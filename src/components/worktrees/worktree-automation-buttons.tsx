@@ -8,6 +8,8 @@ import {
   MergeFollowUpFields,
   MERGE_FOLLOW_UP_FIELDS,
 } from "@/components/github/merge-follow-up-fields";
+import { MergeOperationError } from "@/components/github/merge-operation-error";
+import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import {
   MergeSyncFields,
@@ -437,6 +439,15 @@ function GitLabAutoMergeButton({
               ? t("autoMerging")
               : tg(canMergeNow ? "merge" : "autoMerge")}
       </Button>
+      {!open && (
+        <MergeOperationError
+          operationKey={gitlabMergeOperationKey({
+            projectId: request.projectId,
+            iid: request.number,
+          })}
+          onOpen={() => setOpen(true)}
+        />
+      )}
       <MergeRequestDialog
         mergeRequest={{
           projectId: request.projectId,

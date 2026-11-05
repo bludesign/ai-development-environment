@@ -3316,7 +3316,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         finalSignal,
       );
       const codeStateObservedAt = new Date().toISOString();
-      return {
+      const completedResult = {
         exitCode,
         signal: buildResult?.signal ?? preflightResult?.signal ?? null,
         timedOut,
@@ -3331,6 +3331,8 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         finalStateHash,
         codeStateObservedAt,
       };
+      await context?.finalizeBuildResult?.(completedResult);
+      return completedResult;
     };
     let enteredProtectedBuild = false;
     try {

@@ -1066,6 +1066,42 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each(["cards", "table"])(
+        "marks default branches and uses gray only without an explicit color in %s",
+        async (layout) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          Object.assign(worktree, {
+            isDefaultBranch: true,
+            highlightColor: null,
+          });
+          request.mockResolvedValue(response);
+          window.localStorage.setItem("worktrees-layout", layout);
+          render(<WorktreesPage />);
+          const badge = await screen.findByText("Default branch");
+          const surface = () =>
+            badge.closest(layout === "cards" ? '[data-slot="card"]' : "tr")!;
+          expect(surface().className).toContain("bg-slate-500/10");
+          worktree.highlightColor = "blue";
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() =>
+            expect(surface().className).toContain("bg-blue-500/10"),
+          );
+          expect(surface().className).not.toContain("bg-slate-500/10");
+          Object.assign(worktree, {
+            isDefaultBranch: false,
+            highlightColor: null,
+          });
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() =>
+            expect(screen.queryByText("Default branch")).toBeNull(),
+          );
+        },
+      );
+
       test.each(
         ["cards", "table"].flatMap((layout) =>
           [1, 2].map((count) => ({ layout, count })),

@@ -441,6 +441,8 @@ type Mutation {
     error: String
     "Ownership token for the executing agent session."
     executionToken: String
+    "Whether subprocess cleanup has been verified. False preserves a completed iOS build while retaining its execution resources until a later verified acknowledgement."
+    cleanupVerified: Boolean! = true
   ): AgentJob!
   "Cancels an agent job and returns an agent job."
   cancelAgentJob("Identifier of the job." jobId: ID!): AgentJob!

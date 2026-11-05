@@ -1,5 +1,6 @@
 "use client";
 
+import { MergeOperationWarnings } from "@/components/github/merge-operation-warnings";
 import {
   GITHUB_CONFIGURATION_QUERY,
   readIntegrationConfiguration,
@@ -496,6 +497,7 @@ export function PullRequestsPage() {
 
   return (
     <section className="mx-auto flex w-full max-w-[1800px] flex-col gap-5">
+      <MergeOperationWarnings provider="github" />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -981,16 +983,14 @@ function PullRequestActionsMenu({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {pullRequest.state === "OPEN" && (
-        <MergePullRequestButton
-          onMerged={onMerged}
-          onOpenChange={setMergeOpen}
-          open={mergeOpen}
-          pullRequest={pullRequest}
-          requestSource="PULL_REQUESTS_PAGE"
-          showTrigger={false}
-        />
-      )}
+      <MergePullRequestButton
+        onMerged={onMerged}
+        onOpenChange={setMergeOpen}
+        open={mergeOpen}
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUESTS_PAGE"
+        showTrigger={false}
+      />
     </>
   );
 }

@@ -576,6 +576,8 @@ type Build {
   errorCode: String
   "Error message when this build did not complete successfully. May be null when unavailable or not applicable."
   error: String
+  "Nonfatal warnings recorded while preserving this build's completed result."
+  warnings: [String!]!
   "Whether the out of date condition is true for this build."
   outOfDate: Boolean!
   "The agent associated with this build. May be null when unavailable or not applicable."
@@ -1020,7 +1022,18 @@ extend type Query {
     repositoryId: ID
     "Saved configuration whose builds to return."
     configurationId: ID
+    "Exact historical branch name captured when the build started."
+    branch: String
   ): BuildPage!
+  "Distinct historical build branches within the selected scope, independent of status."
+  buildBranches(
+    "App whose assigned repositories scope the choices."
+    appId: ID
+    "Repository whose historical branches to return."
+    repositoryId: ID
+    "Saved configuration whose historical branches to return."
+    configurationId: ID
+  ): [String!]!
   "Returns a build, or null when it cannot be found."
   build("Identifier of the resource to return or affect." id: ID!): Build
   "Returns agents that can inspect destinations and run a completed build."

@@ -37,6 +37,170 @@ const job: AgentJob = {
 };
 
 describe("JobExecutor", () => {
+  test("preserves completed artifacts on inspection timeout and holds learned output paths until verified cleanup", async () => {
+    const cleanup = Promise.withResolvers<void>();
+    const checkpoint = vi.fn();
+    const settle = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new executionRecovery.ProcessInspectionTimeoutError(),
+      )
+      .mockImplementation(() => cleanup.promise);
+    vi.spyOn(executionRecovery, "withExecutionJournal").mockImplementation(
+      async (_identity, task) =>
+        task({
+          cleanupProcesses: settle,
+          settle,
+          checkpointCompletion: checkpoint,
+        }),
+    );
+    vi.spyOn(executionRecovery, "recoverExecution").mockResolvedValue();
+    const coordinator = new RepositoryCoordinator();
+    const api = {
+      claimJob: vi.fn(async () => claimed),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const claimed: AgentJob = {
+      ...job,
+      kind: "ios.build.run",
+      executionToken: "owner",
+      operationResources: { version: 1, resources: [] },
+    };
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      artifacts: [{ kind: "RUNNABLE_APP", relativePath: "products/App.app" }],
+    };
+    let buildSignal: AbortSignal | undefined;
+    vi.mocked(handlers["ios.build.run"]!).mockImplementation(
+      async (_payload, _timeout, signal, _onLog, context) => {
+        buildSignal = signal;
+        return context!.withOperationResources!(
+          [{ kind: "WORKTREE", key: "learned-output", mode: "WRITE" }],
+          async () => {
+            await context!.finalizeBuildResult!(result);
+            return result;
+          },
+        );
+      },
+    );
+    const executor = new JobExecutor(
+      api as unknown as AgentGraphQLClient,
+      coordinator,
+    );
+    executor.execute(claimed);
+    await vi.waitFor(() =>
+      expect(api.completeJob).toHaveBeenCalledWith(
+        job.id,
+        "SUCCEEDED",
+        expect.objectContaining({
+          artifacts: result.artifacts,
+          warnings: [expect.stringContaining("30 seconds")],
+        }),
+        undefined,
+        "owner",
+        false,
+      ),
+    );
+    const writer = vi.fn(async () => undefined);
+    const waiting = coordinator.withResources(
+      [{ kind: "WORKTREE", key: "learned-output", mode: "WRITE" }],
+      writer,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(writer).not.toHaveBeenCalled();
+    expect(executor.cancel(job.id)).toBe(true);
+    expect(buildSignal?.aborted).toBe(false);
+    cleanup.resolve();
+    await waiting;
+    await vi.waitFor(() =>
+      expect(api.completeJob).toHaveBeenLastCalledWith(
+        job.id,
+        "SUCCEEDED",
+        result,
+        undefined,
+        "owner",
+      ),
+    );
+    expect(checkpoint).toHaveBeenCalled();
+    expect(handlers["ios.build.run"]).toHaveBeenCalledOnce();
+    await executor.cancelAll();
+  });
+
+  test("recovers a durable completed build checkpoint instead of replacing it with an interrupted failure", async () => {
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      artifacts: [{ kind: "RUNNABLE_APP", relativePath: "App.app" }],
+    };
+    vi.spyOn(executionRecovery, "executionCompletion").mockReturnValue({
+      status: "SUCCEEDED",
+      result,
+    });
+    vi.spyOn(executionRecovery, "recoverExecution").mockResolvedValue();
+    const api = { completeJob: vi.fn().mockResolvedValue({}) };
+    const executor = new JobExecutor(api as unknown as AgentGraphQLClient);
+    await executor.recover(
+      {
+        ...job,
+        kind: "ios.build.run",
+        status: "RUNNING",
+        executionToken: "owner",
+        operationResources: { version: 1, resources: [] },
+      },
+      "FAILED",
+      true,
+    );
+    expect(api.completeJob).toHaveBeenCalledWith(
+      job.id,
+      "SUCCEEDED",
+      result,
+      undefined,
+      "owner",
+    );
+    await executor.cancelAll();
+  });
+  test("keeps legacy builds on their original completion path without cleanup checkpoints", async () => {
+    const legacy = {
+      ...job,
+      kind: "ios.build.run",
+      payload: { codebaseId: "legacy-codebase" },
+    };
+    const result = {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+    };
+    const journal = vi.spyOn(executionRecovery, "withExecutionJournal");
+    const handler = vi.mocked(handlers["ios.build.run"]!).mockReset();
+    handler.mockImplementation(
+      async (_payload, _timeout, _signal, _log, context) => {
+        expect(context?.finalizeBuildResult).toBeUndefined();
+        return result;
+      },
+    );
+    const api = {
+      claimJob: vi.fn().mockResolvedValue(legacy),
+      completeJob: vi.fn().mockResolvedValue({}),
+    };
+    const executor = new JobExecutor(api as unknown as AgentGraphQLClient);
+    executor.execute(legacy);
+    await vi.waitFor(() =>
+      expect(api.completeJob).toHaveBeenCalledWith(
+        job.id,
+        "SUCCEEDED",
+        result,
+        undefined,
+      ),
+    );
+    expect(journal).not.toHaveBeenCalled();
+    await executor.cancelAll();
+  });
   test("keeps recovery resources until subprocess cleanup and acknowledgement finish", async () => {
     const cleanup = Promise.withResolvers<void>();
     vi.spyOn(executionRecovery, "recoverExecution").mockImplementation(

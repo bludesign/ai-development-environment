@@ -150,6 +150,8 @@ test("GitLab pipeline action checks wait until the menu opens", async ({
     await route.continue();
   });
   await page.goto("/en/dashboard/worktrees");
+  // Pipeline summaries live in the table; compact cards omit the request row.
+  await page.getByRole("radio", { name: "Table layout", exact: true }).click();
   const menu = page
     .getByRole("button", { name: "Pipelines: Failed", exact: true })
     .first();

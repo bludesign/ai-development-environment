@@ -134,6 +134,7 @@ export type BuildRecord = {
   commandSummary: string;
   artifactDirectory: string;
   errorCode: string | null;
+  warnings?: string[];
   error: string | null;
   outOfDate: boolean;
   worktree?: { id: string; highlightColor: string | null } | null;

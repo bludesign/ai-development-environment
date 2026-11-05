@@ -13,6 +13,7 @@ import { RunBuildControls } from "./run-build-controls";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
+  controlPlaneSubscriptions: () => ({ subscribe: () => () => {} }),
 }));
 
 const request = vi.mocked(controlPlaneRequest);
@@ -42,6 +43,69 @@ afterEach(async () => {
 });
 
 describe("RunBuildControls", () => {
+  test.each(["SIMULATOR", "PHYSICAL_DEVICE"] as const)(
+    "surfaces asynchronous %s launch errors at the originating control",
+    async (type) => {
+      const destination = {
+        type,
+        id: "target",
+        name: type === "SIMULATOR" ? "QA Simulator" : "QA iPhone",
+        platform: "iOS",
+        osVersion: "27.0",
+        state: "Booted",
+      };
+      request.mockImplementation(async (query) => {
+        if (query.includes("BuildRunAgents"))
+          return { buildRunAgents } as never;
+        if (query.includes("BuildRunDestinations"))
+          return { inspectBuildRunDestinations: [destination] } as never;
+        if (query.includes("RunCompletedBuild"))
+          return {
+            runBuild: [{ id: "deployment", status: "QUEUED", destination }],
+          } as never;
+        if (query.includes("BuildRunProgress"))
+          return {
+            build: {
+              deployments: [
+                {
+                  id: "deployment",
+                  status: "FAILED",
+                  destination,
+                  error: "Application launch rejected",
+                },
+              ],
+            },
+          } as never;
+        throw new Error("Unexpected request");
+      });
+      const error = vi.fn();
+      const completed = vi.fn();
+      render(
+        <RunBuildControls
+          buildId="build"
+          destinationType={type}
+          preferredDestination={destination}
+          onError={error}
+          onCompleted={completed}
+        />,
+      );
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+        button: 0,
+        ctrlKey: false,
+      });
+      await screen.findByRole("menuitemcheckbox", {
+        name: new RegExp(destination.name),
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
+      await waitFor(() =>
+        expect(error).toHaveBeenLastCalledWith(
+          `${destination.name}: Application launch rejected`,
+        ),
+      );
+      await waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    },
+  );
+
   test("preselects the concrete destination used for the build", () => {
     render(
       <RunBuildControls
@@ -106,7 +170,7 @@ describe("RunBuildControls", () => {
       }
       if (operation.includes("RunCompletedBuild")) {
         return {
-          runBuild: [{ id: "deployment-1", status: "QUEUED" }],
+          runBuild: [{ id: "deployment-1", status: "SUCCEEDED" }],
         } as never;
       }
       throw new Error(`Unexpected operation: ${operation}`);
@@ -245,7 +309,9 @@ describe("RunBuildControls", () => {
         } as never;
       }
       if (operation.includes("RunCompletedBuild")) {
-        return { runBuild: [{ id: "deployment", status: "QUEUED" }] } as never;
+        return {
+          runBuild: [{ id: "deployment", status: "SUCCEEDED" }],
+        } as never;
       }
       throw new Error(`Unexpected operation: ${operation}`);
     });
@@ -305,6 +371,15 @@ describe("RunBuildControls", () => {
       ),
     );
 
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("button", {
+            name: "Select All",
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Select All" }));
     expect(ipad.getAttribute("aria-checked")).toBe("true");
     expect(offline.getAttribute("aria-checked")).toBe("false");

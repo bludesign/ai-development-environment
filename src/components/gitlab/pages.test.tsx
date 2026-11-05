@@ -5,10 +5,15 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  clearMergeOperation,
+  gitlabMergeOperationKey,
+} from "@/components/github/merge-operation-state";
 
 import { GitLabMergeRequestsPage, GitLabPipelinesPage } from "./pages";
 
@@ -101,6 +106,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  clearMergeOperation(gitlabMergeOperationKey(mergeRequest));
 });
 
 describe("GitLabMergeRequestsPage", () => {
@@ -322,12 +328,24 @@ describe("GitLabMergeRequestsPage", () => {
 
     await screen.findByText("No merge requests match these filters.");
     expect(screen.getByRole("dialog")).toBeDefined();
-    expect(screen.getByText("Jira unavailable")).toBeDefined();
+    expect(
+      within(screen.getByRole("dialog")).getByText("Jira unavailable"),
+    ).toBeDefined();
     expect(
       screen.getByText("The merge succeeded, but a follow-up needs attention."),
     ).toBeDefined();
     expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Retry follow-ups" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getAllByRole("button", {
+        name: "Close",
+      })[0]!,
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(screen.getByText("Jira unavailable")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Review merge error" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Retry follow-ups" }),
+    );
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(navigation.push).not.toHaveBeenCalled();

@@ -354,6 +354,7 @@ export const createAgentResolvers = (
         result?: unknown;
         error?: string | null;
         executionToken?: string | null;
+        cleanupVerified?: boolean;
       },
       context: GraphQLContext,
     ) =>
@@ -364,6 +365,7 @@ export const createAgentResolvers = (
         args.result,
         args.error ?? null,
         args.executionToken,
+        args.cleanupVerified ?? true,
       ),
     cancelAgentJob: (
       _root: unknown,

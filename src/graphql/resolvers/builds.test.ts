@@ -117,6 +117,9 @@ describe("build resolver authorization", () => {
       resolvers.Query.builds({}, {} as never, context("agent-1")),
     ).toThrow("cannot perform control-plane operations");
     expect(() =>
+      resolvers.Query.buildBranches({}, {} as never, context("agent-1")),
+    ).toThrow("cannot perform control-plane operations");
+    expect(() =>
       resolvers.Mutation.startBuild(
         {},
         { input: { requestId: "request-1" } as never },

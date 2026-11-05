@@ -171,6 +171,8 @@ export type AgentJobHandlerContext = {
   reportWorktreeActivity: (input: WorktreeActivityReport) => Promise<unknown>;
   refreshFetchedCodebase?: (input: FetchedCodebaseRefresh) => Promise<string>;
   reportBuildProgress?: (input: BuildProgressReport) => Promise<unknown>;
+  /** Finalize while all learned build output-path reservations remain held. */
+  finalizeBuildResult?: (result: ProcessResult) => Promise<void>;
   reportBuildDeploymentLaunched?: (
     deploymentId: string,
     launchedAt: string,

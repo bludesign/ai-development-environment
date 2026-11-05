@@ -2,7 +2,7 @@
 
 import { ChevronDown, Play } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +21,10 @@ import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
+import {
+  observeBuildDeployments,
+  type ObservedBuildDeployment,
+} from "./observe-build-deployments";
 
 function orderedDestinations(destinations: BuildDestination[]) {
   const isBooted = (destination: BuildDestination) =>
@@ -74,10 +78,20 @@ export function RunBuildControls({
   const agentTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const destinationCache = useRef(new Map<string, BuildDestination[]>());
   const [destinationSearch, setDestinationSearch] = useState("");
-  const [running, setRunning] = useState(false);
-  const [runningDestinationId, setRunningDestinationId] = useState<
-    string | null
-  >(null);
+  const [runState, setRunState] = useState<{
+    buildId: string;
+    destinationId: string | null;
+  } | null>(null);
+  const running = runState?.buildId === buildId;
+  const runningDestinationId = running ? runState?.destinationId : null;
+  const runTask = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      runTask.current?.abort();
+      runTask.current = null;
+    },
+    [buildId],
+  );
 
   const filteredDestinations = useMemo(() => {
     return filterDestinations(destinations, destinationSearch, t);
@@ -203,13 +217,17 @@ export function RunBuildControls({
   };
 
   const run = async (onlyDestination?: BuildDestination) => {
-    setRunning(true);
-    setRunningDestinationId(onlyDestination?.id ?? null);
+    if (runTask.current) return;
+    const controller = new AbortController();
+    runTask.current = controller;
+    setRunState({ buildId, destinationId: onlyDestination?.id ?? null });
     onError(null);
     try {
-      await controlPlaneRequest(
+      const data = await controlPlaneRequest<{
+        runBuild: ObservedBuildDeployment[];
+      }>(
         `mutation RunCompletedBuild($input: RunBuildInput!) {
-          runBuild(input: $input) { id status }
+          runBuild(input: $input) { id status destination error transfer { status error } }
         }`,
         {
           input: {
@@ -226,13 +244,26 @@ export function RunBuildControls({
           },
         },
       );
+      if (controller.signal.aborted) return;
       if (!onlyDestination) setSelectedDestinations(new Set());
+      const failure = await observeBuildDeployments({
+        buildId,
+        deployments: data.runBuild,
+        signal: controller.signal,
+        onError,
+        fallbackError: t("runFailed"),
+      });
+      if (controller.signal.aborted) return;
       await onCompleted?.();
+      if (!controller.signal.aborted && failure) onError(failure);
     } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
+      if (!controller.signal.aborted)
+        onError(value instanceof Error ? value.message : String(value));
     } finally {
-      setRunning(false);
-      setRunningDestinationId(null);
+      if (runTask.current === controller) {
+        runTask.current = null;
+        setRunState(null);
+      }
     }
   };
 

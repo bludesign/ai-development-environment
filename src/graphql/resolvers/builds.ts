@@ -208,6 +208,14 @@ export const createBuildResolvers = (service: BuildsService) => ({
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
     snapshot: (value: { snapshotJson: string }) => json(value.snapshotJson, {}),
+    warnings: (value: { snapshotJson: string }) => {
+      const warnings = json(value.snapshotJson, {})?.warnings;
+      return Array.isArray(warnings)
+        ? warnings.filter(
+            (warning): warning is string => typeof warning === "string",
+          )
+        : [];
+    },
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     startedAt: (value: { startedAt: Date | null }) => iso(value.startedAt),
     finishedAt: (value: { finishedAt: Date | null }) => iso(value.finishedAt),
@@ -292,6 +300,10 @@ export const createBuildResolvers = (service: BuildsService) => ({
     builds: (_root: unknown, args: never, context: GraphQLContext) => {
       requireControlPlane(context);
       return service.builds(args);
+    },
+    buildBranches: (_root: unknown, args: never, context: GraphQLContext) => {
+      requireControlPlane(context);
+      return service.buildBranches(args);
     },
     build: (
       _root: unknown,

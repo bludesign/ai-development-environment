@@ -17,6 +17,20 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { configPath } from "./config.js";
+import type { ProcessResult } from "./process-runner.js";
+
+export type ExecutionCompletion = {
+  status: "SUCCEEDED" | "FAILED" | "CANCELLED" | "TIMED_OUT";
+  result: ProcessResult;
+  error?: string;
+};
+
+export class ProcessInspectionTimeoutError extends Error {
+  constructor() {
+    super("Process inspection timed out after 30 seconds");
+    this.name = "ProcessInspectionTimeoutError";
+  }
+}
 
 type ExecutionIdentity = {
   agentId: string;
@@ -28,6 +42,7 @@ type ExecutionJournal = ExecutionIdentity & {
   state: "RUNNING" | "SETTLING" | "SETTLED";
   marker: string;
   groups: number[];
+  completion?: ExecutionCompletion;
 };
 const executions = new AsyncLocalStorage<ExecutionJournal>();
 export function executionEnvironment(): Record<string, string> {
@@ -199,11 +214,18 @@ function processTable(environment = false): ProcessEntry[] {
   const args = environment
     ? ["axeww", "-o", "pid=,pgid=,stat=,command="]
     : ["axww", "-o", "pid=,pgid=,stat=,command="];
-  const output = execFileSync("/bin/ps", args, {
-    encoding: "utf8",
-    timeout: 5_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  let output: string;
+  try {
+    output = execFileSync("/bin/ps", args, {
+      encoding: "utf8",
+      timeout: 30_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ETIMEDOUT")
+      throw new ProcessInspectionTimeoutError();
+    throw error;
+  }
   return output.split("\n").flatMap((line) => {
     const match = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/.exec(line);
     return match
@@ -261,6 +283,9 @@ async function cleanupGroups(
   journal: ExecutionJournal,
   signal?: AbortSignal,
 ): Promise<void> {
+  // START is sent only after recording a group. Pending gates cannot start
+  // after settlement changes the journal state, so an empty journal is safe.
+  if (!journal.groups.length) return;
   const groups = new Set(journal.groups);
   const ownGroup =
     process.platform !== "win32"
@@ -339,6 +364,7 @@ export async function withExecutionJournal<T>(
   task: (execution: {
     cleanupProcesses: () => Promise<void>;
     settle: () => Promise<void>;
+    checkpointCompletion: (completion: ExecutionCompletion) => void;
   }) => Promise<T>,
 ): Promise<T> {
   const journal: ExecutionJournal = {
@@ -366,11 +392,61 @@ export async function withExecutionJournal<T>(
   };
   try {
     return await executions.run(journal, () =>
-      task({ cleanupProcesses: () => cleanupGroups(journal), settle }),
+      task({
+        cleanupProcesses: () => cleanupGroups(journal),
+        settle,
+        checkpointCompletion: (completion) => {
+          journal.completion = completion;
+          persist(journal);
+        },
+      }),
     );
   } finally {
     await settle();
   }
+}
+
+/** A finished build survives a restart even when process inspection failed. */
+export function executionCompletion(
+  identity: ExecutionIdentity,
+): ExecutionCompletion | undefined {
+  let journal: ExecutionJournal;
+  try {
+    journal = JSON.parse(readFileSync(journalPath(identity), "utf8"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+  if (
+    journal.version !== 1 ||
+    journal.agentId !== identity.agentId ||
+    journal.jobId !== identity.jobId ||
+    journal.executionToken !== identity.executionToken ||
+    journal.marker !== digest(identity.executionToken) ||
+    !Array.isArray(journal.groups)
+  )
+    throw new Error(
+      "Execution journal identity is invalid; its claim remains protected",
+    );
+  const completion = journal.completion;
+  if (
+    completion &&
+    (!["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(
+      completion.status,
+    ) ||
+      !completion.result ||
+      typeof completion.result !== "object" ||
+      typeof completion.result.cancelled !== "boolean" ||
+      typeof completion.result.timedOut !== "boolean" ||
+      !(
+        completion.result.exitCode === null ||
+        Number.isInteger(completion.result.exitCode)
+      ))
+  )
+    throw new Error(
+      "Execution completion checkpoint is invalid; its claim remains protected",
+    );
+  return completion;
 }
 
 /** Prove interrupted commands are gone before acknowledging their server grant. */
