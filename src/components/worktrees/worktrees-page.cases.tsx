@@ -648,6 +648,7 @@ export function registerWorktreesPageTests(
 
     afterEach(() => {
       cleanup();
+      document.cookie = "worktree-branch-mode=; Max-Age=0; Path=/";
       request.mockReset();
       subscriptions.mockReset();
     });
@@ -2134,6 +2135,66 @@ export function registerWorktreesPageTests(
         fireEvent.click(screen.getByRole("heading", { name: "Change branch" }));
         expect(navigation.push).not.toHaveBeenCalled();
       });
+
+      test.each(["cards", "table"])(
+        "excludes occupied default branches from the %s branch chooser",
+        async (layout) => {
+          window.localStorage.setItem("worktrees-layout", layout);
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+          const feature = group.worktrees[0]!;
+          group.codebase.localBranches = [
+            "main",
+            feature.branch!,
+            "release/available",
+          ];
+          group.codebase.remoteBranches = [...group.codebase.localBranches];
+          group.worktrees.push({
+            ...feature,
+            id: "worktree-main",
+            primary: false,
+            branch: "main",
+            isDefaultBranch: true,
+            folder: "/workspaces/main",
+            gitDirectory: "/workspaces/repo/.git/worktrees/main",
+            ticketKey: null,
+            ticketTitle: null,
+            pullRequest: null,
+          });
+
+          render(<WorktreesPage />);
+          fireEvent.pointerDown(
+            await screen.findByRole("button", {
+              name: "Tags: feature/AIDE-24",
+            }),
+            { button: 0, ctrlKey: false },
+          );
+          expect(
+            screen.queryByRole("menuitem", { name: "Change branch to main" }),
+          ).toBeNull();
+          fireEvent.click(
+            await screen.findByRole("menuitem", { name: "Change branch" }),
+          );
+          const chooser = within(
+            (
+              await screen.findByRole("heading", { name: "Change branch" })
+            ).closest('[data-slot="popover-content"]') as HTMLElement,
+          );
+          fireEvent.click(
+            chooser.getByRole("tab", { name: "Existing branch" }),
+          );
+          fireEvent.click(
+            chooser.getByRole("combobox", { name: "Existing branch" }),
+          );
+
+          expect(
+            await screen.findByRole("option", { name: /^release\/available,/ }),
+          ).toBeDefined();
+          expect(screen.queryByRole("option", { name: /^main,/ })).toBeNull();
+        },
+      );
 
       test("offers matching agents and warns about dirty existing destinations", async () => {
         const response = (await request("query Fixture")) as unknown as {

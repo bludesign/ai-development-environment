@@ -2792,6 +2792,11 @@ export function WorktreeMenus(
       (group) => group.codebase.id === props.group.codebase.id,
     ),
   );
+  // The rendered group can omit siblings through filters or default-branch sections.
+  const sourceGroup =
+    sourceAgent?.codebases.find(
+      (group) => group.codebase.id === props.group.codebase.id,
+    ) ?? props.group;
   const deleteDisabled =
     !sourceAgent ||
     sourceAgent.agent.connectionStatus !== "ONLINE" ||
@@ -3192,7 +3197,7 @@ export function WorktreeMenus(
               ) : null
             }
             submitLabel={t("changeBranch")}
-            target={branchTarget(props.group, worktree)}
+            target={branchTarget(sourceGroup, worktree)}
           />
         </PopoverContent>
       </Popover>

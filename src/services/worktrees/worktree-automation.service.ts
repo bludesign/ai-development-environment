@@ -1723,7 +1723,42 @@ export class WorktreeAutomationService {
               ) {
                 if (rule.autoSync)
                   await cancelMergeSync(rule.syncStateJson, this.agentControl);
-                const remote = await this.pullRequestState(rule);
+                const remote = await this.github.pullRequestAutomationState(
+                  repository.owner,
+                  repository.name,
+                  rule.pullRequestNumber,
+                  true,
+                );
+                if (remote.state === "MERGED") {
+                  if (
+                    remote.headRefName !== rule.branch ||
+                    !remote.headRepositoryNameWithOwner ||
+                    `github.com/${remote.headRepositoryNameWithOwner.toLowerCase()}` !==
+                      rule.worktree.codebase.repository.canonicalOrigin.toLowerCase() ||
+                    rule.worktree.branch !== rule.branch
+                  )
+                    throw new Error(
+                      "The pull request source no longer matches this worktree.",
+                    );
+                  if (rule.autoSync) {
+                    const intent = readMergeSync(rule.syncStateJson);
+                    if (
+                      remote.headRefOid !== intent.headSha ||
+                      remote.headRefName !== intent.sourceBranch ||
+                      `github.com/${remote.headRepositoryNameWithOwner.toLowerCase()}` !==
+                        intent.sourceOrigin.toLowerCase()
+                    )
+                      throw new Error(
+                        "A different source commit merged. Review follow-ups manually.",
+                      );
+                  }
+                  await prisma.worktreeAutoMerge.update({
+                    where: { worktreeId: rule.worktreeId },
+                    data: { state: "POST_MERGE", lastError: null },
+                  });
+                  this.rerunRequested = true;
+                  return;
+                }
                 if (remote.state === "OPEN" && remote.autoMergeEnabled)
                   await this.github.disablePullRequestAutoMerge(
                     { ...repository, number: rule.pullRequestNumber },
