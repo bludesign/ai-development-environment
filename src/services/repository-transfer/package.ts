@@ -120,6 +120,7 @@ export const repositoryFields = [
   "description",
   "jiraBranchRegex",
   "keepBaseBranchUpToDate",
+  "defaultBranchPatternsJson",
   "reviewerPools",
   "iosAppSettings",
 ] as const;

@@ -72,7 +72,13 @@ function retargetFixture() {
     primary: false,
     branch: "feature",
     headSha: "a".repeat(40),
-    codebase: { repository: { canonicalOrigin: "github.com/acme/widgets" } },
+    codebase: {
+      defaultBranch: "main",
+      repository: {
+        canonicalOrigin: "github.com/acme/widgets",
+        defaultBranchPatternsJson: "[]",
+      },
+    },
   };
   let rule: WorktreeAutoMerge = {
     worktreeId: worktree.id,
@@ -104,6 +110,7 @@ function retargetFixture() {
     async ({ update }: { update: Partial<WorktreeAutoMerge> }) =>
       (rule = { ...rule, ...update }),
   );
+  const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
   getPrismaClient.mockResolvedValue({
     worktree: { findFirst: vi.fn().mockResolvedValue(worktree) },
     worktreeAutoMerge: {
@@ -111,6 +118,11 @@ function retargetFixture() {
       findMany: vi.fn(async () => [{ ...rule, worktree }]),
       upsert,
       update,
+      updateMany: vi.fn(async ({ data }) => {
+        rule = { ...rule, ...data };
+        return { count: 1 };
+      }),
+      deleteMany,
     },
   });
   const remote = {
@@ -134,13 +146,20 @@ function retargetFixture() {
     ),
     mergePullRequest: vi.fn(async () => ({ state: "MERGED" })),
   };
+  const jira = {
+    transitionTicketToConfiguredAutoMerge: vi.fn().mockResolvedValue(null),
+    transitionTicketToConfiguredDone: vi.fn().mockResolvedValue(undefined),
+  };
+  const deleteWorktree = vi.fn().mockResolvedValue({ id: "delete-job" });
+  const ticketKeyForWorktree = vi.fn().mockResolvedValue(null);
   const automation = new WorktreeAutomationService(
     {
-      ticketKeyForWorktree: vi.fn().mockResolvedValue(null),
+      ticketKeyForWorktree,
+      deleteWorktree,
       publishAutomationChange: vi.fn(),
     } as unknown as WorktreesService,
     github as unknown as GitHubService,
-    {} as JiraService,
+    jira as unknown as JiraService,
     {} as WorkflowsService,
     {
       registerCompletionObserver: vi.fn(),
@@ -155,6 +174,11 @@ function retargetFixture() {
     automation,
     github,
     upsert,
+    jira,
+    deleteWorktree,
+    ticketKeyForWorktree,
+    worktree,
+    deleteMany,
     current: () => rule,
     remote,
     reconcile: () =>
@@ -1161,4 +1185,208 @@ describe("GitHub post-merge contention", () => {
     expect(f.rule.state).toBe("POST_MERGE");
     expect(f.deleteWorktree).toHaveBeenCalledOnce();
   });
+});
+
+describe("auto merge Jira activation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getPrismaClient.mockReset();
+  });
+
+  test("transitions after accepted activation, but skips an active edit and already merged requests", async () => {
+    const f = retargetFixture();
+    f.ticketKeyForWorktree.mockResolvedValue("APP-1");
+    const first = await f.automation.configureAutoMerge(f.input);
+    expect(first.ticketTransitionError).toBeNull();
+    expect(f.jira.transitionTicketToConfiguredAutoMerge).toHaveBeenCalledWith(
+      "APP-1",
+    );
+    expect(f.upsert.mock.invocationCallOrder[0]).toBeLessThan(
+      f.jira.transitionTicketToConfiguredAutoMerge.mock.invocationCallOrder[0]!,
+    );
+    await f.automation.configureAutoMerge(f.input);
+    expect(f.jira.transitionTicketToConfiguredAutoMerge).toHaveBeenCalledOnce();
+    f.current().state = "ACTION_REQUIRED";
+    f.remote.state = "MERGED";
+    await f.automation.configureAutoMerge(f.input);
+    expect(f.jira.transitionTicketToConfiguredAutoMerge).toHaveBeenCalledOnce();
+  });
+
+  test("preserves enabled automation and returns a warning when Jira requires manual input", async () => {
+    const f = retargetFixture();
+    f.ticketKeyForWorktree.mockResolvedValue("APP-1");
+    f.jira.transitionTicketToConfiguredAutoMerge.mockRejectedValue(
+      new Error("Complete required field: Comment"),
+    );
+    const result = await f.automation.configureAutoMerge(f.input);
+    expect(result.state).toBe("WAITING_REQUIREMENTS");
+    expect(result.ticketTransitionError).toContain("Auto merge is enabled");
+    expect(result.ticketTransitionError).toContain("Comment");
+  });
+
+  test("rejects default branch activation and removes an existing managed rule without merging", async () => {
+    const f = retargetFixture();
+    f.worktree.codebase.repository.defaultBranchPatternsJson = '["feature"]';
+    await expect(f.automation.configureAutoMerge(f.input)).rejects.toThrow(
+      "default branches",
+    );
+    await expect(
+      f.automation.configureAutoSync({ worktreeId: "wt" }),
+    ).rejects.toThrow("repository keep up to date");
+    await f.reconcile();
+    expect(f.deleteMany).toHaveBeenCalledWith({ where: { worktreeId: "wt" } });
+    expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+  });
+
+  test.each([false, true])(
+    "preserves confirmed merge follow-ups after reclassification with auto sync=%s",
+    async (autoSync) => {
+      const f = retargetFixture();
+      Object.assign(f.current(), {
+        autoSync,
+        moveTicketToDone: true,
+        ticketKey: "APP-1",
+        deleteWorktree: true,
+        syncStateJson: autoSync
+          ? JSON.stringify({
+              version: 1,
+              headSha: f.worktree.headSha,
+              sourceOrigin: "github.com/acme/widgets",
+              sourceBranch: f.worktree.branch,
+              targetOrigin: "github.com/acme/widgets",
+              targetBranch: "main",
+              agentId: "agent",
+              gitDirectory: "/git/wt",
+            })
+          : null,
+      });
+      f.remote.state = "MERGED";
+      f.worktree.codebase.repository.defaultBranchPatternsJson = '["feature"]';
+
+      await f.reconcile();
+
+      expect(f.deleteMany).not.toHaveBeenCalled();
+      expect(f.current().state).toBe("POST_MERGE");
+      expect(f.github.pullRequestAutomationState).toHaveBeenCalledWith(
+        "acme",
+        "widgets",
+        17,
+        true,
+      );
+
+      await f.reconcile();
+
+      expect(f.jira.transitionTicketToConfiguredDone).toHaveBeenCalledOnce();
+      expect(f.jira.transitionTicketToConfiguredDone).toHaveBeenCalledWith(
+        "APP-1",
+      );
+      expect(f.deleteWorktree).toHaveBeenCalledWith(
+        expect.objectContaining({
+          worktreeId: "wt",
+          expectedBranch: "feature",
+          expectedHeadSha: f.remote.headRefOid,
+        }),
+      );
+      expect(f.current().deleteJobId).toBe("delete-job");
+      expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+    },
+  );
+
+  test.each(["branch", "repository"])(
+    "retains follow-ups for manual review when the merged %s differs after reclassification",
+    async (mismatch) => {
+      const f = retargetFixture();
+      f.remote.state = "MERGED";
+      f.worktree.codebase.repository.defaultBranchPatternsJson = '["feature"]';
+      if (mismatch === "branch") f.remote.headRefName = "other";
+      else f.remote.headRepositoryNameWithOwner = "another/widgets";
+
+      await f.reconcile();
+
+      expect(f.deleteMany).not.toHaveBeenCalled();
+      expect(f.current()).toMatchObject({
+        state: "ACTION_REQUIRED",
+        lastError: "The pull request source no longer matches this worktree.",
+      });
+      expect(f.jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
+      expect(f.deleteWorktree).not.toHaveBeenCalled();
+    },
+  );
+
+  test("requires the accepted sync commit before preserving reclassified merge follow-ups", async () => {
+    const f = retargetFixture();
+    Object.assign(f.current(), {
+      autoSync: true,
+      syncStateJson: JSON.stringify({
+        version: 1,
+        headSha: "b".repeat(40),
+        sourceOrigin: "github.com/acme/widgets",
+        sourceBranch: f.worktree.branch,
+        targetOrigin: "github.com/acme/widgets",
+        targetBranch: "main",
+        agentId: "agent",
+        gitDirectory: "/git/wt",
+      }),
+    });
+    f.remote.state = "MERGED";
+    f.worktree.codebase.repository.defaultBranchPatternsJson = '["feature"]';
+
+    await f.reconcile();
+
+    expect(f.deleteMany).not.toHaveBeenCalled();
+    expect(f.current()).toMatchObject({
+      state: "ACTION_REQUIRED",
+      lastError:
+        "A different source commit merged. Review follow-ups manually.",
+    });
+    expect(f.jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
+    expect(f.deleteWorktree).not.toHaveBeenCalled();
+  });
+});
+
+test("default branch classification stops and removes existing auto sync work", async () => {
+  const cancelJob = vi.fn().mockResolvedValue(undefined);
+  const lifecycle = vi.fn().mockResolvedValue(undefined);
+  const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+  getPrismaClient.mockResolvedValue({
+    worktreeAutoSync: {
+      findMany: vi.fn().mockResolvedValue([
+        {
+          worktreeId: "wt",
+          branch: "feature",
+          state: "SYNCING",
+          activeJobId: "sync-job",
+          workflowRunId: "conflict-workflow",
+          worktree: { codebaseId: "cb" },
+        },
+      ]),
+      deleteMany,
+    },
+    worktree: {
+      findUnique: vi.fn().mockResolvedValue({
+        branch: "release/next",
+        codebase: {
+          defaultBranch: "main",
+          repository: { defaultBranchPatternsJson: '["release/*"]' },
+        },
+      }),
+    },
+  });
+  const service = new WorktreeAutomationService(
+    { publishAutomationChange: vi.fn() } as unknown as WorktreesService,
+    {} as GitHubService,
+    {} as JiraService,
+    { lifecycle } as unknown as WorkflowsService,
+    {
+      cancelJob,
+      registerCompletionObserver: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+    } as unknown as AgentControlService,
+  );
+  await (
+    service as unknown as { reconcileAutoSync(): Promise<void> }
+  ).reconcileAutoSync();
+  expect(cancelJob).toHaveBeenCalledWith("sync-job");
+  expect(lifecycle).toHaveBeenCalledWith("conflict-workflow", "CANCEL");
+  expect(deleteMany).toHaveBeenCalledWith({ where: { worktreeId: "wt" } });
 });

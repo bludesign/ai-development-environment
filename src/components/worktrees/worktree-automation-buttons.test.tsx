@@ -443,6 +443,28 @@ describe("Auto Merge form state", () => {
     return { worktree, props, options };
   }
 
+  test("shows an activation status warning while preserving successful auto merge configuration", async () => {
+    const { props, options } = fixture();
+    const warning = "Auto merge is enabled, but Jira requires a Comment";
+    request.mockImplementation(async (query) =>
+      query.includes("mutation ConfigureWorktreeAutoMerge")
+        ? ({
+            configureWorktreeAutoMerge: {
+              state: "WAITING_REQUIREMENTS",
+              ticketTransitionError: warning,
+            },
+          } as never)
+        : ({ githubPullRequestMergeOptions: options } as never),
+    );
+    render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge" }));
+    await screen.findByDisplayValue("Saved headline");
+    fireEvent.click(screen.getByRole("button", { name: "Enable Auto Merge" }));
+    expect(await screen.findByText(warning)).toBeDefined();
+    expect(props.onCompleted).toHaveBeenCalledOnce();
+    expect(screen.getByRole("dialog")).toBeDefined();
+  });
+
   test("keeps checkbox and text edits across refreshes and mergeability changes", async () => {
     const { worktree, props } = fixture();
     const { rerender } = render(<AutoMergeButton {...props} />);

@@ -521,6 +521,8 @@ describe("JiraTicketsPage", () => {
     );
     fireEvent.keyDown(document, { key: "Escape" });
     await chooseSelectOption("In review ticket status", "Released");
+    await chooseSelectOption("Auto merge status", "Released");
+    expect(screen.getByLabelText("Auto merge done status")).toBeDefined();
     fireEvent.click(
       await screen.findByRole("button", { name: "Save display settings" }),
     );
@@ -533,6 +535,7 @@ describe("JiraTicketsPage", () => {
             projectId: "project-2",
             defaultResolutionId: null,
             doneStatusId: undefined,
+            autoMergeStatusId: "done",
             inReviewStatusId: "done",
             ticketAssignmentFilter: "SELF_IN_PROGRESS",
             hideCompletedTickets: true,

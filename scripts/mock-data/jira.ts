@@ -88,6 +88,7 @@ export async function seedJira(prisma: PrismaClient): Promise<void> {
       ticketAssignmentFilter: "ALL",
       hideCompletedTickets: false,
       doneStatusId: "10003",
+      autoMergeStatusId: "10001",
       completedStatusIdsJson: JSON.stringify(["10003"]),
       sources: {
         create: [

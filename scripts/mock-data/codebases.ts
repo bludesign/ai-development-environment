@@ -31,6 +31,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         displayOrigin: "github.com/acme/web-app",
         name: "web-app",
         description: "Acme customer web application (Next.js).",
+        defaultBranchPatternsJson: JSON.stringify(["release/*"]),
         createdAt: daysAgo(120),
       },
       {
@@ -52,7 +53,7 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
     ],
   });
 
-  const branches = JSON.stringify(["main", "develop"]);
+  const branches = JSON.stringify(["main", "develop", "release/1.0"]);
   await prisma.codebase.createMany({
     data: [
       {
@@ -174,6 +175,28 @@ export async function seedCodebases(prisma: PrismaClient): Promise<void> {
         availability: "AVAILABLE",
         lastCheckedAt: minutesAgo(3),
         createdAt: daysAgo(120),
+      },
+      {
+        id: "worktree-web-release",
+        codebaseId: ids.codebases.web,
+        gitDirectory: `${BASE}/web-app/.git/worktrees/release-1`,
+        folder: `${BASE}/web-app-release-1`,
+        relativePath: "web-app-release-1",
+        branch: "release/1.0",
+        headSha: "9f3c1a2b4d5e6f7089a1b2c3d4e5f60718293a4b",
+        upstream: "origin/release/1.0",
+        baseBranchOverride: "develop",
+        baseAhead: 0,
+        baseBehind: 3,
+        ahead: 0,
+        behind: 2,
+        syncState: "BEHIND",
+        hasUnstagedChanges: true,
+        pushStatus: "DIRTY",
+        highlightColor: "green",
+        availability: "AVAILABLE",
+        lastCheckedAt: minutesAgo(3),
+        createdAt: daysAgo(30),
       },
       {
         id: ids.worktrees.webFeature,

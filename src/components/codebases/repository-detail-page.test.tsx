@@ -129,10 +129,13 @@ describe("RepositoryDetailPage", () => {
 
     expect(await screen.findByText("Edit repository details")).toBeDefined();
     const checkbox = screen.getByRole("checkbox", {
-      name: "Keep base branch up to date",
+      name: "Keep default branches up to date",
     });
     expect(checkbox.getAttribute("data-state")).toBe("checked");
     fireEvent.click(checkbox);
+    fireEvent.change(screen.getByLabelText("Default branch matches"), {
+      target: { value: " release/*\nmain\n release/*\n\n" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
@@ -144,7 +147,11 @@ describe("RepositoryDetailPage", () => {
               variables as {
                 input?: { keepBaseBranchUpToDate?: boolean };
               }
-            ).input?.keepBaseBranchUpToDate === false,
+            ).input?.keepBaseBranchUpToDate === false &&
+            JSON.stringify(
+              (variables as { input?: { defaultBranchPatterns?: string[] } })
+                .input?.defaultBranchPatterns,
+            ) === JSON.stringify(["release/*", "main"]),
         ),
       ).toBe(true),
     );

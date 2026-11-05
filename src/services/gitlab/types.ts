@@ -303,6 +303,7 @@ export type SubmitGitLabMergeRequestMergeInput = {
 };
 
 export type GitLabMergeResult = {
+  ticketTransitionError?: string | null;
   mergeRequest: GitLabMergeRequestView;
   operation: GitLabMergeOperationView | null;
   postMergeError: string | null;

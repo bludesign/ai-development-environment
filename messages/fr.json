@@ -1850,9 +1850,12 @@
     "selectExcludedStatuses": "Sélectionner les statuts à exclure",
     "excludedStatusesDescription": "Masqués dans Tous les statuts pour ce projet dans les deux vues. Sélectionnez un statut précis dans le filtre pour afficher ses tickets.",
     "completedStatuses": "Statuts terminés",
-    "doneStatus": "Statut terminé d’Auto Merge",
+    "autoMergeStatus": "Statut de fusion automatique",
+    "noAutoMergeStatus": "Désactivé",
+    "autoMergeStatusDescription": "Activer la fusion automatique d’un worktree déplace son ticket Jira lié vers ce statut.",
+    "doneStatus": "Statut terminé de fusion automatique",
     "noDoneStatus": "Non configuré",
-    "doneStatusDescription": "Auto Merge déplace les tickets liés vers ce statut après la fusion GitHub.",
+    "doneStatusDescription": "Lorsque cette option est sélectionnée, les tickets liés passent à ce statut après une fusion manuelle ou automatique réussie.",
     "inReviewStatus": "Statut du ticket en révision",
     "noInReviewStatus": "Désactivé",
     "inReviewStatusDescription": "L’attribution de réviseurs depuis un worktree déplace le ticket Jira lié vers ce statut.",
@@ -3391,8 +3394,8 @@
     "noWorkflows": "Aucun workflow disponible.",
     "quickActionEligibility": "Les workflows configurés restent affichés lorsqu’ils sont en pause ; les actions n’apparaissent que s’ils sont publiés, activés et associés à la ressource actuelle.",
     "saveQuickActions": "Enregistrer les actions rapides",
-    "keepBaseBranchUpToDate": "Maintenir la branche de base à jour",
-    "keepBaseBranchUpToDateHelp": "Après une récupération réussie, la branche de base est avancée en mode fast-forward lorsqu’aucune modification n’est indexée. Ce réglage du dépôt s’applique à tous les agents.",
+    "keepBaseBranchUpToDate": "Maintenir les branches par défaut à jour",
+    "keepBaseBranchUpToDateHelp": "Avance les arbres de travail des branches par défaut depuis leur branche origin correspondante. Les modifications locales suspendent les mises à jour jusqu’à ce que l’arbre soit propre. Ce réglage s’applique à tous les agents.",
     "save": "Enregistrer",
     "remove": "Supprimer",
     "confirmRemoveTitle": "Supprimer l’enregistrement de la base de code ?",
@@ -3475,7 +3478,9 @@
         "SKIPPED": "Ignorée",
         "FAILED": "Échec"
       }
-    }
+    },
+    "defaultBranchPatterns": "Correspondances des branches par défaut",
+    "defaultBranchPatternsHelp": "Un nom de branche ou motif par ligne, par exemple release/*. La casse est respectée ; * correspond aussi à /. La branche distante par défaut est toujours incluse."
   },
   "codebaseDetail": {
     "iosApp": "App iOS",
@@ -3996,7 +4001,10 @@
       "cloneRepository": "Cloner le dépôt",
       "inspectClone": "Inspecter le clone",
       "inspectRepositoryGitState": "Inspecter l’état Git du dépôt"
-    }
+    },
+    "commitsBehindBase": "{count} commits derrière la base",
+    "defaultBranchUpdateEnabled": "Maintien à jour",
+    "defaultBranchUpdatePaused": "Maintien à jour suspendu"
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",

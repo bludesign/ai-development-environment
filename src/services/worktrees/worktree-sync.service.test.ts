@@ -41,6 +41,39 @@ const control = {
 
 const service = () => new WorktreeSyncService(worktrees, control);
 
+test("rejects default branches at selection and skips branches reclassified before dispatch", async () => {
+  await prisma.worktree.update({
+    where: { id: "first" },
+    data: { branch: "main" },
+  });
+  await expect(
+    service().start({ requestId: "default", worktreeIds: ["first", "second"] }),
+  ).rejects.toThrow("Default branches cannot be selected");
+  await prisma.worktree.update({
+    where: { id: "first" },
+    data: { branch: "release/1" },
+  });
+  const sync = service();
+  const batch = await sync.start({
+    requestId: "reclassified",
+    worktreeIds: ["first"],
+  });
+  await prisma.codebaseRepository.update({
+    where: { id: "one" },
+    data: { defaultBranchPatternsJson: '["release/*"]' },
+  });
+  await (sync as unknown as { reconcile(): Promise<void> }).reconcile();
+  expect(await sync.batch(batch.id)).toMatchObject({
+    items: [
+      {
+        status: "SKIPPED",
+        error: "Default branches are excluded from Bulk Sync",
+      },
+    ],
+  });
+  expect(createAutoSyncJob).not.toHaveBeenCalled();
+});
+
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "aide-bulk-sync-"));
   template = join(directory, "template.db");

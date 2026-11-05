@@ -321,6 +321,8 @@ extend type AgentJob {
 
 "Represents a worktree auto merge in the GraphQL API."
 type WorktreeAutoMerge {
+  "Jira transition warning returned after activation; auto merge remains enabled."
+  ticketTransitionError: String
   "Whether AIDE syncs the linked branch and waits for passing CI before merging."
   autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
@@ -371,6 +373,12 @@ type Worktree {
   primary: Boolean!
   "Git branch associated with this worktree. May be null when unavailable or not applicable."
   branch: String
+  "Whether the current branch is the remote default or matches repository default branch patterns."
+  isDefaultBranch: Boolean!
+  "Whether automatic same-name remote branch maintenance applies to this checkout."
+  defaultBranchUpdateEnabled: Boolean!
+  "Whether automatic branch maintenance is paused by local changes, conflicts, divergence, or an unavailable checkout or same-name origin branch."
+  defaultBranchUpdatePaused: Boolean!
   "Git commit SHA associated with this worktree. May be null when unavailable or not applicable."
   headSha: String
   "Hash of the complete worktree code state, including local changes. May be null when unavailable or not applicable."

@@ -25,6 +25,7 @@ function control() {
   return {
     registerCompletionHandler: vi.fn(),
     createJob: vi.fn(async (input) => ({ id: `job-${input.codebaseId}` })),
+    requestCodebaseReconcile: vi.fn().mockResolvedValue(0),
   } as unknown as AgentControlService;
 }
 
@@ -560,7 +561,7 @@ describe("CodebasesService", () => {
           folder: "/ready",
           expectedOrigin: "example.com/ready",
           baseBranch: "main",
-          keepBaseBranchUpToDate: true,
+          keepBaseBranchUpToDate: false,
         },
       }),
     );
@@ -912,6 +913,7 @@ describe("CodebasesService", () => {
       keepBaseBranchUpToDate: false,
     };
     const prisma = {
+      codebase: { findMany: vi.fn().mockResolvedValue([]) },
       codebaseRepository: {
         update: vi.fn().mockResolvedValue(repository),
       },
@@ -939,6 +941,49 @@ describe("CodebasesService", () => {
     });
   });
 
+  test("normalizes default branch patterns and immediately reconciles repository agents", async () => {
+    const update = vi.fn().mockResolvedValue({ id: "repository-1" });
+    getPrismaClient.mockResolvedValue({
+      codebaseRepository: { update },
+      codebase: {
+        findMany: vi.fn().mockResolvedValue([{ agentId: "agent-1" }]),
+      },
+    });
+    const agentControl = control();
+    await new CodebasesService(agentControl).updateRepository(
+      "repository-1",
+      "Repo",
+      "",
+      null,
+      true,
+      undefined,
+      [" release/* ", "develop", "release/*", ""],
+    );
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          keepBaseBranchUpToDate: true,
+          defaultBranchPatternsJson: '["release/*","develop"]',
+        }),
+      }),
+    );
+    expect(agentControl.requestCodebaseReconcile).toHaveBeenCalledWith([
+      "agent-1",
+    ]);
+    await expect(
+      new CodebasesService(agentControl).updateRepository(
+        "repository-1",
+        "Repo",
+        "",
+        null,
+        true,
+        undefined,
+        ["bad branch"],
+      ),
+    ).rejects.toThrow("whitespace");
+    expect(update).toHaveBeenCalledOnce();
+  });
+
   test("does not mutate workflow scopes from repository settings", async () => {
     const repository = {
       id: "repository-1",
@@ -953,6 +998,7 @@ describe("CodebasesService", () => {
     };
     const transactionClient = { workflowQuickActionRepository };
     const prisma = {
+      codebase: { findMany: vi.fn().mockResolvedValue([]) },
       codebaseRepository: {
         update: vi.fn().mockResolvedValue(repository),
       },

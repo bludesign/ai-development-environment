@@ -29,6 +29,7 @@ describe("Jira administration tools", () => {
         ticketAssignmentFilter,
         hideCompletedTickets: false,
         completedStatusIds: [],
+        autoMergeStatusId: "waiting-for-merge",
       };
 
       await expect(tool.invoke(input)).resolves.toEqual({ projects: [] });

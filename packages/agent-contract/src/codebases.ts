@@ -9,6 +9,69 @@ export const CODEBASE_GIT_OPERATION_JOB_KIND = "codebase.git.operation";
 export const CODEBASE_BRANCHES_DELETE_JOB_KIND = "codebase.branches.delete";
 export const CODEBASE_RECONCILE_EVENT_CAPABILITY =
   "codebase.reconcile.requested";
+export const CODEBASE_DEFAULT_BRANCHES_CAPABILITY =
+  "codebase.default-branches.v1";
+
+/** Repository patterns supplement Git's remote default. Only * is a wildcard. */
+export function normalizeDefaultBranchPatterns(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 100)
+    throw new Error(
+      "Default branch patterns must be a list of at most 100 entries",
+    );
+  const patterns = value.map((entry) => {
+    if (typeof entry !== "string" || entry.trim().length > 255)
+      throw new Error(
+        "Default branch patterns must be strings of at most 255 characters",
+      );
+    const pattern = entry.trim();
+    if (pattern && /[\s\x00-\x1f\x7f]/.test(pattern))
+      throw new Error(
+        "Default branch patterns cannot contain whitespace or control characters",
+      );
+    return pattern;
+  });
+  return [...new Set(patterns.filter(Boolean))];
+}
+
+export function parseDefaultBranchPatterns(
+  value: string | null | undefined,
+): string[] {
+  try {
+    return normalizeDefaultBranchPatterns(JSON.parse(value ?? "[]"));
+  } catch {
+    return [];
+  }
+}
+
+export function isDefaultBranch(
+  branch: string | null | undefined,
+  remoteDefaultBranch: string | null | undefined,
+  patterns: readonly string[] = [],
+): boolean {
+  if (!branch) return false;
+  if (branch === remoteDefaultBranch) return true;
+  return patterns.some((pattern) => {
+    // Greedy wildcard matching avoids regular-expression backtracking for long patterns.
+    let position = 0;
+    let patternPosition = 0;
+    let star = -1;
+    let resume = 0;
+    while (position < branch.length) {
+      if (pattern[patternPosition] === "*") {
+        star = patternPosition++;
+        resume = position;
+      } else if (pattern[patternPosition] === branch[position]) {
+        patternPosition++;
+        position++;
+      } else if (star >= 0) {
+        patternPosition = star + 1;
+        position = ++resume;
+      } else return false;
+    }
+    while (pattern[patternPosition] === "*") patternPosition++;
+    return patternPosition === pattern.length;
+  });
+}
 
 export const MAX_CODEBASE_GIT_BRANCHES = 1_000;
 export const MAX_CODEBASE_STASHES = 200;
@@ -670,6 +733,7 @@ export function codebaseJobPayload(value: unknown): {
   expectedOrigin?: string;
   baseBranch?: string;
   keepBaseBranchUpToDate?: boolean;
+  defaultBranchPatterns?: string[];
 } {
   const payload = objectValue(value, "codebase job payload");
   const allowed = new Set([
@@ -678,6 +742,7 @@ export function codebaseJobPayload(value: unknown): {
     "expectedOrigin",
     "baseBranch",
     "keepBaseBranchUpToDate",
+    "defaultBranchPatterns",
   ]);
   const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
   if (unexpected)
@@ -706,6 +771,13 @@ export function codebaseJobPayload(value: unknown): {
           keepBaseBranchUpToDate: booleanValue(
             payload.keepBaseBranchUpToDate,
             "payload.keepBaseBranchUpToDate",
+          ),
+        }),
+    ...(payload.defaultBranchPatterns === undefined
+      ? {}
+      : {
+          defaultBranchPatterns: normalizeDefaultBranchPatterns(
+            payload.defaultBranchPatterns,
           ),
         }),
   };

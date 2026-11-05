@@ -28,10 +28,12 @@ import { recoverMergeReservations } from "@/services/operation-locks/operation-l
 import { getPrismaClient } from "@/data/prisma-client";
 import type { WorktreeAutoSync } from "@/generated/prisma/client";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
+import { isDefaultWorktreeBranch } from "@/lib/default-branches";
 
 import {
   validateMergeFollowUps,
   completeMergeTicketFollowUp,
+  autoMergeTicketTransitionWarning,
 } from "./merge-follow-ups";
 import type { WorktreesService } from "./worktrees.service";
 import {
@@ -147,6 +149,7 @@ function mergeView(rule: {
   return {
     ...rule,
     autoSync: rule.autoSync ?? false,
+    ticketTransitionError: null as string | null,
     mergeMethod: rule.mergeMethod as GitHubMergeMethod,
     baseBranchUpdateResults: baseBranchUpdateResults(
       rule.baseBranchUpdatesJson,
@@ -281,10 +284,20 @@ export class WorktreeAutomationService {
         id: true,
         branch: true,
         codebaseId: true,
-        codebase: { select: { repositoryId: true } },
+        codebase: {
+          select: {
+            repositoryId: true,
+            defaultBranch: true,
+            repository: { select: { defaultBranchPatternsJson: true } },
+          },
+        },
       },
     });
     if (!worktree?.branch) throw new Error("Auto Sync requires a branch");
+    if (isDefaultWorktreeBranch(worktree))
+      throw new Error(
+        "Default branches use the repository keep up to date setting instead of Auto Sync",
+      );
     await this.stopAutoSyncWork(
       await prisma.worktreeAutoSync.findUnique({
         where: { worktreeId: worktree.id },
@@ -656,12 +669,20 @@ export class WorktreeAutomationService {
             codebaseId: true,
             codebase: {
               select: {
-                repository: { select: { canonicalOrigin: true } },
+                defaultBranch: true,
+                repository: {
+                  select: {
+                    canonicalOrigin: true,
+                    defaultBranchPatternsJson: true,
+                  },
+                },
               },
             },
           },
         });
         if (!worktree?.branch) throw new Error("Auto Merge requires a branch");
+        if (isDefaultWorktreeBranch(worktree))
+          throw new Error("Auto Merge is not available for default branches");
         if (input.deleteWorktree && worktree.primary) {
           throw new Error("The primary worktree cannot be deleted after merge");
         }
@@ -670,6 +691,7 @@ export class WorktreeAutomationService {
         });
         const ticketKey = await this.worktrees.ticketKeyForWorktree(
           worktree.id,
+          worktree.branch,
         );
         if (input.moveTicketToDone) {
           if (!ticketKey) {
@@ -722,6 +744,10 @@ export class WorktreeAutomationService {
             input.repositoryNameWithOwner.toLowerCase() ||
             existing.pullRequestNumber !== input.pullRequestNumber),
         );
+        const newlyEnabled =
+          !existing ||
+          retargeting ||
+          !["ACTIVE", ...MANAGED_MERGE_STATES].includes(existing.state);
         if (input.autoSync) {
           return withMergeSyncLock(worktree.id, async () => {
             if (
@@ -812,12 +838,15 @@ export class WorktreeAutomationService {
               );
               throw error;
             }
+            const ticketTransitionError = newlyEnabled
+              ? await autoMergeTicketTransitionWarning(this.jira, ticketKey)
+              : null;
             this.worktrees.publishAutomationChange(
               worktree.id,
               worktree.codebaseId,
             );
             this.changed();
-            return mergeView(rule);
+            return { ...mergeView(rule), ticketTransitionError };
           });
         }
         if (existing?.autoSync)
@@ -891,12 +920,16 @@ export class WorktreeAutomationService {
           create: { worktreeId: worktree.id, ...data },
           update: data,
         });
+        const ticketTransitionError =
+          newlyEnabled && current.state !== "MERGED"
+            ? await autoMergeTicketTransitionWarning(this.jira, ticketKey)
+            : null;
         this.worktrees.publishAutomationChange(
           worktree.id,
           worktree.codebaseId,
         );
         this.changed();
-        return mergeView(rule);
+        return { ...mergeView(rule), ticketTransitionError };
       },
       input.worktreeId,
     );
@@ -1287,7 +1320,15 @@ export class WorktreeAutomationService {
           folder: true,
           gitDirectory: true,
           codebase: {
-            select: { repository: { select: { canonicalOrigin: true } } },
+            select: {
+              defaultBranch: true,
+              repository: {
+                select: {
+                  canonicalOrigin: true,
+                  defaultBranchPatternsJson: true,
+                },
+              },
+            },
           },
         },
       });
@@ -1359,11 +1400,7 @@ export class WorktreeAutomationService {
       where: {
         OR: [
           { state: { in: ["ACTIVE", "SYNCING", "RESOLVING"] } },
-          {
-            state: "PAUSED",
-            pauseReason: "ERROR",
-            lastError: LEGACY_CODEBASE_BUSY_MESSAGE,
-          },
+          { state: "PAUSED" },
         ],
       },
       include: { worktree: { select: { codebaseId: true } } },
@@ -1373,16 +1410,31 @@ export class WorktreeAutomationService {
       await withMergeSyncLock(savedRule.worktreeId, async () => {
         let rule = savedRule;
         try {
+          const current = await prisma.worktree.findUnique({
+            where: { id: rule.worktreeId },
+            select: {
+              branch: true,
+              codebase: {
+                select: {
+                  defaultBranch: true,
+                  repository: { select: { defaultBranchPatternsJson: true } },
+                },
+              },
+            },
+          });
+          if (current?.codebase && isDefaultWorktreeBranch(current)) {
+            await this.stopAutoSyncWork(rule);
+            await prisma.worktreeAutoSync.deleteMany({
+              where: { worktreeId: rule.worktreeId },
+            });
+            return;
+          }
           if (rule.state === "PAUSED") {
             const recovered = await this.recoverLegacyAutoSync(rule);
             if (!recovered) return;
             rule = { ...rule, ...recovered };
           }
           if (await managedMergeOwnsWorktree(rule.worktreeId)) return;
-          const current = await prisma.worktree.findUnique({
-            where: { id: rule.worktreeId },
-            select: { branch: true },
-          });
           if (current?.branch !== rule.branch) {
             throw new Error(
               "Auto Sync paused because the worktree branch changed",
@@ -1582,7 +1634,7 @@ export class WorktreeAutomationService {
       where: {
         OR: [
           { state: { in: ["ACTIVE", "POST_MERGE", ...MANAGED_MERGE_STATES] } },
-          { state: "ACTION_REQUIRED", lastError: LEGACY_CODEBASE_BUSY_MESSAGE },
+          { state: "ACTION_REQUIRED" },
         ],
       },
       include: {
@@ -1593,7 +1645,15 @@ export class WorktreeAutomationService {
             headSha: true,
             primary: true,
             codebase: {
-              select: { repository: { select: { canonicalOrigin: true } } },
+              select: {
+                defaultBranch: true,
+                repository: {
+                  select: {
+                    canonicalOrigin: true,
+                    defaultBranchPatternsJson: true,
+                  },
+                },
+              },
             },
           },
         },
@@ -1620,7 +1680,13 @@ export class WorktreeAutomationService {
                     primary: true,
                     codebase: {
                       select: {
-                        repository: { select: { canonicalOrigin: true } },
+                        defaultBranch: true,
+                        repository: {
+                          select: {
+                            canonicalOrigin: true,
+                            defaultBranchPatternsJson: true,
+                          },
+                        },
                       },
                     },
                   },
@@ -1651,6 +1717,58 @@ export class WorktreeAutomationService {
             let rule = current;
             try {
               const repository = repositoryParts(rule.repositoryNameWithOwner);
+              if (
+                isDefaultWorktreeBranch(rule.worktree) &&
+                rule.state !== "POST_MERGE"
+              ) {
+                if (rule.autoSync)
+                  await cancelMergeSync(rule.syncStateJson, this.agentControl);
+                const remote = await this.github.pullRequestAutomationState(
+                  repository.owner,
+                  repository.name,
+                  rule.pullRequestNumber,
+                  true,
+                );
+                if (remote.state === "MERGED") {
+                  if (
+                    remote.headRefName !== rule.branch ||
+                    !remote.headRepositoryNameWithOwner ||
+                    `github.com/${remote.headRepositoryNameWithOwner.toLowerCase()}` !==
+                      rule.worktree.codebase.repository.canonicalOrigin.toLowerCase() ||
+                    rule.worktree.branch !== rule.branch
+                  )
+                    throw new Error(
+                      "The pull request source no longer matches this worktree.",
+                    );
+                  if (rule.autoSync) {
+                    const intent = readMergeSync(rule.syncStateJson);
+                    if (
+                      remote.headRefOid !== intent.headSha ||
+                      remote.headRefName !== intent.sourceBranch ||
+                      `github.com/${remote.headRepositoryNameWithOwner.toLowerCase()}` !==
+                        intent.sourceOrigin.toLowerCase()
+                    )
+                      throw new Error(
+                        "A different source commit merged. Review follow-ups manually.",
+                      );
+                  }
+                  await prisma.worktreeAutoMerge.update({
+                    where: { worktreeId: rule.worktreeId },
+                    data: { state: "POST_MERGE", lastError: null },
+                  });
+                  this.rerunRequested = true;
+                  return;
+                }
+                if (remote.state === "OPEN" && remote.autoMergeEnabled)
+                  await this.github.disablePullRequestAutoMerge(
+                    { ...repository, number: rule.pullRequestNumber },
+                    "WORKTREE_AUTOMATION",
+                  );
+                await prisma.worktreeAutoMerge.deleteMany({
+                  where: { worktreeId: rule.worktreeId },
+                });
+                return;
+              }
               if (rule.state === "ACTION_REQUIRED") {
                 if (rule.lastError !== LEGACY_CODEBASE_BUSY_MESSAGE) return;
                 const confirmed = await this.github.pullRequestAutomationState(

@@ -121,6 +121,7 @@ describe("Bulk Sync candidates", () => {
       worktree("one"),
       worktree("current", { baseBehind: 0 }),
       worktree("unknown", { baseBehind: null }),
+      worktree("release/1", { isDefaultBranch: true, baseBehind: 8 }),
     ]);
     value.agents.push({
       ...value.agents[0]!,

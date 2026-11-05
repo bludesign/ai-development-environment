@@ -61,6 +61,9 @@ function automationWorktree(
 
   return {
     ...template,
+    isDefaultBranch: false,
+    defaultBranchUpdateEnabled: false,
+    defaultBranchUpdatePaused: false,
     id,
     branch,
     folder: `/Users/acme/Repositories/${id}`,

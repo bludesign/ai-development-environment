@@ -22,6 +22,7 @@ import {
 import {
   applyJiraTicketToWorktreeOverview,
   displayedWorktreePath,
+  defaultBranchSections,
   filterWorktreeAgentGroups,
   worktreeBranchIsTaken,
   WorktreesPage,
@@ -404,7 +405,7 @@ export function registerWorktreesPageTests(
         expect(result.map((group) => group.agent.id)).toEqual(["agent-1"]);
       });
 
-      test("includes detached worktrees but excludes unknown default branches", () => {
+      test("includes detached and non-default worktrees when remote default is unknown", () => {
         const candidates = structuredClone(groups);
         candidates[0]!.codebases[0]!.worktrees[0]!.branch = null;
         candidates[1]!.codebases[0]!.codebase.defaultBranch = null;
@@ -417,7 +418,59 @@ export function registerWorktreesPageTests(
           nonDefaultBranch: true,
         });
 
-        expect(result.map((group) => group.agent.id)).toEqual(["agent-1"]);
+        expect(result.map((group) => group.agent.id)).toEqual([
+          "agent-1",
+          "agent-2",
+        ]);
+      });
+
+      test("puts defaults below ordinary worktrees across checkout subgroups", () => {
+        const entries = groups.flatMap((agentGroup) =>
+          agentGroup.codebases.map((group) => ({
+            agentGroup,
+            group: {
+              ...group,
+              worktrees: [
+                {
+                  ...group.worktrees[0]!,
+                  id: `${group.codebase.id}-default`,
+                  isDefaultBranch: true,
+                },
+                {
+                  ...group.worktrees[0]!,
+                  id: `${group.codebase.id}-feature`,
+                  isDefaultBranch: false,
+                },
+              ],
+            },
+          })),
+        );
+        expect(
+          defaultBranchSections(entries).flatMap(({ group }) =>
+            group.worktrees.map((worktree) => worktree.id),
+          ),
+        ).toEqual([
+          "codebase-1-feature",
+          "codebase-2-feature",
+          "codebase-1-default",
+          "codebase-2-default",
+        ]);
+      });
+
+      test("uses server classification for matched release branches", () => {
+        const candidates = structuredClone(groups);
+        const worktree = candidates[0]!.codebases[0]!.worktrees[0]!;
+        worktree.branch = "release/1.0";
+        worktree.isDefaultBranch = true;
+        expect(
+          filterWorktreeAgentGroups(candidates, {
+            query: "",
+            agentId: null,
+            repositoryId: null,
+            dirty: null,
+            nonDefaultBranch: true,
+          }).map((group) => group.agent.id),
+        ).toEqual(["agent-2"]);
       });
     });
   }
@@ -595,6 +648,7 @@ export function registerWorktreesPageTests(
 
     afterEach(() => {
       cleanup();
+      document.cookie = "worktree-branch-mode=; Max-Age=0; Path=/";
       request.mockReset();
       subscriptions.mockReset();
     });
@@ -1311,6 +1365,7 @@ export function registerWorktreesPageTests(
       test.each(["GITHUB", "GITLAB"] as const)(
         "distinguishes required and requested %s reviews",
         async (provider) => {
+          window.localStorage.setItem("worktrees-layout", "table");
           const response = (await request("query Fixture")) as unknown as {
             worktreeOverview: WorktreeOverview;
           };
@@ -1363,6 +1418,54 @@ export function registerWorktreesPageTests(
         },
       );
 
+      test("moves default branch actions into More and restores a feature card after branch changes", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const worktree =
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+        Object.assign(worktree, {
+          branch: "release/1",
+          isDefaultBranch: true,
+          baseBehind: 4,
+          defaultBranchUpdateEnabled: true,
+          defaultBranchUpdatePaused: true,
+          hasUnstagedChanges: true,
+        });
+        request.mockClear();
+        render(<WorktreesPage />);
+        const freshness = await screen.findByText("4 commits behind base");
+        expect(freshness.className).not.toContain("amber");
+        expect(screen.getByText("Keep up to date paused")).toBeDefined();
+        for (const name of [
+          "Sync",
+          "Rebase",
+          "Push",
+          "Auto Sync",
+          "Auto Merge",
+        ])
+          expect(screen.queryByRole("button", { name })).toBeNull();
+        fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+          button: 0,
+          ctrlKey: false,
+        });
+        for (const name of ["Sync", "Rebase", "Push"])
+          expect(await screen.findByRole("menuitem", { name })).toBeDefined();
+        fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+        Object.assign(worktree, {
+          branch: "feature/AIDE-25",
+          isDefaultBranch: false,
+          defaultBranchUpdateEnabled: false,
+          defaultBranchUpdatePaused: false,
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await screen.findByRole("button", { name: "feature/AIDE-25" });
+        expect(screen.getByRole("button", { name: "Sync" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "Rebase" })).toBeDefined();
+        expect(screen.getByRole("button", { name: "Push" })).toBeDefined();
+        expect(screen.queryByText("Keep up to date paused")).toBeNull();
+      });
+
       test("renders the primary worktree card with Jira and tag metadata", async () => {
         render(<WorktreesPage />);
         expect(await screen.findByText("feature/AIDE-24")).toBeDefined();
@@ -1380,7 +1483,8 @@ export function registerWorktreesPageTests(
         expect(screen.getByText("Yes").className).toContain(
           "dark:text-emerald-300",
         );
-        expect(screen.getByText("Commits: 1")).toBeDefined();
+        expect(screen.queryByText("Commits: 1")).toBeNull();
+        expect(screen.queryByText("Pull request")).toBeNull();
         expect(screen.getByText("In sync")).toBeDefined();
         expect(screen.getByText("Latest build")).toBeDefined();
         const latestBuildRow = screen.getByText("Latest build").parentElement!;
@@ -2032,6 +2136,66 @@ export function registerWorktreesPageTests(
         expect(navigation.push).not.toHaveBeenCalled();
       });
 
+      test.each(["cards", "table"])(
+        "excludes occupied default branches from the %s branch chooser",
+        async (layout) => {
+          window.localStorage.setItem("worktrees-layout", layout);
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const group = response.worktreeOverview.agents[0]!.codebases[0]!;
+          const feature = group.worktrees[0]!;
+          group.codebase.localBranches = [
+            "main",
+            feature.branch!,
+            "release/available",
+          ];
+          group.codebase.remoteBranches = [...group.codebase.localBranches];
+          group.worktrees.push({
+            ...feature,
+            id: "worktree-main",
+            primary: false,
+            branch: "main",
+            isDefaultBranch: true,
+            folder: "/workspaces/main",
+            gitDirectory: "/workspaces/repo/.git/worktrees/main",
+            ticketKey: null,
+            ticketTitle: null,
+            pullRequest: null,
+          });
+
+          render(<WorktreesPage />);
+          fireEvent.pointerDown(
+            await screen.findByRole("button", {
+              name: "Tags: feature/AIDE-24",
+            }),
+            { button: 0, ctrlKey: false },
+          );
+          expect(
+            screen.queryByRole("menuitem", { name: "Change branch to main" }),
+          ).toBeNull();
+          fireEvent.click(
+            await screen.findByRole("menuitem", { name: "Change branch" }),
+          );
+          const chooser = within(
+            (
+              await screen.findByRole("heading", { name: "Change branch" })
+            ).closest('[data-slot="popover-content"]') as HTMLElement,
+          );
+          fireEvent.click(
+            chooser.getByRole("tab", { name: "Existing branch" }),
+          );
+          fireEvent.click(
+            chooser.getByRole("combobox", { name: "Existing branch" }),
+          );
+
+          expect(
+            await screen.findByRole("option", { name: /^release\/available,/ }),
+          ).toBeDefined();
+          expect(screen.queryByRole("option", { name: /^main,/ })).toBeNull();
+        },
+      );
+
       test("offers matching agents and warns about dirty existing destinations", async () => {
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;
@@ -2197,6 +2361,7 @@ export function registerWorktreesPageTests(
 
     if (section === "details") {
       test("opens pull request actions from the PR badge", async () => {
+        window.localStorage.setItem("worktrees-layout", "table");
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
 
@@ -2284,6 +2449,7 @@ export function registerWorktreesPageTests(
       });
 
       test("toggles commits and expandable file changes from the commits badge", async () => {
+        window.localStorage.setItem("worktrees-layout", "table");
         render(<WorktreesPage />);
         await screen.findByText("feature/AIDE-24");
         request.mockResolvedValueOnce({
@@ -2526,6 +2692,7 @@ export function registerWorktreesPageTests(
       );
 
       test("refreshes expanded details when live worktree activity arrives", async () => {
+        window.localStorage.setItem("worktrees-layout", "table");
         const activityCallbacks: Array<() => void> = [];
         subscriptions.mockReturnValue({
           subscribe: vi.fn(
@@ -2698,6 +2865,7 @@ export function registerWorktreesPageTests(
       });
 
       test("falls back to a dash only when the pull request row is empty", async () => {
+        window.localStorage.setItem("worktrees-layout", "table");
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;
         };
@@ -2722,8 +2890,9 @@ export function registerWorktreesPageTests(
       });
 
       test.each(["GITHUB", "GITLAB"] as const)(
-        "opens %s review details from a worktree card without navigating",
+        "opens %s review details from a worktree table without navigating",
         async (provider) => {
+          window.localStorage.setItem("worktrees-layout", "table");
           const response = (await request("query Fixture")) as unknown as {
             worktreeOverview: WorktreeOverview;
           };
@@ -2800,6 +2969,7 @@ export function registerWorktreesPageTests(
       );
 
       test("shows GitLab merge requests and pipelines for the worktree", async () => {
+        window.localStorage.setItem("worktrees-layout", "table");
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;
         };

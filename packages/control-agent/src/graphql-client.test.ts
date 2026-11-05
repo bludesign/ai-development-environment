@@ -29,6 +29,43 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("falls back to remote-default maintenance when an older server has no branch patterns field", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          errors: [
+            {
+              message:
+                'Cannot query field "defaultBranchPatterns" on type "AgentCodebaseRegistration".',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            agentCodebaseConfiguration: {
+              refreshIntervalSeconds: 30,
+              fetchIntervalSeconds: 300,
+              codebases: [],
+            },
+          },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      new AgentGraphQLClient(
+        "https://control.test",
+      ).agentCodebaseConfiguration(),
+    ).resolves.toMatchObject({ codebases: [] });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).query).toContain(
+      "defaultBranchPatterns",
+    );
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[1][1].body)).query,
+    ).not.toContain("defaultBranchPatterns");
+  });
   test("uploads session info with native session identity", async () => {
     const fetchMock = vi.fn<
       (url: string, init?: RequestInit) => Promise<Response>

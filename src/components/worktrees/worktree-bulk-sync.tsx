@@ -71,7 +71,10 @@ export function worktreeSyncCandidates(
     .flatMap(({ agent, codebases }) =>
       codebases.flatMap((group) =>
         group.worktrees
-          .filter((worktree) => (worktree.baseBehind ?? 0) > 0)
+          .filter(
+            (worktree) =>
+              !worktree.isDefaultBranch && (worktree.baseBehind ?? 0) > 0,
+          )
           .map((worktree): WorktreeSyncCandidate => ({
             worktree,
             repositoryName: group.repository.name,

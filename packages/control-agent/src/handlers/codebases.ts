@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 
 import {
   codebaseBrowsePayload,
+  isDefaultBranch,
   codebaseGitInspectPayload,
   codebaseGitOperationPayload,
   codebaseJobPayload,
@@ -422,89 +423,204 @@ export const refreshCodebase: AgentJobHandler = async (
   };
 };
 
+/** Update a checked-out branch only; inactive local refs are intentionally untouched. */
 export async function updateBaseBranchAfterFetch(
   folder: string,
   baseBranch: string,
   timeoutMs: number,
   signal: AbortSignal,
+  expectedOrigin?: string,
+  expectedGitDirectory?: string,
 ): Promise<boolean> {
-  const localRef = `refs/heads/${baseBranch}`;
-  const remoteRef = `refs/remotes/origin/${baseBranch}`;
   try {
-    const validRef = await git(
+    return await withRepositoryMetadata(
       folder,
-      ["check-ref-format", localRef],
-      timeoutMs,
+      async () => {
+        if (expectedGitDirectory) {
+          const directory = await git(
+            folder,
+            ["rev-parse", "--path-format=absolute", "--git-dir"],
+            timeoutMs,
+            signal,
+          );
+          if (
+            directory.exitCode !== 0 ||
+            (await realpath(directory.stdout.trim())) !== expectedGitDirectory
+          )
+            return false;
+        }
+        const current = await git(
+          folder,
+          ["symbolic-ref", "--short", "-q", "HEAD"],
+          timeoutMs,
+          signal,
+        );
+        if (current.exitCode !== 0 || current.stdout.trim() !== baseBranch)
+          return false;
+        if (expectedOrigin) {
+          const remote = await git(
+            folder,
+            ["remote", "get-url", "origin"],
+            timeoutMs,
+            signal,
+          );
+          if (
+            remote.exitCode !== 0 ||
+            normalizeGitOrigin(remote.stdout.trim()).canonicalOrigin !==
+              expectedOrigin
+          )
+            return false;
+        }
+        const status = await git(
+          folder,
+          [
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--ignore-submodules=none",
+          ],
+          timeoutMs,
+          signal,
+        );
+        if (status.exitCode !== 0 || status.outputTruncated || status.stdout)
+          return false;
+        for (const name of [
+          "MERGE_HEAD",
+          "rebase-merge",
+          "rebase-apply",
+          "CHERRY_PICK_HEAD",
+          "REVERT_HEAD",
+        ]) {
+          const path = await git(
+            folder,
+            ["rev-parse", "--path-format=absolute", "--git-path", name],
+            timeoutMs,
+            signal,
+          );
+          if (path.exitCode !== 0) return false;
+          try {
+            await stat(path.stdout.trim());
+            return false;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        const remoteRef = `refs/remotes/origin/${baseBranch}`;
+        const valid = await git(
+          folder,
+          ["check-ref-format", remoteRef],
+          timeoutMs,
+          signal,
+        );
+        if (valid.exitCode !== 0) return false;
+        const tip = await git(
+          folder,
+          ["rev-parse", "--verify", remoteRef],
+          timeoutMs,
+          signal,
+        );
+        if (tip.exitCode !== 0) return false;
+        const ancestor = await git(
+          folder,
+          ["merge-base", "--is-ancestor", "HEAD", tip.stdout.trim()],
+          timeoutMs,
+          signal,
+        );
+        // Ahead or divergent local commits are never rebased, reset, or pushed.
+        if (ancestor.exitCode !== 0) return false;
+        const branch = await git(
+          folder,
+          ["symbolic-ref", "--short", "-q", "HEAD"],
+          timeoutMs,
+          signal,
+        );
+        if (branch.exitCode !== 0 || branch.stdout.trim() !== baseBranch)
+          return false;
+        return (
+          (
+            await git(
+              folder,
+              ["merge", "--ff-only", tip.stdout.trim()],
+              timeoutMs,
+              signal,
+            )
+          ).exitCode === 0
+        );
+      },
       signal,
     );
-    if (validRef.exitCode !== 0) return false;
-
-    const staged = await git(
-      folder,
-      ["diff", "--cached", "--quiet"],
-      timeoutMs,
-      signal,
-    );
-    if (staged.exitCode !== 0) return false;
-
-    const remoteExists = await git(
-      folder,
-      ["show-ref", "--verify", "--quiet", remoteRef],
-      timeoutMs,
-      signal,
-    );
-    if (remoteExists.exitCode !== 0) return false;
-    const remoteTip = requireSuccess(
-      await git(folder, ["rev-parse", remoteRef], timeoutMs, signal),
-      "Could not pin the fetched base branch",
-    ).stdout.trim();
-
-    const currentBranch = await git(
-      folder,
-      ["symbolic-ref", "--short", "-q", "HEAD"],
-      timeoutMs,
-      signal,
-    );
-    if (
-      currentBranch.exitCode === 0 &&
-      currentBranch.stdout.trim() === baseBranch
-    ) {
-      const merged = await git(
-        folder,
-        ["merge", "--ff-only", remoteTip],
-        timeoutMs,
-        signal,
-      );
-      return merged.exitCode === 0;
-    }
-
-    const localExists = await git(
-      folder,
-      ["show-ref", "--verify", "--quiet", localRef],
-      timeoutMs,
-      signal,
-    );
-    if (localExists.exitCode === 0) {
-      const fastForward = await git(
-        folder,
-        ["merge-base", "--is-ancestor", localRef, remoteTip],
-        timeoutMs,
-        signal,
-      );
-      if (fastForward.exitCode !== 0) return false;
-    } else if (localExists.exitCode !== 1) {
-      return false;
-    }
-
-    const updated = await git(
-      folder,
-      ["branch", "--force", baseBranch, remoteTip],
-      timeoutMs,
-      signal,
-    );
-    return updated.exitCode === 0;
-  } catch {
+  } catch (error) {
+    if (signal.aborted) throw error;
     return false;
+  }
+}
+
+export async function updateDefaultBranchesAfterFetch(
+  folder: string,
+  defaultBranch: string | null,
+  patterns: readonly string[],
+  timeoutMs: number,
+  signal: AbortSignal,
+  withCheckout: (
+    folder: string,
+    gitDirectory: string,
+    update: () => Promise<boolean>,
+  ) => Promise<unknown>,
+  expectedOrigin?: string,
+): Promise<void> {
+  const listed = requireSuccess(
+    await git(
+      folder,
+      ["worktree", "list", "--porcelain", "-z"],
+      timeoutMs,
+      signal,
+    ),
+    "Could not list worktrees",
+  );
+  if (listed.outputTruncated) return;
+  for (const block of listed.stdout.split("\0\0")) {
+    signal.throwIfAborted();
+    const fields = block.split("\0");
+    if (
+      fields.some((field) => field.startsWith("prunable")) ||
+      fields.includes("bare")
+    )
+      continue;
+    const checkout = fields
+      .find((field) => field.startsWith("worktree "))
+      ?.slice(9);
+    const branch = fields
+      .find((field) => field.startsWith("branch refs/heads/"))
+      ?.slice(18);
+    if (!checkout || !isDefaultBranch(branch, defaultBranch, patterns))
+      continue;
+    try {
+      const path = await realpath(checkout);
+      const directory = requireSuccess(
+        await git(
+          path,
+          ["rev-parse", "--path-format=absolute", "--git-dir"],
+          timeoutMs,
+          signal,
+        ),
+        "Could not resolve worktree",
+      ).stdout.trim();
+      const expectedGitDirectory = await realpath(directory);
+      await withCheckout(path, expectedGitDirectory, () =>
+        updateBaseBranchAfterFetch(
+          path,
+          branch!,
+          timeoutMs,
+          signal,
+          expectedOrigin,
+          expectedGitDirectory,
+        ),
+      );
+    } catch (error) {
+      if (signal.aborted) throw error;
+      // An unavailable checkout must not prevent maintenance of other defaults.
+    }
   }
 }
 
@@ -550,57 +666,43 @@ export const fetchCodebase: AgentJobHandler = async (
     if (error instanceof InterruptedGitInspection) return error.result;
     throw error;
   }
-  if (
-    result.exitCode === 0 &&
-    input.keepBaseBranchUpToDate &&
-    input.baseBranch
-  ) {
-    await log("Updating the base branch where it can be fast-forwarded");
-    const update = () =>
-      updateBaseBranchAfterFetch(
-        input.folder,
-        input.baseBranch!,
-        timeoutMs,
-        signal,
-      );
-    const gitDirectory = requireSuccess(
-      await git(
-        input.folder,
-        ["rev-parse", "--path-format=absolute", "--git-dir"],
-        timeoutMs,
-        signal,
-      ),
-      "Could not resolve base worktree",
-    ).stdout.trim();
-    const grant = context?.tryWithOperationResources
-      ? await context.tryWithOperationResources(
-          [
-            {
-              kind: "WORKTREE",
-              key: `${context.agentId}:worktree:${await realpath(gitDirectory)}`,
-              agentId: context.agentId,
-              codebaseId: input.codebaseId,
-              mode: "WRITE",
-            },
-            {
-              kind: "PATH",
-              key: input.folder,
-              path: input.folder,
-              agentId: context.agentId,
-              codebaseId: input.codebaseId,
-              mode: "WRITE",
-            },
-          ],
-          update,
-        )
-      : { ran: true as const, result: await update() };
-    const updated = grant.ran && grant.result;
+  if (result.exitCode === 0 && input.keepBaseBranchUpToDate) {
     await log(
-      updated
-        ? "Base branch updated"
-        : "Base branch left unchanged because it could not be safely fast-forwarded",
+      "Updating clean default branch worktrees from their matching origin branches",
+    );
+    await updateDefaultBranchesAfterFetch(
+      input.folder,
+      input.baseBranch ?? null,
+      input.defaultBranchPatterns ?? [],
+      timeoutMs,
+      signal,
+      (folder, gitDirectory, update) =>
+        context?.tryWithOperationResources
+          ? context.tryWithOperationResources(
+              [
+                {
+                  kind: "WORKTREE",
+                  key: `${context.agentId}:worktree:${gitDirectory}`,
+                  agentId: context.agentId,
+                  codebaseId: input.codebaseId,
+                  mode: "WRITE",
+                },
+                {
+                  kind: "PATH",
+                  key: folder,
+                  path: folder,
+                  agentId: context.agentId,
+                  codebaseId: input.codebaseId,
+                  mode: "WRITE",
+                },
+              ],
+              update,
+            )
+          : update(),
+      input.expectedOrigin,
     );
   }
+
   const afterResult = await inspectCodebaseProcess(
     input.folder,
     Math.min(timeoutMs, 30_000),

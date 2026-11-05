@@ -69,6 +69,46 @@ afterEach(async () => {
 });
 
 describe("GitLab merge options", () => {
+  test("shows a Jira activation warning while keeping successful auto merge enabled", async () => {
+    const warning = "Auto merge is enabled, but Jira requires a Comment";
+    const onOpenChange = vi.fn();
+    request.mockImplementation(async (query) =>
+      query.includes("query GitLabMergeRequestMergeOptions")
+        ? ({
+            gitlabMergeRequestMergeOptions: { ...options, canMerge: false },
+          } as never)
+        : ({
+            submitGitLabMergeRequestMerge: {
+              mergeRequest: {
+                ...target,
+                state: "OPENED",
+                mergeWhenPipelineSucceeds: false,
+              },
+              operation: {
+                ...operation,
+                state: "WAITING_REQUIREMENTS",
+                mergeConfirmedAt: null,
+                lastError: null,
+              },
+              postMergeError: null,
+              ticketTransitionError: warning,
+            },
+          } as never),
+    );
+    render(
+      <MergeRequestDialog
+        mergeRequest={target}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Enable auto-merge" }),
+    );
+    expect(await screen.findByText(warning)).toBeDefined();
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
   test("queues branch syncing when a rebase blocks native auto-merge", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("query GitLabMergeRequestMergeOptions"))

@@ -11,7 +11,7 @@ import type {
 } from "./graphql-client.js";
 import {
   inspectCodebase,
-  updateBaseBranchAfterFetch,
+  updateDefaultBranchesAfterFetch,
 } from "./handlers/codebases.js";
 import { discoverWorktrees } from "./handlers/worktrees.js";
 import { captureCommand } from "./capture-command.js";
@@ -171,26 +171,51 @@ export class CodebaseMonitor {
                   signal,
                 );
                 if (fetchResult.exitCode === 0) {
-                  if (
-                    codebase.keepBaseBranchUpToDate &&
-                    codebase.defaultBranch
-                  ) {
-                    const baseBranch = codebase.defaultBranch;
-                    await runExclusive(() =>
-                      updateBaseBranchAfterFetch(
-                        codebase.folder,
-                        baseBranch,
-                        INSPECTION_TIMEOUT_MS,
-                        signal,
-                      ),
-                    );
-                  }
                   snapshot = await this.inspectRoot(codebase, signal);
                 } else {
                   fetchError = (fetchResult.stderr || "Git fetch failed")
                     .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1")
                     .slice(0, 2_000);
                 }
+              }
+              if (
+                snapshot.availability === "AVAILABLE" &&
+                codebase.keepBaseBranchUpToDate &&
+                !signal.aborted
+              ) {
+                await updateDefaultBranchesAfterFetch(
+                  codebase.folder,
+                  codebase.defaultBranch,
+                  codebase.defaultBranchPatterns ?? [],
+                  INSPECTION_TIMEOUT_MS,
+                  signal,
+                  (folder, gitDirectory, update) =>
+                    this.agentId
+                      ? this.repositoryCoordinator.tryWithResources(
+                          [
+                            {
+                              kind: "WORKTREE",
+                              key: `${this.agentId}:worktree:${gitDirectory}`,
+                              agentId: this.agentId,
+                              codebaseId: codebase.id,
+                              mode: "WRITE",
+                            },
+                            {
+                              kind: "PATH",
+                              key: folder,
+                              path: folder,
+                              agentId: this.agentId,
+                              codebaseId: codebase.id,
+                              mode: "WRITE",
+                            },
+                          ],
+                          update,
+                          signal,
+                        )
+                      : runExclusive(update),
+                  codebase.canonicalOrigin,
+                );
+                snapshot = await this.inspectRoot(codebase, signal);
               }
               let inventory: Omit<
                 CodebaseWorktreeReport,

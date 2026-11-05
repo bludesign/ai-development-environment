@@ -5,6 +5,9 @@ import { randomUUID } from "node:crypto";
 import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import {
   CODEBASE_BROWSE_JOB_KIND,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+  normalizeDefaultBranchPatterns,
+  parseDefaultBranchPatterns,
   CODEBASE_BRANCHES_DELETE_JOB_KIND,
   DEFAULT_CODEBASE_RECONCILE_INTERVAL_SECONDS,
   CODEBASE_FETCH_JOB_KIND,
@@ -44,6 +47,7 @@ import {
   agentOnlineWindowMs,
   AgentControlService,
   CODEBASE_CHANGED_TOPIC,
+  WORKTREE_CHANGED_TOPIC,
   agentEventBus,
   agentJobChangedTopic,
 } from "@/services/agent-control";
@@ -313,12 +317,14 @@ export class CodebasesService {
         id: true,
         folder: true,
         defaultBranch: true,
+        agent: { select: { capabilitiesJson: true } },
         lastFetchedAt: true,
         lastFetchAttemptAt: true,
         repository: {
           select: {
             canonicalOrigin: true,
             keepBaseBranchUpToDate: true,
+            defaultBranchPatternsJson: true,
           },
         },
         worktrees: {
@@ -594,6 +600,7 @@ export class CodebasesService {
     jiraBranchRegexValue?: string | null,
     keepBaseBranchUpToDate = true,
     skillGroupIds?: string[] | null,
+    defaultBranchPatterns?: string[] | null,
   ) {
     const name = nameValue.trim();
     const description = descriptionValue.trim();
@@ -622,12 +629,29 @@ export class CodebasesService {
         description,
         jiraBranchRegex,
         keepBaseBranchUpToDate,
+        ...(defaultBranchPatterns == null
+          ? {}
+          : {
+              defaultBranchPatternsJson: JSON.stringify(
+                normalizeDefaultBranchPatterns(defaultBranchPatterns),
+              ),
+            }),
       },
     });
     if (validatedSkillGroupIds) {
       await this.skillsService?.setRepositoryGroups(id, validatedSkillGroupIds);
     }
     this.publish(null, id);
+    agentEventBus.publish(WORKTREE_CHANGED_TOPIC, {
+      worktreeOverviewChanged: { worktreeId: null, codebaseId: null },
+    });
+    const checkouts = await prisma.codebase.findMany({
+      where: { repositoryId: id },
+      select: { agentId: true },
+    });
+    await this.agentControl.requestCodebaseReconcile(
+      checkouts.map((checkout) => checkout.agentId),
+    );
     return repository;
   }
 
@@ -901,7 +925,19 @@ export class CodebasesService {
               ...(kind === CODEBASE_FETCH_JOB_KIND
                 ? {
                     keepBaseBranchUpToDate:
-                      codebase.repository.keepBaseBranchUpToDate,
+                      codebase.repository.keepBaseBranchUpToDate &&
+                      capabilities(codebase.agent).includes(
+                        CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+                      ),
+                    ...(capabilities(codebase.agent).includes(
+                      CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+                    )
+                      ? {
+                          defaultBranchPatterns: parseDefaultBranchPatterns(
+                            codebase.repository.defaultBranchPatternsJson,
+                          ),
+                        }
+                      : {}),
                   }
                 : {}),
             },

@@ -123,6 +123,7 @@ function setup() {
   };
   const jira = {
     transitionTicketToConfiguredDone: vi.fn().mockResolvedValue(undefined),
+    transitionTicketToConfiguredAutoMerge: vi.fn().mockResolvedValue(null),
   };
   const worktrees = {
     publishAutomationChange: vi.fn(),
@@ -534,4 +535,46 @@ test("rechecks a merge racing with automatic cancellation after a new head is de
   expect(gitlab.cancelAutoMergeDirect).toHaveBeenCalledOnce();
   expect(database.row?.state).toBe("COMPLETED");
   expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledOnce();
+});
+
+test("transitions a worktree ticket on managed auto merge activation once and returns optional Jira warnings", async () => {
+  const { service, gitlab, jira } = setup();
+  gitlab.mergeRequestState.mockResolvedValue({ ...mr });
+  vi.mocked(service.options).mockResolvedValue({
+    ...options,
+    worktreeId: "w1",
+  });
+  jira.transitionTicketToConfiguredAutoMerge.mockRejectedValueOnce(
+    new Error("Complete required field: Comment"),
+  );
+  const result = await service.submit({ ...input, autoMerge: true });
+  expect(result.operation?.state).toBe("WAITING_REQUIREMENTS");
+  expect(result.ticketTransitionError).toContain("Auto merge is enabled");
+  expect(jira.transitionTicketToConfiguredAutoMerge).toHaveBeenCalledWith(
+    "AIDE-145",
+  );
+  await service.submit({ ...input, autoMerge: true });
+  expect(jira.transitionTicketToConfiguredAutoMerge).toHaveBeenCalledOnce();
+  expect(gitlab.mergeMergeRequestDirect).not.toHaveBeenCalled();
+});
+
+test("default branch classification cancels managed auto merge before provider submission", async () => {
+  const { service, gitlab, jira } = setup();
+  gitlab.mergeRequestState.mockResolvedValue({ ...mr });
+  vi.mocked(service.options).mockResolvedValue({
+    ...options,
+    worktreeId: "w1",
+  });
+  await service.submit({ ...input, autoMerge: true });
+  database.worktree.findUnique.mockResolvedValue({
+    branch: mr.sourceBranch,
+    codebase: {
+      defaultBranch: "main",
+      repository: { defaultBranchPatternsJson: '["feature/*"]' },
+    },
+  });
+  await service.reconcile();
+  expect(database.row).toMatchObject({ state: "CANCELED", autoMerge: false });
+  expect(gitlab.mergeMergeRequestDirect).not.toHaveBeenCalled();
+  expect(jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
 });

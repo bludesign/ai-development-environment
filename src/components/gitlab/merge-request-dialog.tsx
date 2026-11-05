@@ -47,7 +47,7 @@ const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} projectId iid title state s
   canRemoveSourceBranch canMerge canAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
   defaultMoveTicketToDone defaultDeleteWorktree operation { ${GITLAB_MERGE_OPERATION_FIELDS} }`;
-const RESULT_FIELDS = `mergeRequest { ${GITLAB_MERGE_REQUEST_FIELDS} } operation { ${GITLAB_MERGE_OPERATION_FIELDS} } postMergeError`;
+const RESULT_FIELDS = `mergeRequest { ${GITLAB_MERGE_REQUEST_FIELDS} } operation { ${GITLAB_MERGE_OPERATION_FIELDS} } postMergeError ticketTransitionError`;
 
 export function MergeRequestDialog({
   mergeRequest,
@@ -240,7 +240,11 @@ export function MergeRequestDialog({
       }
       setResult(next);
       await onMerged?.(next.mergeRequest);
-      if (!next.postMergeError && next.operation?.state !== "ACTION_REQUIRED")
+      if (
+        !next.postMergeError &&
+        !next.ticketTransitionError &&
+        next.operation?.state !== "ACTION_REQUIRED"
+      )
         onOpenChange(false);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -298,11 +302,17 @@ export function MergeRequestDialog({
                 {options.sourceBranch} → {options.targetBranch} ·{" "}
                 {options.sha.slice(0, 8)}
               </p>
-              {(result?.postMergeError || operation?.lastError) && (
+              {(result?.postMergeError ||
+                result?.ticketTransitionError ||
+                operation?.lastError) && (
                 <Alert variant="destructive">
                   <AlertDescription>
                     {confirmed && <p>{t("mergeFollowUpFailed")}</p>}
-                    <p>{result?.postMergeError ?? operation?.lastError}</p>
+                    <p>
+                      {result?.postMergeError ??
+                        result?.ticketTransitionError ??
+                        operation?.lastError}
+                    </p>
                   </AlertDescription>
                 </Alert>
               )}

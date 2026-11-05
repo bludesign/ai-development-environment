@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     completedStatusIdsJson: '["done"]',
     excludedStatusIdsJson: '["backlog"]',
     doneStatusId: null,
+    autoMergeStatusId: null as string | null,
     inReviewStatusId: null as string | null,
     branchNamingScript: null,
     sources: [],
@@ -35,6 +36,7 @@ import type { JiraTicketBoard, JiraTicketSummary } from "./types";
 beforeEach(() => {
   vi.restoreAllMocks();
   mocks.project.inReviewStatusId = null;
+  mocks.project.autoMergeStatusId = null;
   mocks.update.mockClear();
   mocks.project.excludedStatusIdsJson = '["backlog"]';
   mocks.update.mockImplementation(async ({ data }) =>
@@ -186,6 +188,58 @@ describe("Jira reviewer assignment status", () => {
           inReviewStatusId: "   ",
         })
       )[0].inReviewStatusId,
+    ).toBeNull();
+  });
+});
+
+describe("Jira auto merge status", () => {
+  test("validates, trims, saves, preserves omission, and clears the auto merge status", async () => {
+    const service = new JiraService();
+    const statuses = vi
+      .spyOn(service, "projectStatuses")
+      .mockResolvedValue([
+        { id: "review", name: "In review", category: "indeterminate" },
+      ]);
+    const input = {
+      projectId: "p",
+      ticketAssignmentFilter: "ALL" as const,
+      hideCompletedTickets: false,
+      completedStatusIds: [],
+    };
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          autoMergeStatusId: " review ",
+        })
+      )[0].autoMergeStatusId,
+    ).toBe("review");
+    expect(statuses).toHaveBeenCalledWith("p");
+    expect(
+      (await service.updateProjectDisplaySettings(input))[0].autoMergeStatusId,
+    ).toBe("review");
+    await expect(
+      service.updateProjectDisplaySettings({
+        ...input,
+        autoMergeStatusId: "removed",
+      }),
+    ).rejects.toThrow("auto merge status is not available");
+    expect(mocks.update).toHaveBeenCalledTimes(2);
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          autoMergeStatusId: null,
+        })
+      )[0].autoMergeStatusId,
+    ).toBeNull();
+    expect(
+      (
+        await service.updateProjectDisplaySettings({
+          ...input,
+          autoMergeStatusId: "   ",
+        })
+      )[0].autoMergeStatusId,
     ).toBeNull();
   });
 });

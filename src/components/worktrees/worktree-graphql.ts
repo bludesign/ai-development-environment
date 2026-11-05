@@ -16,7 +16,7 @@ export const GITLAB_PIPELINE_STATUS_FIELDS = `
 `;
 
 const worktreeFields = (pipelineFields: string) => `
-  id canAssignReviewers codebaseId gitDirectory folder relativePath primary branch headSha upstream ahead behind syncState
+  id canAssignReviewers codebaseId gitDirectory folder relativePath primary branch isDefaultBranch defaultBranchUpdateEnabled defaultBranchUpdatePaused headSha upstream ahead behind syncState
   baseBranch baseBranchOverride baseAhead baseBehind hasStagedChanges hasUnstagedChanges rebaseInProgress hasConflicts highlightColor availability statusError
   pushStatus
   ticketKey ticketTitle ticketStatus lastCheckedAt missingAt createdAt updatedAt

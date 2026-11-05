@@ -1,3 +1,4 @@
+import { isDefaultWorktreeBranch } from "@/lib/default-branches";
 import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
@@ -8,7 +9,10 @@ import {
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 
-import { parseCodebaseGitState } from "@ai-development-environment/agent-contract/codebases";
+import {
+  parseCodebaseGitState,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+} from "@ai-development-environment/agent-contract/codebases";
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   parseCodebaseWorktreeReport,
@@ -1019,8 +1023,33 @@ export class WorktreesService {
       associationMatches && worktree.gitLabMergeRequest
         ? storedGitLabMergeRequestView(worktree.gitLabMergeRequest)
         : null;
+    const isDefaultBranch = isDefaultWorktreeBranch(worktree);
+    const defaultBranchUpdateEnabled =
+      isDefaultBranch &&
+      worktree.codebase.repository.keepBaseBranchUpToDate &&
+      capabilities(worktree.codebase.agent).includes(
+        CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+      );
+    const defaultBranchUpdatePaused = Boolean(
+      defaultBranchUpdateEnabled &&
+      (worktree.hasStagedChanges ||
+        worktree.hasUnstagedChanges ||
+        worktree.hasConflicts ||
+        worktree.rebaseInProgress ||
+        worktree.pushStatus === "DIVERGED" ||
+        worktree.availability !== "AVAILABLE" ||
+        worktree.codebase.availability !== "AVAILABLE" ||
+        worktree.missingAt ||
+        !online(worktree.codebase.agent) ||
+        !parseBranches(worktree.codebase.remoteBranchesJson).includes(
+          worktree.branch!,
+        )),
+    );
     return {
       ...worktree,
+      isDefaultBranch,
+      defaultBranchUpdateEnabled,
+      defaultBranchUpdatePaused,
       relativePath: worktreeDisplayPath(
         worktree.folder,
         worktree.codebase.agent.baseRepoDirectory,
@@ -2678,7 +2707,7 @@ export class WorktreesService {
     ]);
     if (expectedBranch !== undefined && worktree?.branch !== expectedBranch) {
       throw new Error(
-        "The worktree branch changed after reviewers were assigned. Open the original Jira ticket to update its status.",
+        "The worktree branch changed. Open the original Jira ticket to update its status.",
       );
     }
     if (!worktree) return null;
@@ -3727,6 +3756,8 @@ export class WorktreesService {
           "A build is active for this codebase; update the agent for worktree-scoped concurrency",
         );
     }
+    if (isDefaultWorktreeBranch(worktree))
+      throw new Error("Default branches cannot use Auto Sync");
     const payload = this.payload(worktree);
     if (
       mergeGuard &&

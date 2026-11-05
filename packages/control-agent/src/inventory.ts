@@ -14,6 +14,7 @@ import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contr
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
 import {
   CODEBASE_JOB_KINDS,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
@@ -44,6 +45,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
   CCUSAGE_REPORT_JOB_KIND,
   ...CODEBASE_JOB_KINDS,
   CODEBASE_RECONCILE_EVENT_CAPABILITY,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
   ...WORKTREE_JOB_KINDS,
   WORKTREE_REVIEWED_SYNC_CAPABILITY,
   ...SKILL_JOB_KINDS,

@@ -199,6 +199,7 @@ export type AgentCodebaseRegistration = {
   canonicalOrigin: string;
   defaultBranch: string | null;
   keepBaseBranchUpToDate: boolean;
+  defaultBranchPatterns?: string[];
   lastFetchedAt: string | null;
   lastFetchAttemptAt: string | null;
   worktrees: Array<{
@@ -1212,14 +1213,30 @@ export class AgentGraphQLClient {
     return this.request<{ health: string }>(`query Health { health }`);
   }
 
+  private async requestDefaultBranchConfiguration<T>(
+    query: string,
+  ): Promise<T> {
+    try {
+      return await this.request<T>(query);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !/Cannot query field "defaultBranchPatterns"/.test(error.message)
+      )
+        throw error;
+      return this.request<T>(query.replace(/\sdefaultBranchPatterns\b/g, ""));
+    }
+  }
+
   async agentCodebases(): Promise<AgentCodebaseRegistration[]> {
-    const data = await this.request<{
+    const data = await this.requestDefaultBranchConfiguration<{
       agentCodebases: Array<{
         id: string;
         folder: string;
         canonicalOrigin: string;
         defaultBranch: string | null;
         keepBaseBranchUpToDate: boolean;
+        defaultBranchPatterns?: string[];
         lastFetchedAt: string | null;
         lastFetchAttemptAt: string | null;
         worktrees: Array<{
@@ -1232,7 +1249,7 @@ export class AgentGraphQLClient {
       }>;
     }>(`query AgentCodebases {
       agentCodebases {
-        id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
+        id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate defaultBranchPatterns lastFetchedAt lastFetchAttemptAt
         worktrees { id folder branch gitDirectory baseBranchOverride }
       }
     }`);
@@ -1240,14 +1257,14 @@ export class AgentGraphQLClient {
   }
 
   async agentCodebaseConfiguration(): Promise<AgentCodebaseConfiguration> {
-    const data = await this.request<{
+    const data = await this.requestDefaultBranchConfiguration<{
       agentCodebaseConfiguration: AgentCodebaseConfiguration;
     }>(`query AgentCodebaseConfiguration {
       agentCodebaseConfiguration {
         refreshIntervalSeconds
         fetchIntervalSeconds
         codebases {
-          id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate lastFetchedAt lastFetchAttemptAt
+          id folder canonicalOrigin defaultBranch keepBaseBranchUpToDate defaultBranchPatterns lastFetchedAt lastFetchAttemptAt
           worktrees { id folder branch gitDirectory baseBranchOverride }
         }
       }

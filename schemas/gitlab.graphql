@@ -1335,6 +1335,8 @@ type GitLabMergeOptions {
 
 "Merge outcome is separate from deferred follow-up errors."
 type GitLabMergeResult {
+  "Jira transition warning returned after activation; auto merge remains enabled."
+  ticketTransitionError: String
   "Fresh provider merge-request state after the requested action."
   mergeRequest: GitLabMergeRequest!
   "Persisted merge intent and follow-up outcome, when available."
