@@ -1949,7 +1949,7 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
       <CardContent className="flex flex-col gap-4">
         <WorktreeMetadata
           {...liveProps}
-          showPullRequest={false}
+          showPullRequest={!isDefault}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
         />
