@@ -208,6 +208,57 @@ describe("GitLab merge options", () => {
     ).toHaveLength(1);
   });
 
+  test("keeps a background merge confirmed when reopened options arrive after completion", async () => {
+    let finishMerge!: (value: unknown) => void;
+    const pendingMerge = new Promise((resolve) => {
+      finishMerge = resolve;
+    });
+    let finishOptions!: (value: unknown) => void;
+    const pendingOptions = new Promise((resolve) => {
+      finishOptions = resolve;
+    });
+    let optionsRequests = 0;
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions")) {
+        optionsRequests++;
+        return optionsRequests === 1
+          ? ({ gitlabMergeRequestMergeOptions: options } as never)
+          : ((await pendingOptions) as never);
+      }
+      return (await pendingMerge) as never;
+    });
+    const original = show();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    original.unmount();
+    show();
+    await waitFor(() => expect(optionsRequests).toBe(2));
+
+    await act(async () =>
+      finishMerge({
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: { ...target, state: "MERGED" },
+          operation: null,
+          postMergeError: null,
+          ticketTransitionError: null,
+        },
+      }),
+    );
+    await act(async () =>
+      finishOptions({ gitlabMergeRequestMergeOptions: options }),
+    );
+
+    expect(screen.getByText("Merge completed")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation SubmitGitLabMergeRequestMerge"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("does not dismiss a different request when an earlier background merge completes", async () => {
     let finishMerge!: (value: unknown) => void;
     const pendingMerge = new Promise((resolve) => {

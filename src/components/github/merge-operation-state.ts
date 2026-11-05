@@ -83,9 +83,22 @@ export function reportMergeOperationError(
     publish(key, { ...state, error });
 }
 
-export function clearMergeOperation(key: string, preserveError = false) {
-  const current = operations.get(key);
-  if (current?.pending || (preserveError && current?.error)) return;
+export function getMergeOperationSnapshot(key: string): MergeOperationState {
+  return operations.get(key) ?? EMPTY;
+}
+
+export function clearMergeOperation(
+  key: string,
+  preserveError = false,
+  expectedSnapshot = getMergeOperationSnapshot(key),
+) {
+  const current = getMergeOperationSnapshot(key);
+  if (
+    current !== expectedSnapshot ||
+    current.pending ||
+    (preserveError && current.error)
+  )
+    return;
   operations.delete(key);
   listeners.get(key)?.forEach((listener) => listener());
   publishErrors();
@@ -104,7 +117,7 @@ export function useMergeOperation<T>(key: string): MergeOperationState<T> {
     },
     [key],
   );
-  const snapshot = useCallback(() => operations.get(key) ?? EMPTY, [key]);
+  const snapshot = useCallback(() => getMergeOperationSnapshot(key), [key]);
   return useSyncExternalStore(
     subscribe,
     snapshot,

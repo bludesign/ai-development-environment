@@ -45,6 +45,7 @@ import {
 
 import {
   clearMergeOperation,
+  getMergeOperationSnapshot,
   gitlabMergeOperationKey,
   reportMergeOperationError,
   runMergeOperation,
@@ -107,6 +108,7 @@ export function MergeRequestDialog({
   const load = useCallback(
     async (replaceOutcome = false) => {
       const current = ++generation.current;
+      const operationAtLoad = getMergeOperationSnapshot(operationKey);
       setLoading(true);
       setError(null);
       try {
@@ -125,7 +127,7 @@ export function MergeRequestDialog({
         if (generation.current !== current) return;
         const next = data.gitlabMergeRequestMergeOptions;
         setLoadedOptions({ key: operationKey, value: next });
-        clearMergeOperation(operationKey, !replaceOutcome);
+        clearMergeOperation(operationKey, !replaceOutcome, operationAtLoad);
         setAutoSync(next.defaultAutoSync ?? false);
         setSelectedWorktreeIds(
           next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
