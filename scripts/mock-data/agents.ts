@@ -37,6 +37,7 @@ const AGENT_CAPABILITIES = [
   "codebase.inspect",
   "codebase.refresh",
   "codebase.fetch",
+  "codebase.default-branches.v1",
   "codebase.clone",
   "codebase.clone.inspect",
   "codebase.git.operation",

@@ -47,6 +47,7 @@ export type CodebaseRepository = {
   name: string;
   description: string;
   jiraBranchRegex: string | null;
+  defaultBranchPatterns?: string[];
   keepBaseBranchUpToDate: boolean;
   preparations?: RepositoryPreparation[];
   skillGroups?: Array<{ id: string; name: string }>;

@@ -42,6 +42,7 @@ export type JiraProjectView = JiraBranchNamingSettings & {
   completedStatusIds: string[];
   excludedStatusIds: string[];
   doneStatusId: string | null;
+  autoMergeStatusId?: string | null;
   inReviewStatusId?: string | null;
   defaultResolutionId?: string | null;
   branchNamingScript: string;

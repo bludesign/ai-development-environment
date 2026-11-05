@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  isDefaultBranch,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+} from "@ai-development-environment/agent-contract/codebases";
+import type { Agent } from "@/components/agents/types";
 
 import { createClientId } from "@/lib/browser-utils";
 import {
@@ -9,7 +14,7 @@ import {
 } from "@/lib/control-plane-client";
 
 import { INSPECT_WORKTREE_MUTATION } from "./worktree-graphql";
-import type { Worktree, WorktreeDetail } from "./types";
+import type { Worktree, WorktreeDetail, WorktreeCodebaseGroup } from "./types";
 
 const LIVE_INSPECTION_RETRY_MS = 1_000;
 
@@ -83,7 +88,11 @@ type LiveWorktreeFields = Pick<
   | "pushStatus"
 >;
 
-export function useLiveWorktree(source: Worktree) {
+export function useLiveWorktree(
+  source: Worktree,
+  group?: WorktreeCodebaseGroup,
+  agent?: Pick<Agent, "capabilities" | "connectionStatus">,
+) {
   const [override, setOverride] = useState<{
     sourceUpdatedAt: string;
     value: Partial<LiveWorktreeFields>;
@@ -132,11 +141,47 @@ export function useLiveWorktree(source: Worktree) {
     },
     [applyOverride],
   );
+  let liveWorktree =
+    override?.sourceUpdatedAt === source.updatedAt
+      ? { ...source, ...override.value }
+      : source;
+  // A live branch/status report can precede the authoritative overview refresh.
+  if (liveWorktree !== source && group) {
+    const defaultBranch = isDefaultBranch(
+      liveWorktree.branch,
+      group.codebase.defaultBranch,
+      group.repository.defaultBranchPatterns ?? [],
+    );
+    const defaultBranchUpdateEnabled = Boolean(
+      defaultBranch &&
+      group.repository.keepBaseBranchUpToDate &&
+      (agent
+        ? agent.capabilities.includes(CODEBASE_DEFAULT_BRANCHES_CAPABILITY)
+        : source.defaultBranchUpdateEnabled),
+    );
+    const defaultBranchUpdatePaused = Boolean(
+      defaultBranchUpdateEnabled &&
+      (liveWorktree.hasStagedChanges ||
+        liveWorktree.hasUnstagedChanges ||
+        liveWorktree.hasConflicts ||
+        liveWorktree.rebaseInProgress ||
+        liveWorktree.pushStatus === "DIVERGED" ||
+        liveWorktree.availability !== "AVAILABLE" ||
+        liveWorktree.missingAt ||
+        group.codebase.availability !== "AVAILABLE" ||
+        (agent && agent.connectionStatus !== "ONLINE") ||
+        (Array.isArray(group.codebase.remoteBranches) &&
+          !group.codebase.remoteBranches.includes(liveWorktree.branch ?? ""))),
+    );
+    liveWorktree = {
+      ...liveWorktree,
+      isDefaultBranch: defaultBranch,
+      defaultBranchUpdateEnabled,
+      defaultBranchUpdatePaused,
+    };
+  }
   return {
-    worktree:
-      override?.sourceUpdatedAt === source.updatedAt
-        ? { ...source, ...override.value }
-        : source,
+    worktree: liveWorktree,
     applyActivity,
     setUnstagedChanges: useCallback(
       (value: boolean) => applyOverride({ hasUnstagedChanges: value }),

@@ -1,5 +1,19 @@
 import type { JiraService } from "@/services/jira";
 
+/** An optional Jira status follow-up must not undo successful auto merge activation. */
+export async function autoMergeTicketTransitionWarning(
+  jira: JiraService,
+  ticketKey: string | null,
+): Promise<string | null> {
+  if (!ticketKey) return null;
+  try {
+    await jira.transitionTicketToConfiguredAutoMerge(ticketKey);
+    return null;
+  } catch (error) {
+    return `Auto merge is enabled, but the Jira ticket status could not be updated: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 export function validateMergeFollowUps(
   input: { deleteWorktree?: boolean | null; moveTicketToDone?: boolean | null },
   options: {

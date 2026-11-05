@@ -383,6 +383,7 @@ export const createJiraResolvers = (
               completedStatusIds: string[];
               excludedStatusIds?: string[] | null;
               doneStatusId?: string | null;
+              autoMergeStatusId?: string | null;
               inReviewStatusId?: string | null;
               defaultResolutionId?: string | null;
             };

@@ -1850,9 +1850,12 @@
     "selectExcludedStatuses": "Auszuschließende Status auswählen",
     "excludedStatusesDescription": "In beiden Ansichten für dieses Projekt unter Alle Status ausgeblendet. Wählen Sie einen bestimmten Status im Filter, um seine Vorgänge anzuzeigen.",
     "completedStatuses": "Abgeschlossene Status",
-    "doneStatus": "Auto-Merge-Abschlussstatus",
+    "autoMergeStatus": "Status bei automatischem Merge",
+    "noAutoMergeStatus": "Deaktiviert",
+    "autoMergeStatusDescription": "Beim Aktivieren des automatischen Merges für einen Worktree wechselt das verknüpfte Jira-Ticket in diesen Status.",
+    "doneStatus": "Abschlussstatus bei automatischem Merge",
     "noDoneStatus": "Nicht konfiguriert",
-    "doneStatusDescription": "Auto Merge verschiebt verknüpfte Tickets nach dem GitHub-Merge in diesen Status.",
+    "doneStatusDescription": "Wenn in den Merge-Optionen ausgewählt, wechseln verknüpfte Tickets nach einem erfolgreichen manuellen oder automatischen Merge in diesen Status.",
     "inReviewStatus": "Ticketstatus für die Review",
     "noInReviewStatus": "Deaktiviert",
     "inReviewStatusDescription": "Wenn du einem Worktree Reviewer zuweist, wird das verknüpfte Jira-Ticket in diesen Status versetzt.",
@@ -3391,8 +3394,8 @@
     "noWorkflows": "Keine Workflows verfügbar.",
     "quickActionEligibility": "Konfigurierte Workflows bleiben im pausierten Zustand aufgeführt; Aktionen erscheinen nur, wenn sie veröffentlicht, aktiviert und der aktuellen Ressource zugeordnet sind.",
     "saveQuickActions": "Schnellaktionen speichern",
-    "keepBaseBranchUpToDate": "Basis-Branch aktuell halten",
-    "keepBaseBranchUpToDateHelp": "Nach einem erfolgreichen Abruf wird der Basis-Branch per Fast-Forward aktualisiert, wenn keine vorgemerkten Änderungen vorhanden sind. Diese Repository-Einstellung gilt für alle Agenten.",
+    "keepBaseBranchUpToDate": "Standard-Branches aktuell halten",
+    "keepBaseBranchUpToDateHelp": "Aktualisiert Worktrees der Standard-Branches per Fast-Forward aus dem gleichnamigen origin-Branch. Lokale Änderungen pausieren Updates, bis der Worktree sauber ist. Diese Einstellung gilt für alle Agenten.",
     "save": "Speichern",
     "remove": "Entfernen",
     "confirmRemoveTitle": "Registrierung der Codebasis entfernen?",
@@ -3475,7 +3478,9 @@
         "SKIPPED": "Übersprungen",
         "FAILED": "Fehlgeschlagen"
       }
-    }
+    },
+    "defaultBranchPatterns": "Muster für Standard-Branches",
+    "defaultBranchPatternsHelp": "Ein Branch-Name oder Muster pro Zeile, zum Beispiel release/*. Groß- und Kleinschreibung wird beachtet; * erfasst auch /. Der Remote-Standard-Branch ist immer enthalten."
   },
   "codebaseDetail": {
     "iosApp": "iOS-App",
@@ -3996,7 +4001,10 @@
       "cloneRepository": "Repository klonen",
       "inspectClone": "Klon prüfen",
       "inspectRepositoryGitState": "Git-Status des Repositorys prüfen"
-    }
+    },
+    "commitsBehindBase": "{count} Commits hinter der Basis",
+    "defaultBranchUpdateEnabled": "Aktuell halten",
+    "defaultBranchUpdatePaused": "Aktualisierung pausiert"
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",

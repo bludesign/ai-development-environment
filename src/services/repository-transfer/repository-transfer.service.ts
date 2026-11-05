@@ -2,7 +2,10 @@ import { validateTransferReferences } from "./integrity";
 import "server-only";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
+import {
+  normalizeGitOrigin,
+  normalizeDefaultBranchPatterns,
+} from "@ai-development-environment/agent-contract/codebases";
 import {
   parseBuildSource,
   parseBuildAdvancedSettings,
@@ -1691,6 +1694,12 @@ export class RepositoryTransferService {
         else if (!existing) f.name = nameSchema.parse(entity.name);
         if (Object.hasOwn(f, "description"))
           f.description = z.string().max(2000).parse(f.description);
+        if (Object.hasOwn(f, "defaultBranchPatternsJson"))
+          f.defaultBranchPatternsJson = JSON.stringify(
+            normalizeDefaultBranchPatterns(
+              JSON.parse(z.string().parse(f.defaultBranchPatternsJson)),
+            ),
+          );
         if (Object.hasOwn(f, "keepBaseBranchUpToDate"))
           f.keepBaseBranchUpToDate = z
             .boolean()

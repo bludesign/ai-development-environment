@@ -1216,9 +1216,12 @@ const mockTranslations = {
     skillGroupsHelp:
       "Choose the project skill groups synchronized into every checkout and worktree for this repository.",
     noSkillGroups: "No skill groups are available.",
-    keepBaseBranchUpToDate: "Keep base branch up to date",
-    keepBaseBranchUpToDateHelp:
-      "After a successful fetch, fast-forward the base branch when there are no staged changes. This repository setting applies to every agent.",
+    keepBaseBranchUpToDate: "Keep default branches up to date",
+    defaultBranchPatterns: "Default branch matches",
+    defaultBranchPatternsHelp: require("../../messages/en.json").codebases
+      .defaultBranchPatternsHelp,
+    keepBaseBranchUpToDateHelp: require("../../messages/en.json").codebases
+      .keepBaseBranchUpToDateHelp,
     save: "Save",
     remove: "Remove",
     confirmRemoveTitle: "Remove codebase registration?",
@@ -1464,6 +1467,9 @@ const mockTranslations = {
     baseBehind: "{count} behind base",
     yes: "Yes",
     notUpToDate: "No · {count} commits behind base",
+    commitsBehindBase: "{count} commits behind base",
+    defaultBranchUpdateEnabled: "Keep up to date",
+    defaultBranchUpdatePaused: "Keep up to date paused",
     ahead: "{count} ahead",
     behind: "{count} behind",
     diverged: "Diverged",

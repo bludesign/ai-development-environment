@@ -10,6 +10,26 @@ function context(agentId: string | null): GraphQLContext {
 }
 
 describe("codebase Git management resolvers", () => {
+  test("disables maintenance for legacy agents while preserving repository settings", () => {
+    const resolvers = createCodebaseResolvers({} as CodebasesService);
+    const value = {
+      repository: {
+        keepBaseBranchUpToDate: true,
+        defaultBranchPatternsJson: '["release/*"]',
+      },
+      agent: { capabilitiesJson: "[]" },
+    };
+    expect(
+      resolvers.AgentCodebaseRegistration.keepBaseBranchUpToDate(value),
+    ).toBe(false);
+    value.agent.capabilitiesJson = '["codebase.default-branches.v1"]';
+    expect(
+      resolvers.AgentCodebaseRegistration.keepBaseBranchUpToDate(value),
+    ).toBe(true);
+    expect(
+      resolvers.AgentCodebaseRegistration.defaultBranchPatterns(value),
+    ).toEqual(["release/*"]);
+  });
   test("projects only source blockers on the primary checkout", () => {
     const resolvers = createCodebaseResolvers({} as CodebasesService);
     const target = {

@@ -63,6 +63,9 @@ for (const [scope, path, appId] of [
         group.blockingJob = null;
         const base = {
           ...group.worktrees[0],
+          isDefaultBranch: false,
+          defaultBranchUpdateEnabled: false,
+          defaultBranchUpdatePaused: false,
           baseBranch: "main",
           baseBehind: 3,
           availability: "AVAILABLE",

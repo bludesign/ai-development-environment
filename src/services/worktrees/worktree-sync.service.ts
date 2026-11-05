@@ -7,6 +7,7 @@ import {
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma, WorktreeSyncItem } from "@/generated/prisma/client";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
+import { isDefaultWorktreeBranch } from "@/lib/default-branches";
 import {
   agentOnlineWindowMs,
   type AgentControlService,
@@ -52,6 +53,8 @@ function capabilityList(value: string): string[] {
 }
 
 function blockReason(target: Target): string | null {
+  if (isDefaultWorktreeBranch(target))
+    return "Default branches are excluded from Bulk Sync";
   if (target.missingAt || target.availability !== "AVAILABLE")
     return "Worktree is unavailable";
   if (target.codebase.availability !== "AVAILABLE")
@@ -232,6 +235,10 @@ export class WorktreeSyncService {
     if (byId.size !== worktreeIds.length)
       throw new Error(
         "Some selected worktrees no longer exist or are outside the page scope",
+      );
+    if (targets.some(isDefaultWorktreeBranch))
+      throw new Error(
+        "Default branches cannot be selected for Bulk Sync; use the worktree's More menu",
       );
     const items = await Promise.all(
       worktreeIds.map(async (id, position) => {

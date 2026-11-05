@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 vi.mock("./handlers/codebases.js", () => ({
   inspectCodebase: vi.fn(),
   updateBaseBranchAfterFetch: vi.fn(),
+  updateDefaultBranchesAfterFetch: vi.fn(),
 }));
 vi.mock("./handlers/worktrees.js", () => ({ discoverWorktrees: vi.fn() }));
 vi.mock("./capture-command.js", () => ({ captureCommand: vi.fn() }));
@@ -21,6 +22,7 @@ import type { AgentGraphQLClient } from "./graphql-client.js";
 import {
   inspectCodebase,
   updateBaseBranchAfterFetch,
+  updateDefaultBranchesAfterFetch,
 } from "./handlers/codebases.js";
 import { discoverWorktrees } from "./handlers/worktrees.js";
 import { RepositoryCoordinator } from "./repository-coordinator.js";
@@ -51,6 +53,14 @@ const snapshot = {
 describe("CodebaseMonitor", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(updateDefaultBranchesAfterFetch).mockImplementation(
+      async (folder, branch, _patterns, timeoutMs, signal, withCheckout) => {
+        if (branch)
+          await withCheckout(folder, `${folder}/.git`, () =>
+            updateBaseBranchAfterFetch(folder, branch, timeoutMs, signal),
+          );
+      },
+    );
     discover.mockResolvedValue({
       complete: true,
       defaultBranch: "main",
@@ -175,7 +185,7 @@ describe("CodebaseMonitor", () => {
 
     await monitor.reconcile(new AbortController().signal);
 
-    expect(inspect).toHaveBeenCalledTimes(2);
+    expect(inspect).toHaveBeenCalledTimes(4);
     expect(monitor.reconcileIntervalMs).toBe(120_000);
     expect(client.reportCodebaseStatuses).toHaveBeenCalledWith([
       expect.objectContaining({

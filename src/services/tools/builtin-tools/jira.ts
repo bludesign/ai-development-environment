@@ -143,7 +143,7 @@ function createJiraAdministrationGroup(
         name: "update_jira_project_display_settings",
         title: "Update Jira project display settings",
         description:
-          "Set the assignment filter, completed statuses, done status, and reviewer-assignment in-review status for a Jira project.",
+          "Set the assignment filter, completed statuses, auto merge enabled and done statuses, and reviewer-assignment in-review status for a Jira project.",
         inputSchema: z.object({
           projectId: z.string().min(1),
           ticketAssignmentFilter: z.enum([
@@ -154,6 +154,7 @@ function createJiraAdministrationGroup(
           hideCompletedTickets: z.boolean(),
           completedStatusIds: z.array(z.string()),
           doneStatusId: z.string().nullable().optional(),
+          autoMergeStatusId: z.string().nullable().optional(),
           inReviewStatusId: z.string().nullable().optional(),
         }),
         service,

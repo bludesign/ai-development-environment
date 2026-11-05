@@ -53,7 +53,13 @@ describe("SystemStatusService", () => {
       $queryRaw: vi
         .fn()
         .mockResolvedValue([
-          { dirtyWorktrees: BigInt(7), offMainWorktrees: BigInt(8) },
+          {
+            branch: "feature",
+            defaultBranch: "main",
+            defaultBranchPatternsJson: "[]",
+            dirtyWorktrees: BigInt(7),
+            worktreeCount: BigInt(8),
+          },
         ]),
       sidebarUsageSummary: {
         findUnique: vi.fn().mockResolvedValue({

@@ -17,6 +17,7 @@ import {
   operateCodebaseGit,
   pullCodebaseBranch,
   updateBaseBranchAfterFetch,
+  updateDefaultBranchesAfterFetch,
 } from "./codebases.js";
 import type { AgentJobHandlerContext } from "./index.js";
 
@@ -225,6 +226,158 @@ describe("manual codebase fetch", () => {
 });
 
 describe("codebase Git inspection", () => {
+  test("maintains multiple checked-out defaults independently and resumes dirty checkouts", async () => {
+    const folder = await repository();
+    const { initialHead, remoteHead } = await advanceRemoteMain(folder);
+    const linked = `${folder}-release`;
+    const feature = `${folder}-feature`;
+    temporaryDirectories.push(linked, feature);
+    await git(
+      folder,
+      "worktree",
+      "add",
+      "-b",
+      "release/1",
+      linked,
+      initialHead,
+    );
+    await git(folder, "worktree", "add", "-b", "feature", feature, initialHead);
+    const releaseHead = (
+      await git(
+        folder,
+        "commit-tree",
+        `${initialHead}^{tree}`,
+        "-p",
+        initialHead,
+        "-m",
+        "Release remote commit",
+      )
+    ).stdout.trim();
+    await git(
+      folder,
+      "update-ref",
+      "refs/remotes/origin/release/1",
+      releaseHead,
+    );
+    // A differently named tracking/base branch must not control automatic maintenance.
+    await git(folder, "branch", "--set-upstream-to=origin/main", "release/1");
+    await git(folder, "update-ref", "refs/remotes/origin/feature", remoteHead);
+    await writeFile(join(linked, "untracked.txt"), "local changes");
+    const withCheckout = vi.fn(async (_folder, _directory, update) => update());
+    const update = () =>
+      updateDefaultBranchesAfterFetch(
+        folder,
+        "main",
+        ["release/*"],
+        10_000,
+        new AbortController().signal,
+        withCheckout,
+        "github.com/openai/codex",
+      );
+
+    await update();
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      remoteHead,
+    );
+    expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    expect((await git(feature, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    expect(withCheckout).toHaveBeenCalledTimes(2);
+
+    await rm(join(linked, "untracked.txt"));
+    await update();
+    expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      releaseHead,
+    );
+    expect((await git(feature, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    // The feature checkout must never cause its inactive local default ref to update.
+    await git(linked, "switch", "-c", "another-feature", initialHead);
+    await git(folder, "commit", "--allow-empty", "-m", "new remote revision");
+    const newest = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    await git(folder, "update-ref", "refs/remotes/origin/release/1", newest);
+    await update();
+    expect((await git(folder, "rev-parse", "release/1")).stdout.trim()).toBe(
+      releaseHead,
+    );
+  });
+
+  test("skips busy defaults without blocking another default checkout", async () => {
+    const folder = await repository();
+    const { initialHead, remoteHead } = await advanceRemoteMain(folder);
+    const linked = `${folder}-release`;
+    temporaryDirectories.push(linked);
+    await git(
+      folder,
+      "worktree",
+      "add",
+      "-b",
+      "release/1",
+      linked,
+      initialHead,
+    );
+    await git(
+      folder,
+      "update-ref",
+      "refs/remotes/origin/release/1",
+      remoteHead,
+    );
+    await updateDefaultBranchesAfterFetch(
+      folder,
+      "main",
+      ["release/*"],
+      10_000,
+      new AbortController().signal,
+      async (checkout, _directory, update) =>
+        checkout === (await realpath(folder)) ? { ran: false } : update(),
+    );
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    expect((await git(linked, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      remoteHead,
+    );
+  });
+
+  test("revalidates branch and Git directory after acquiring checkout resources", async () => {
+    const folder = await repository();
+    const { initialHead } = await advanceRemoteMain(folder);
+    await expect(
+      updateBaseBranchAfterFetch(
+        folder,
+        "main",
+        10_000,
+        new AbortController().signal,
+        undefined,
+        "/different/git-directory",
+      ),
+    ).resolves.toBe(false);
+    await updateDefaultBranchesAfterFetch(
+      folder,
+      "main",
+      [],
+      10_000,
+      new AbortController().signal,
+      async (_checkout, _directory, update) => {
+        await git(folder, "switch", "-c", "feature/switched");
+        return update();
+      },
+    );
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "feature/switched",
+    );
+    expect((await git(folder, "rev-parse", "HEAD")).stdout.trim()).toBe(
+      initialHead,
+    );
+    expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
+      initialHead,
+    );
+  });
+
   test("resolves a nested folder and reports a normalized origin", async () => {
     const folder = await repository();
     const nested = join(folder, "packages", "example");
@@ -345,9 +498,9 @@ describe("codebase Git inspection", () => {
     );
   });
 
-  test("updates an inactive base branch without switching branches", async () => {
+  test("leaves inactive default refs unchanged after switching to a feature branch", async () => {
     const folder = await repository();
-    const { initialHead, remoteHead } = await advanceRemoteMain(folder);
+    const { initialHead } = await advanceRemoteMain(folder);
     await git(folder, "checkout", "-b", "feature");
 
     await expect(
@@ -357,7 +510,7 @@ describe("codebase Git inspection", () => {
         10_000,
         new AbortController().signal,
       ),
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
 
     expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
       "feature",
@@ -366,7 +519,7 @@ describe("codebase Git inspection", () => {
       initialHead,
     );
     expect((await git(folder, "rev-parse", "main")).stdout.trim()).toBe(
-      remoteHead,
+      initialHead,
     );
   });
 

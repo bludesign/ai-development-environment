@@ -1,3 +1,4 @@
+import { parseDefaultBranchPatterns } from "@ai-development-environment/agent-contract/codebases";
 import * as z from "zod/v4";
 
 import { agentOnlineWindowMs } from "@/services/agent-control";
@@ -123,6 +124,7 @@ export const CodebaseRepositoryToolRecordSchema = z.object({
   displayOrigin: z.string(),
   jiraBranchRegex: z.string().nullable(),
   keepBaseBranchUpToDate: z.boolean(),
+  defaultBranchPatterns: z.array(z.string()),
   codebaseCount: z.number().int().nonnegative(),
   agentIds: z.array(z.string()),
   createdAt: z.string(),
@@ -343,6 +345,9 @@ export class CodebaseToolsService {
       displayOrigin: repository.displayOrigin,
       jiraBranchRegex: repository.jiraBranchRegex,
       keepBaseBranchUpToDate: repository.keepBaseBranchUpToDate,
+      defaultBranchPatterns: parseDefaultBranchPatterns(
+        repository.defaultBranchPatternsJson,
+      ),
       codebaseCount: repository.codebases.length,
       agentIds: [
         ...new Set(repository.codebases.map((codebase) => codebase.agentId)),

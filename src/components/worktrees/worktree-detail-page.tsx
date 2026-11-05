@@ -136,7 +136,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
             hasPlainTrigger(resourceKind: "WORKTREE")
             triggerChoices(resourceKind: "WORKTREE") { key label description }
           }
-        repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
+        repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
         codebase { ${CODEBASE_FIELDS} }
         worktrees { ${WORKTREE_FIELDS} }
       }
@@ -584,6 +584,8 @@ function LoadedWorktreeDetail({
   const detailRequest = useRef(0);
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     entry.worktree,
+    entry.group,
+    entry.agentGroup.agent,
   );
   useBreadcrumbLabel(
     ["dashboard", "worktrees", worktree.id],

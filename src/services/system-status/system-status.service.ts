@@ -2,6 +2,10 @@ import { SETTLED_AGENT_JOB_WHERE } from "@/services/agent-control/job-cleanup";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import {
+  isDefaultBranch,
+  parseDefaultBranchPatterns,
+} from "@ai-development-environment/agent-contract/codebases";
 
 import {
   CCUSAGE_REPORT_JOB_KIND,
@@ -319,17 +323,40 @@ export class SystemStatusService {
       this.integrations?.counts() ?? Promise.resolve(EMPTY_INTEGRATION_COUNTS),
       settings.showWorktreeCountsInSidebar
         ? prisma.$queryRaw<
-            Array<{ dirtyWorktrees: bigint; offMainWorktrees: bigint }>
+            Array<{
+              branch: string | null;
+              defaultBranch: string | null;
+              defaultBranchPatternsJson: string;
+              dirtyWorktrees: bigint;
+              worktreeCount: bigint;
+            }>
           >`
-            SELECT
-              COALESCE(SUM(CASE WHEN w.hasStagedChanges OR w.hasUnstagedChanges THEN 1 ELSE 0 END), 0) AS dirtyWorktrees,
-              COALESCE(SUM(CASE WHEN c.defaultBranch IS NOT NULL AND c.defaultBranch != ''
-                AND (w.branch IS NULL OR w.branch != c.defaultBranch) THEN 1 ELSE 0 END), 0) AS offMainWorktrees
-            FROM Worktree w JOIN Codebase c ON c.id = w.codebaseId
+            SELECT w.branch, c.defaultBranch, r.defaultBranchPatternsJson,
+              SUM(CASE WHEN w.hasStagedChanges OR w.hasUnstagedChanges THEN 1 ELSE 0 END) AS dirtyWorktrees,
+              COUNT(*) AS worktreeCount
+            FROM Worktree w
+            JOIN Codebase c ON c.id = w.codebaseId
+            JOIN CodebaseRepository r ON r.id = c.repositoryId
             WHERE w.missingAt IS NULL
+            GROUP BY w.branch, c.defaultBranch, r.defaultBranchPatternsJson
           `
         : Promise.resolve(null),
     ]);
+    const worktreeCounts = worktrees?.reduce(
+      (counts, group) => ({
+        dirtyWorktrees: counts.dirtyWorktrees + Number(group.dirtyWorktrees),
+        offMainWorktrees:
+          counts.offMainWorktrees +
+          (isDefaultBranch(
+            group.branch,
+            group.defaultBranch,
+            parseDefaultBranchPatterns(group.defaultBranchPatternsJson),
+          )
+            ? 0
+            : Number(group.worktreeCount)),
+      }),
+      { dirtyWorktrees: 0, offMainWorktrees: 0 },
+    );
     let usageToday =
       storedUsage?.period === period
         ? {
@@ -361,10 +388,8 @@ export class SystemStatusService {
         workflows,
         commands,
         ...integrations,
-        dirtyWorktrees: worktrees ? Number(worktrees[0].dirtyWorktrees) : null,
-        offMainWorktrees: worktrees
-          ? Number(worktrees[0].offMainWorktrees)
-          : null,
+        dirtyWorktrees: worktreeCounts?.dirtyWorktrees ?? null,
+        offMainWorktrees: worktreeCounts?.offMainWorktrees ?? null,
       },
       settings,
       diskSpace,

@@ -81,6 +81,7 @@ beforeEach(async () => {
         description: "Source settings",
         jiraBranchRegex: "(AIDE-[0-9]+)",
         keepBaseBranchUpToDate: false,
+        defaultBranchPatternsJson: '["develop","release/*"]',
       },
       {
         id: "destination",
@@ -257,6 +258,7 @@ describe("portable repository transfers", () => {
       canonicalOrigin: "github.com/acme/destination",
       jiraBranchRegex: "(AIDE-[0-9]+)",
       keepBaseBranchUpToDate: false,
+      defaultBranchPatternsJson: '["develop","release/*"]',
     });
   });
   test("stale previews reject changed configuration before any writes", async () => {

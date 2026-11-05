@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 
 import {
   CODEBASE_FETCH_JOB_KIND,
+  CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+  parseDefaultBranchPatterns,
   CODEBASE_REFRESH_JOB_KIND,
   type CodebaseGitOperation,
   type CodebaseStatusReport,
@@ -40,6 +42,8 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
       Array.isArray(value) ? value : (value.repositories ?? []),
   },
   CodebaseRepository: {
+    defaultBranchPatterns: (value: { defaultBranchPatternsJson?: string }) =>
+      parseDefaultBranchPatterns(value.defaultBranchPatternsJson),
     codebases: async (value: { id: string; codebases?: unknown[] }) => {
       if (value.codebases) return value.codebases;
       const prisma = await getPrismaClient();
@@ -170,9 +174,24 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
   AgentCodebaseRegistration: {
     canonicalOrigin: (value: { repository: { canonicalOrigin: string } }) =>
       value.repository.canonicalOrigin,
+    defaultBranchPatterns: (value: {
+      repository: { defaultBranchPatternsJson?: string };
+    }) =>
+      parseDefaultBranchPatterns(value.repository.defaultBranchPatternsJson),
     keepBaseBranchUpToDate: (value: {
       repository: { keepBaseBranchUpToDate: boolean };
-    }) => value.repository.keepBaseBranchUpToDate,
+      agent?: { capabilitiesJson: string };
+    }) =>
+      value.repository.keepBaseBranchUpToDate &&
+      (() => {
+        try {
+          return JSON.parse(value.agent?.capabilitiesJson ?? "[]").includes(
+            CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+          );
+        } catch {
+          return false;
+        }
+      })(),
     worktrees: (value: { worktrees?: unknown[] }) => value.worktrees ?? [],
     lastFetchedAt: (value: { lastFetchedAt: Date | null }) =>
       iso(value.lastFetchedAt),
@@ -286,6 +305,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
           description: string;
           jiraBranchRegex?: string | null;
           keepBaseBranchUpToDate: boolean;
+          defaultBranchPatterns?: string[] | null;
           skillGroupIds?: string[] | null;
         };
       },
@@ -299,6 +319,7 @@ export const createCodebaseResolvers = (service: CodebasesService) => ({
         input.jiraBranchRegex,
         input.keepBaseBranchUpToDate,
         input.skillGroupIds,
+        input.defaultBranchPatterns,
       );
     },
     saveCodebaseRepositoryPreparations: (

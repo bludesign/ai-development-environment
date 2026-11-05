@@ -71,6 +71,7 @@ export type WorktreeAutoSync = {
 };
 
 export type WorktreeAutoMerge = {
+  ticketTransitionError?: string | null;
   autoSync?: boolean;
   worktreeId: string;
   state: string;
@@ -97,6 +98,9 @@ export type Worktree = {
   relativePath: string;
   primary: boolean;
   branch: string | null;
+  isDefaultBranch?: boolean;
+  defaultBranchUpdateEnabled?: boolean;
+  defaultBranchUpdatePaused?: boolean;
   headSha: string | null;
   upstream: string | null;
   ahead: number | null;

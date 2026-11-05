@@ -160,7 +160,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     error: null,
   };
   const worktrees = {
-    ticketKeyForWorktree: vi.fn().mockResolvedValue(null),
+    ticketKeyForWorktree: vi.fn().mockResolvedValue("APP-1"),
     publishAutomationChange: vi.fn(),
     createAutoSyncJob: vi.fn().mockResolvedValue(job),
   };
@@ -231,10 +231,13 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     mergeMergeRequestDirect: merge,
     cancelAutoMergeDirect: nativeDisable,
   };
+  const jira = {
+    transitionTicketToConfiguredAutoMerge: vi.fn().mockResolvedValue(null),
+  };
   const githubService = new WorktreeAutomationService(
     worktrees as unknown as WorktreesService,
     github as unknown as GitHubService,
-    {} as JiraService,
+    jira as unknown as JiraService,
     {} as WorkflowsService,
     agents as unknown as AgentControlService,
   );
@@ -245,12 +248,13 @@ function fixture(provider: "GITHUB" | "GITLAB") {
   const gitlabService = new GitLabMergeService(
     gitlab as unknown as GitLabService,
     worktrees as unknown as WorktreesService,
-    {} as JiraService,
+    jira as unknown as JiraService,
     agents as unknown as AgentControlService,
   );
   vi.spyOn(gitlabService, "wake").mockImplementation(() => {});
   vi.spyOn(gitlabService, "options").mockResolvedValue({
     worktreeId: "wt",
+    ticketKey: "APP-1",
     sha: head,
     canAutoMergeWithSync: true,
     canMerge: false,
@@ -321,12 +325,36 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     nativeEnable,
     nativeDisable,
     worktrees,
+    jira,
   };
 }
 
 describe.each(["GITHUB", "GITLAB"] as const)(
   "%s managed Auto Merge",
   (provider) => {
+    test.each([false, true])(
+      "transitions the ticket once on activation with autoSync=%s and retains automation on Jira failure",
+      async (autoSync) => {
+        const f = fixture(provider);
+        f.jira.transitionTicketToConfiguredAutoMerge.mockRejectedValueOnce(
+          new Error("Jira offline"),
+        );
+        const result = await f.configure(autoSync);
+        expect(result.ticketTransitionError).toContain("Auto merge is enabled");
+        expect(f.row()?.state).toBe(
+          autoSync ? "SYNCING" : "WAITING_REQUIREMENTS",
+        );
+        expect(
+          f.jira.transitionTicketToConfiguredAutoMerge,
+        ).toHaveBeenCalledWith("APP-1");
+        await f.configure(autoSync);
+        expect(
+          f.jira.transitionTicketToConfiguredAutoMerge,
+        ).toHaveBeenCalledOnce();
+        expect(f.merge).not.toHaveBeenCalled();
+      },
+    );
+
     test("manages linked Auto Merge without syncing or arming native automation", async () => {
       const f = fixture(provider);
       f.ready.nativeAutoMerge = true;

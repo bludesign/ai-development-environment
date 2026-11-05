@@ -53,7 +53,7 @@ import { ExternalPipelineActionsSettings } from "./external-pipeline-actions";
 import { RepositoryPreparations } from "./repository-preparations";
 
 const REPOSITORY_FIELDS = `
-  id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt
+  id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt
   preparations @include(if: $includePreparations) { id kind path contentSha256 byteCount contentBase64 definitionHash }
   skillGroups { id name }
   quickActionWorkflows { id name description enabled quickActionKind quickActionRepositories { id name } }
@@ -98,6 +98,7 @@ export function RepositoryDetailPage({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [jiraBranchRegex, setJiraBranchRegex] = useState("");
+  const [defaultBranchPatterns, setDefaultBranchPatterns] = useState("");
   const [keepBaseBranchUpToDate, setKeepBaseBranchUpToDate] = useState(true);
   const [skillGroupIds, setSkillGroupIds] = useState<string[]>([]);
   const [preparationsDirty, setPreparationsDirty] = useState(false);
@@ -126,6 +127,7 @@ export function RepositoryDetailPage({
     setName(value.name);
     setDescription(value.description);
     setJiraBranchRegex(value.jiraBranchRegex ?? "");
+    setDefaultBranchPatterns((value.defaultBranchPatterns ?? []).join("\n"));
     setKeepBaseBranchUpToDate(value.keepBaseBranchUpToDate);
     setSkillGroupIds(value.skillGroups?.map((group) => group.id) ?? []);
     setQuickActionWorkflows(value.quickActionWorkflows ?? []);
@@ -237,6 +239,14 @@ export function RepositoryDetailPage({
             name,
             description,
             jiraBranchRegex: jiraBranchRegex || null,
+            defaultBranchPatterns: [
+              ...new Set(
+                defaultBranchPatterns
+                  .split(/\r?\n/)
+                  .map((pattern) => pattern.trim())
+                  .filter(Boolean),
+              ),
+            ],
             keepBaseBranchUpToDate,
             skillGroupIds,
           },
@@ -291,6 +301,8 @@ export function RepositoryDetailPage({
     name !== repository.name ||
     description !== repository.description ||
     jiraBranchRegex !== (repository.jiraBranchRegex ?? "") ||
+    defaultBranchPatterns !==
+      (repository.defaultBranchPatterns ?? []).join("\n") ||
     keepBaseBranchUpToDate !== repository.keepBaseBranchUpToDate ||
     JSON.stringify([...skillGroupIds].sort()) !==
       JSON.stringify(
@@ -396,6 +408,27 @@ export function RepositoryDetailPage({
                     onChange={(event) => setDescription(event.target.value)}
                     value={description}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="repository-default-branches">
+                    {t("defaultBranchPatterns")}
+                  </Label>
+                  <Textarea
+                    id="repository-default-branches"
+                    value={defaultBranchPatterns}
+                    onChange={(event) =>
+                      setDefaultBranchPatterns(event.target.value)
+                    }
+                    placeholder={"main\nrelease/*"}
+                    spellCheck={false}
+                    aria-describedby="repository-default-branches-help"
+                  />
+                  <p
+                    id="repository-default-branches-help"
+                    className="text-xs text-muted-foreground"
+                  >
+                    {t("defaultBranchPatternsHelp")}
+                  </p>
                 </div>
                 <div className="flex items-start gap-3 rounded-lg border p-3">
                   <Checkbox

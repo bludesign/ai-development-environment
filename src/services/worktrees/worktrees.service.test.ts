@@ -6,6 +6,7 @@ vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import type { AgentControlService } from "@/services/agent-control";
 import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
+import { CODEBASE_DEFAULT_BRANCHES_CAPABILITY } from "@ai-development-environment/agent-contract/codebases";
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   WORKTREE_BRANCH_JOB_KIND,
@@ -190,6 +191,73 @@ function autoSyncWorktreeRecord() {
 
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("classifies current default branches and derives maintenance pauses independently of their base", () => {
+    const original = storedWorktreeRecord();
+    const record = {
+      ...original,
+      branch: "release/1",
+      baseBranchOverride: "develop",
+      hasStagedChanges: false,
+      hasUnstagedChanges: false,
+      hasConflicts: false,
+      rebaseInProgress: false,
+      pushStatus: "BEHIND",
+      availability: "AVAILABLE",
+      codebase: {
+        ...original.codebase,
+        availability: "AVAILABLE",
+        remoteBranchesJson: '["main","release/1"]',
+        agent: {
+          ...original.codebase.agent,
+          capabilitiesJson: JSON.stringify([
+            CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
+          ]),
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+        },
+        repository: {
+          ...original.codebase.repository,
+          keepBaseBranchUpToDate: true,
+          defaultBranchPatternsJson: '["release/*"]',
+        },
+      },
+    };
+    const view = () =>
+      (
+        service() as unknown as {
+          view(value: typeof record): {
+            isDefaultBranch: boolean;
+            defaultBranchUpdateEnabled: boolean;
+            defaultBranchUpdatePaused: boolean;
+          };
+        }
+      ).view(record);
+    expect(view()).toMatchObject({
+      isDefaultBranch: true,
+      defaultBranchUpdateEnabled: true,
+      defaultBranchUpdatePaused: false,
+    });
+    record.hasUnstagedChanges = true;
+    expect(view().defaultBranchUpdatePaused).toBe(true);
+    record.hasUnstagedChanges = false;
+    expect(view().defaultBranchUpdatePaused).toBe(false);
+    record.pushStatus = "DIVERGED";
+    expect(view().defaultBranchUpdatePaused).toBe(true);
+    record.pushStatus = "BEHIND";
+    record.codebase.remoteBranchesJson = '["main"]';
+    expect(view().defaultBranchUpdatePaused).toBe(true);
+    record.branch = "feature/new";
+    expect(view()).toMatchObject({
+      isDefaultBranch: false,
+      defaultBranchUpdateEnabled: false,
+      defaultBranchUpdatePaused: false,
+    });
+    record.branch = "main";
+    expect(view().isDefaultBranch).toBe(true);
+    record.codebase.agent.capabilitiesJson = "[]";
+    expect(view().defaultBranchUpdateEnabled).toBe(false);
+  });
 
   test("notifies after a successful new worktree projection with a worktree link", async () => {
     let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;

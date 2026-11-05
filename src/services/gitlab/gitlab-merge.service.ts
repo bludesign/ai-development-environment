@@ -14,10 +14,12 @@ import {
   recoverMergeReservations,
 } from "@/services/operation-locks/operation-locks.service";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
+import { isDefaultWorktreeBranch } from "@/lib/default-branches";
 import type { GitLabMergeOperation } from "@/generated/prisma/client";
 import {
   validateMergeFollowUps,
   completeMergeTicketFollowUp,
+  autoMergeTicketTransitionWarning,
 } from "@/services/worktrees/merge-follow-ups";
 import type { WorktreesService } from "@/services/worktrees";
 import type { JiraService } from "@/services/jira";
@@ -228,7 +230,7 @@ export class GitLabMergeService {
         "The worktree no longer matches the merge request source project and branch.",
       );
     const branchTicket = worktree
-      ? await this.worktrees.ticketKeyForWorktree(worktree.id)
+      ? await this.worktrees.ticketKeyForWorktree(worktree.id, mr.sourceBranch)
       : null;
     const ticketKey =
       mr.title.match(/\b([A-Z][A-Z0-9_]*-\d+)\b/)?.[1] ??
@@ -455,6 +457,12 @@ export class GitLabMergeService {
           input.iid,
         );
         const context = await this.context(mr, input.worktreeId);
+        if (
+          input.autoMerge &&
+          context.worktree &&
+          isDefaultWorktreeBranch(context.worktree)
+        )
+          throw new Error("Auto Merge is not available for default branches");
         const removeSourceBranch = options.canRemoveSourceBranch
           ? (input.removeSourceBranch ?? options.removeSourceBranch)
           : options.removeSourceBranch;
@@ -546,9 +554,17 @@ export class GitLabMergeService {
               this.changed(row);
               throw error;
             }
+            const ticketTransitionError =
+              await autoMergeTicketTransitionWarning(
+                this.jira,
+                options.ticketKey,
+              );
             this.changed(row);
             this.wake();
-            return this.result(input.projectId, input.iid);
+            return {
+              ...(await this.result(input.projectId, input.iid)),
+              ticketTransitionError,
+            };
           });
         }
         if (input.autoMerge && options.worktreeId) {
@@ -586,9 +602,19 @@ export class GitLabMergeService {
             row = await this.observe(row, remote);
             if (row.mergeConfirmedAt) await this.followUps(row);
           }
+          const ticketTransitionError =
+            remote.state !== "MERGED"
+              ? await autoMergeTicketTransitionWarning(
+                  this.jira,
+                  options.ticketKey,
+                )
+              : null;
           this.changed(row);
           this.wake();
-          return this.result(input.projectId, input.iid);
+          return {
+            ...(await this.result(input.projectId, input.iid)),
+            ticketTransitionError,
+          };
         }
         let row = await prisma.gitLabMergeOperation.upsert({
           where: {
@@ -1098,6 +1124,46 @@ export class GitLabMergeService {
               return;
             }
             try {
+              if (
+                current.autoMerge &&
+                current.worktreeId &&
+                !current.mergeConfirmedAt
+              ) {
+                const worktree = await prisma.worktree.findUnique({
+                  where: { id: current.worktreeId },
+                  include: { codebase: { include: { repository: true } } },
+                });
+                if (worktree && isDefaultWorktreeBranch(worktree)) {
+                  if (current.autoSync)
+                    await cancelMergeSync(current.syncStateJson, this.agents);
+                  const remote = await this.gitlab.mergeRequestState(
+                    current.projectId,
+                    current.iid,
+                  );
+                  if (remote.state === "MERGED") {
+                    const observed = await this.observe(current, remote);
+                    await this.followUps(observed);
+                  } else {
+                    if (remote.mergeWhenPipelineSucceeds)
+                      await this.gitlab.cancelAutoMergeDirect(
+                        current.projectId,
+                        current.iid,
+                      );
+                    const canceled = await prisma.gitLabMergeOperation.update({
+                      where: { id: current.id },
+                      data: {
+                        state: "CANCELED",
+                        autoMerge: false,
+                        autoSync: false,
+                        syncStateJson: null,
+                        lastError: null,
+                      },
+                    });
+                    this.changed(canceled);
+                  }
+                  return;
+                }
+              }
               if (recoverBusy) {
                 const confirmed = await this.gitlab.mergeRequestState(
                   current.projectId,

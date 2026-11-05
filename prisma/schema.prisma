@@ -429,6 +429,7 @@ model CodebaseRepository {
   description                String                          @default("")
   jiraBranchRegex            String?
   keepBaseBranchUpToDate     Boolean                         @default(true)
+  defaultBranchPatternsJson  String                          @default("[]")
   hasConfiguredCodeReviewers Boolean                         @default(false)
   createdAt                  DateTime                        @default(now())
   updatedAt                  DateTime                        @updatedAt
@@ -2891,6 +2892,7 @@ model JiraProject {
   completedStatusIdsJson String       @default("[]")
   excludedStatusIdsJson  String       @default("[]")
   doneStatusId           String?
+  autoMergeStatusId      String?
   inReviewStatusId       String?
   defaultResolutionId    String?
   branchNamingMode       String       @default("JAVASCRIPT")

@@ -19,13 +19,19 @@ beforeEach(async () => {
     adapter: new PrismaBetterSqlite3({ url: ":memory:" }),
   });
   await prisma.$executeRawUnsafe(
-    "CREATE TABLE Codebase (id TEXT PRIMARY KEY, defaultBranch TEXT)",
+    "CREATE TABLE Codebase (id TEXT PRIMARY KEY, defaultBranch TEXT, repositoryId TEXT)",
   );
   await prisma.$executeRawUnsafe(
     "CREATE TABLE Worktree (id TEXT PRIMARY KEY, codebaseId TEXT, branch TEXT, hasStagedChanges BOOLEAN, hasUnstagedChanges BOOLEAN, missingAt DATETIME)",
   );
   await prisma.$executeRawUnsafe(
-    "INSERT INTO Codebase VALUES ('known', 'main'), ('unknown', NULL), ('empty', '')",
+    "CREATE TABLE CodebaseRepository (id TEXT PRIMARY KEY, defaultBranchPatternsJson TEXT)",
+  );
+  await prisma.$executeRawUnsafe(
+    "INSERT INTO CodebaseRepository VALUES ('repo', '[]')",
+  );
+  await prisma.$executeRawUnsafe(
+    "INSERT INTO Codebase VALUES ('known', 'main', 'repo'), ('unknown', NULL, 'repo'), ('empty', '', 'repo')",
   );
   raw = vi.fn(prisma.$queryRaw.bind(prisma));
   getPrismaClient.mockResolvedValue({
@@ -70,12 +76,12 @@ test("counts staged and unstaged changes once, excludes missing worktrees, and f
     ('missing', 'known', 'feature', 1, 1, '2026-10-30')`);
   expect((await service().status(false)).activity).toMatchObject({
     dirtyWorktrees: 3,
-    offMainWorktrees: 3,
+    offMainWorktrees: 5,
   });
   await prisma.$executeRawUnsafe(
     "UPDATE Codebase SET defaultBranch = 'develop' WHERE id = 'known'",
   );
-  expect((await service().status(false)).activity.offMainWorktrees).toBe(5);
+  expect((await service().status(false)).activity.offMainWorktrees).toBe(7);
 });
 
 test("empty repositories show zero counts", async () => {
@@ -92,4 +98,29 @@ test("turning off worktree counters skips the aggregation", async () => {
     offMainWorktrees: null,
   });
   expect(raw).not.toHaveBeenCalled();
+});
+
+test("off-main counts use exact and wildcard defaults and follow settings and branch changes", async () => {
+  await prisma.$executeRawUnsafe(`INSERT INTO Worktree VALUES
+    ('main', 'known', 'main', 0, 0, NULL),
+    ('develop', 'known', 'develop', 1, 0, NULL),
+    ('release', 'known', 'release/2026/hotfix', 0, 1, NULL),
+    ('feature', 'known', 'feature/123', 0, 0, NULL),
+    ('upper', 'known', 'Release/2026', 0, 0, NULL),
+    ('missing', 'known', 'feature/missing', 1, 0, '2026-11-04')`);
+  await prisma.$executeRawUnsafe(
+    `UPDATE CodebaseRepository SET defaultBranchPatternsJson = '["develop","release/*"]'`,
+  );
+  expect((await service().status(false)).activity).toMatchObject({
+    dirtyWorktrees: 2,
+    offMainWorktrees: 2,
+  });
+  await prisma.$executeRawUnsafe(
+    "UPDATE Worktree SET branch = 'feature/switched' WHERE id = 'release'",
+  );
+  expect((await service().status(false)).activity.offMainWorktrees).toBe(3);
+  await prisma.$executeRawUnsafe(
+    `UPDATE CodebaseRepository SET defaultBranchPatternsJson = '["release/*"]'`,
+  );
+  expect((await service().status(false)).activity.offMainWorktrees).toBe(4);
 });

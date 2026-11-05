@@ -430,11 +430,9 @@ export function filterWorktreeAgentGroups(
               (worktree) => worktreeIsDirty(worktree) === filters.dirty,
             );
       const branchWorktrees = filters.nonDefaultBranch
-        ? group.codebase.defaultBranch
-          ? changedWorktrees.filter(
-              (worktree) => worktree.branch !== group.codebase.defaultBranch,
-            )
-          : []
+        ? changedWorktrees.filter(
+            (worktree) => !worktreeIsDefaultBranch(worktree, group),
+          )
         : changedWorktrees;
       const worktrees = filters.openPullRequests
         ? branchWorktrees.filter(
@@ -454,6 +452,33 @@ export type WorktreeRepositoryGroup = {
     group: WorktreeCodebaseGroup;
   }>;
 };
+
+function worktreeIsDefaultBranch(
+  worktree: Worktree,
+  group: WorktreeCodebaseGroup,
+) {
+  return (
+    worktree.isDefaultBranch ??
+    Boolean(worktree.branch && worktree.branch === group.codebase.defaultBranch)
+  );
+}
+
+/** Keep defaults below every ordinary checkout in the selected top-level group. */
+export function defaultBranchSections<
+  T extends { group: WorktreeCodebaseGroup },
+>(entries: T[]): T[] {
+  return [false, true].flatMap((isDefault) =>
+    entries.flatMap((entry) => {
+      const worktrees = entry.group.worktrees.filter(
+        (worktree) =>
+          worktreeIsDefaultBranch(worktree, entry.group) === isDefault,
+      );
+      return worktrees.length
+        ? [{ ...entry, group: { ...entry.group, worktrees } }]
+        : [];
+    }),
+  );
+}
 
 export function groupWorktreesByRepository(
   agents: WorktreeAgentGroup[],
@@ -782,7 +807,7 @@ export function WorktreesPage({
             hasPlainTrigger(resourceKind: "WORKTREE")
             triggerChoices(resourceKind: "WORKTREE") { key label description }
           }
-                repository { id canonicalOrigin displayOrigin name description jiraBranchRegex keepBaseBranchUpToDate createdAt updatedAt }
+                repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_LIST_FIELDS} }
               }
@@ -1700,8 +1725,13 @@ function AgentSection({
         <h2 className="text-lg font-semibold">{agentGroup.agent.name}</h2>
         <AgentStatusBadge agent={agentGroup.agent} />
       </div>
-      {agentGroup.codebases.map((group) => (
-        <section className="space-y-3" key={group.codebase.id}>
+      {defaultBranchSections(
+        agentGroup.codebases.map((group) => ({ group })),
+      ).map(({ group }) => (
+        <section
+          className="space-y-3"
+          key={`${group.codebase.id}:${worktreeIsDefaultBranch(group.worktrees[0], group)}`}
+        >
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="font-medium">{group.repository.name}</h3>
@@ -1732,18 +1762,27 @@ function RepositorySection({
           {repositoryGroup.repository.displayOrigin}
         </span>
       </div>
-      {repositoryGroup.entries.map(({ agentGroup, group }) => (
-        <section className="space-y-3" key={group.codebase.id}>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 className="font-medium">{agentGroup.agent.name}</h3>
-              <AgentStatusBadge agent={agentGroup.agent} />
+      {defaultBranchSections(repositoryGroup.entries).map(
+        ({ agentGroup, group }) => (
+          <section
+            className="space-y-3"
+            key={`${group.codebase.id}:${worktreeIsDefaultBranch(group.worktrees[0], group)}`}
+          >
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="font-medium">{agentGroup.agent.name}</h3>
+                <AgentStatusBadge agent={agentGroup.agent} />
+              </div>
+              <FetchAge codebase={group.codebase} />
             </div>
-            <FetchAge codebase={group.codebase} />
-          </div>
-          <CodebaseWorktrees {...props} agentGroup={agentGroup} group={group} />
-        </section>
-      ))}
+            <CodebaseWorktrees
+              {...props}
+              agentGroup={agentGroup}
+              group={group}
+            />
+          </section>
+        ),
+      )}
     </section>
   );
 }
@@ -1792,9 +1831,15 @@ function FetchAge({
 }
 
 function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
-  const { inspectionRefreshToken } = props;
+  const { inspectionRefreshToken, onReload } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
+    props.group,
+    props.overview.agents.find((entry) =>
+      entry.codebases.some(
+        (group) => group.codebase.id === props.group.codebase.id,
+      ),
+    )?.agent,
   );
   const [operationError, setOperationError] = useState<string | null>(null);
   const liveProps = { ...props, worktree, onError: setOperationError };
@@ -1832,9 +1877,14 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
       applyActivity(activity);
+      if (
+        typeof activity.headSha === "string" &&
+        activity.branch !== worktree.branch
+      )
+        void onReload();
       if (expanded) void refreshInspection();
     },
-    [applyActivity, expanded, refreshInspection],
+    [applyActivity, expanded, refreshInspection, onReload, worktree.branch],
   );
   useWorktreeActivitySubscription(
     worktree.id,
@@ -1897,6 +1947,7 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
       <CardContent className="space-y-4">
         <WorktreeMetadata
           {...liveProps}
+          showPullRequest={false}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
         />
@@ -2076,6 +2127,7 @@ export function WorktreeMetadata(
   props: WorktreeItemProps & {
     detailsExpanded?: boolean;
     onToggleDetails?: () => void;
+    showPullRequest?: boolean;
   },
 ) {
   const {
@@ -2099,18 +2151,29 @@ export function WorktreeMetadata(
       </div>
       <MetadataRow label={t("upToDate")}>
         <BaseFreshnessBadge worktree={worktree} />
+        {worktree.defaultBranchUpdateEnabled && (
+          <Badge variant="outline">
+            {t(
+              worktree.defaultBranchUpdatePaused
+                ? "defaultBranchUpdatePaused"
+                : "defaultBranchUpdateEnabled",
+            )}
+          </Badge>
+        )}
         <span className="pl-6 text-xs text-muted-foreground">{t("agent")}</span>
         <Badge variant="outline">{agentName}</Badge>
       </MetadataRow>
       <WorktreeTagsMenu {...props} />
-      <MetadataRow label={t("pullRequest")}>
-        <PullRequestBadges
-          detailsExpanded={detailsExpanded}
-          onPipelinesChanged={props.onReload}
-          onToggleDetails={onToggleDetails}
-          worktree={worktree}
-        />
-      </MetadataRow>
+      {props.showPullRequest !== false && (
+        <MetadataRow label={t("pullRequest")}>
+          <PullRequestBadges
+            detailsExpanded={detailsExpanded}
+            onPipelinesChanged={props.onReload}
+            onToggleDetails={onToggleDetails}
+            worktree={worktree}
+          />
+        </MetadataRow>
+      )}
       {worktree.latestBuild && (
         <LatestBuildRow
           build={worktree.latestBuild}
@@ -2273,7 +2336,7 @@ export function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
       className={
         current
           ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-          : worktree.baseBehind === null
+          : worktree.baseBehind === null || worktree.isDefaultBranch
             ? undefined
             : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
       }
@@ -2283,7 +2346,9 @@ export function BaseFreshnessBadge({ worktree }: { worktree: Worktree }) {
         ? t("unknown")
         : current
           ? t("yes")
-          : t("notUpToDate", { count: worktree.baseBehind })}
+          : t(worktree.isDefaultBranch ? "commitsBehindBase" : "notUpToDate", {
+              count: worktree.baseBehind,
+            })}
     </Badge>
   );
 }
@@ -3812,6 +3877,7 @@ export function ActionRow(
     Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
     worktree.rebaseInProgress;
   const changeActions = worktreeChangeActionState(worktree);
+  const isDefault = worktreeIsDefaultBranch(worktree, props.group);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <PrimaryWorktreeActions {...props} includeReviewers={false} />
@@ -3822,50 +3888,60 @@ export function ActionRow(
         props={props}
         disabled={unavailable || !worktree.upstream || worktree.behind === 0}
       />
-      <OperationButton
-        confirm
-        icon={<RefreshCw />}
-        label={t("sync")}
-        operation="SYNC"
-        props={props}
-        disabled={
-          unavailable ||
-          !worktree.upstream ||
-          !worktree.baseBranch ||
-          worktree.baseBehind === 0
-        }
-      />
-      <OperationButton
-        confirm
-        icon={<GitMerge />}
-        label={t("rebase")}
-        operation="REBASE"
-        props={props}
-        disabled={
-          unavailable || !worktree.baseBranch || worktree.baseBehind === 0
-        }
-      />
-      <OperationButton
-        icon={<Upload />}
-        label={worktree.upstream ? t("push") : t("publish")}
-        operation="PUSH"
-        props={props}
-        disabled={unavailable || !worktree.branch}
-      />
-      <AutoSyncButton
-        conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
-        disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
-        onCompleted={props.onCompleted}
-        onError={props.onError}
-        worktree={worktree}
-      />
-      <AutoMergeButton
-        conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
-        disabled={unavailable}
-        onCompleted={props.onCompleted}
-        onError={props.onError}
-        worktree={worktree}
-      />
+      {!isDefault && (
+        <OperationButton
+          confirm
+          icon={<RefreshCw />}
+          label={t("sync")}
+          operation="SYNC"
+          props={props}
+          disabled={
+            unavailable ||
+            !worktree.upstream ||
+            !worktree.baseBranch ||
+            worktree.baseBehind === 0
+          }
+        />
+      )}
+      {!isDefault && (
+        <OperationButton
+          confirm
+          icon={<GitMerge />}
+          label={t("rebase")}
+          operation="REBASE"
+          props={props}
+          disabled={
+            unavailable || !worktree.baseBranch || worktree.baseBehind === 0
+          }
+        />
+      )}
+      {!isDefault && (
+        <OperationButton
+          icon={<Upload />}
+          label={worktree.upstream ? t("push") : t("publish")}
+          operation="PUSH"
+          props={props}
+          disabled={unavailable || !worktree.branch}
+        />
+      )}
+      {!isDefault && (
+        <AutoSyncButton
+          conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+          disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
+          onCompleted={props.onCompleted}
+          onError={props.onError}
+          worktree={worktree}
+        />
+      )}
+      {!isDefault && (
+        <AutoMergeButton
+          conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+          disabled={unavailable}
+          onCompleted={props.onCompleted}
+          onError={props.onError}
+          worktree={worktree}
+        />
+      )}
       <AssignReviewersButton
         onCompleted={props.onCompleted}
         worktree={worktree}
@@ -3878,6 +3954,43 @@ export function ActionRow(
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {isDefault && (
+            <>
+              <OperationMenuItem
+                confirm
+                icon={<RefreshCw />}
+                label={t("sync")}
+                operation="SYNC"
+                props={props}
+                disabled={
+                  unavailable ||
+                  !worktree.upstream ||
+                  !worktree.baseBranch ||
+                  worktree.baseBehind === 0
+                }
+              />
+              <OperationMenuItem
+                confirm
+                icon={<GitMerge />}
+                label={t("rebase")}
+                operation="REBASE"
+                props={props}
+                disabled={
+                  unavailable ||
+                  !worktree.baseBranch ||
+                  worktree.baseBehind === 0
+                }
+              />
+              <OperationMenuItem
+                icon={<Upload />}
+                label={worktree.upstream ? t("push") : t("publish")}
+                operation="PUSH"
+                props={props}
+                disabled={unavailable || !worktree.branch}
+              />
+              <DropdownMenuSeparator />
+            </>
+          )}
           <OperationMenuItem
             confirm
             icon={<Upload />}
@@ -4107,9 +4220,15 @@ function WorktreeTable(props: Omit<WorktreeItemProps, "worktree" | "onError">) {
 }
 
 function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
-  const { baseRepoDirectory, inspectionRefreshToken } = props;
+  const { baseRepoDirectory, inspectionRefreshToken, onReload } = props;
   const { worktree, applyActivity, setUnstagedChanges } = useLiveWorktree(
     props.worktree,
+    props.group,
+    props.overview.agents.find((entry) =>
+      entry.codebases.some(
+        (group) => group.codebase.id === props.group.codebase.id,
+      ),
+    )?.agent,
   );
   const [operationError, setOperationError] = useState<string | null>(null);
   const liveProps = { ...props, worktree, onError: setOperationError };
@@ -4147,9 +4266,14 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
   const handleActivity = useCallback(
     (activity: WorktreeActivity) => {
       applyActivity(activity);
+      if (
+        typeof activity.headSha === "string" &&
+        activity.branch !== worktree.branch
+      )
+        void onReload();
       if (expanded) void refreshInspection();
     },
-    [applyActivity, expanded, refreshInspection],
+    [applyActivity, expanded, refreshInspection, onReload, worktree.branch],
   );
   useWorktreeActivitySubscription(
     worktree.id,

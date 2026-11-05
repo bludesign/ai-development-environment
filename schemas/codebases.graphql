@@ -98,8 +98,10 @@ type CodebaseRepository {
   description: String!
   "The Jira branch regex associated with this codebase repository. May be null when unavailable or not applicable."
   jiraBranchRegex: String
-  "Whether the keep base branch up to date condition is true for this codebase repository."
+  "Whether clean default branch checkouts are automatically fast-forwarded from their same-name origin branches."
   keepBaseBranchUpToDate: Boolean!
+  "Exact branch names or full-name patterns where * matches any characters, in addition to the remote default."
+  defaultBranchPatterns: [String!]!
   "Skill groups associated with this codebase repository."
   skillGroups: [SkillGroup!]!
   "Quick action workflows associated with this codebase repository."
@@ -264,8 +266,10 @@ type AgentCodebaseRegistration {
   canonicalOrigin: String!
   "Git branch associated with this agent codebase registration. May be null when unavailable or not applicable."
   defaultBranch: String
-  "Whether the keep base branch up to date condition is true for this agent codebase registration."
+  "Whether this agent supports and should maintain clean default branch checkouts."
   keepBaseBranchUpToDate: Boolean!
+  "Exact branch names or full-name patterns where * matches any characters, in addition to the remote default."
+  defaultBranchPatterns: [String!]!
   "ISO 8601 timestamp when this agent codebase registration was last fetched. May be null when unavailable or not applicable."
   lastFetchedAt: String
   "ISO 8601 timestamp when this agent codebase registration last fetch attempt. May be null when unavailable or not applicable."
@@ -426,8 +430,10 @@ input UpdateCodebaseRepositoryInput {
   description: String!
   "The Jira branch regex to use for the request."
   jiraBranchRegex: String
-  "Whether keep base branch up to date applies to the request."
+  "Whether clean default branch checkouts should be kept up to date from their same-name origin branches."
   keepBaseBranchUpToDate: Boolean!
+  "Additional exact or wildcard default branch names; omitted values preserve existing patterns."
+  defaultBranchPatterns: [String!]
   "Identifiers of the skill groups to use."
   skillGroupIds: [ID!]
 }

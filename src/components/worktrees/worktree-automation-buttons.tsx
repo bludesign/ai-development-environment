@@ -593,7 +593,7 @@ function GitHubAutoMergeButton({
         await onCompleted();
         return;
       }
-      await controlPlaneRequest<{
+      const result = await controlPlaneRequest<{
         configureWorktreeAutoMerge: WorktreeAutoMerge;
       }>(
         `mutation ConfigureWorktreeAutoMerge(
@@ -603,7 +603,7 @@ function GitHubAutoMergeButton({
             worktreeId state repositoryNameWithOwner pullRequestNumber
             mergeMethod commitHeadline commitBody authorEmail deleteWorktree
             moveTicketToDone ticketKey lastError updatedAt
-            autoSync
+            autoSync ticketTransitionError
           }
         }`,
         {
@@ -634,8 +634,10 @@ function GitHubAutoMergeButton({
         },
       );
       onError(null);
-      setOpen(false);
       await onCompleted();
+      if (result.configureWorktreeAutoMerge.ticketTransitionError)
+        setError(result.configureWorktreeAutoMerge.ticketTransitionError);
+      else setOpen(false);
     } catch (value) {
       setError(errorMessage(value));
     } finally {

@@ -229,6 +229,61 @@ describe("merge preferences and follow-up actions", () => {
     expect(github.enablePullRequestAutoMerge).not.toHaveBeenCalled();
     expect(jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
   });
+  test.each([true, false])(
+    "manual worktree merge applies done follow-up only when selected: %s",
+    async (moveTicketToDone) => {
+      const { service, prisma, github, jira, worktree } = setup();
+      let saved: Record<string, unknown> | null = null;
+      prisma.worktreeAutoMerge.upsert.mockImplementation(async ({ create }) => {
+        saved = {
+          ...create,
+          updatedAt: new Date(),
+          worktree: { ...worktree, codebaseId: "cb", headSha: "head" },
+        };
+        return saved;
+      });
+      Object.assign(prisma.worktreeAutoMerge, {
+        findMany: vi.fn(async () => (saved ? [saved] : [])),
+        update: vi.fn(async ({ data }) => Object.assign(saved!, data)),
+        updateMany: vi.fn(async ({ data }) => {
+          Object.assign(saved!, data);
+          return { count: 1 };
+        }),
+      });
+      Object.assign(github, {
+        pullRequestAutomationState: vi.fn().mockResolvedValue({
+          state: "MERGED",
+          headRefName: worktree.branch,
+          headRefOid: "head",
+          headRepositoryNameWithOwner: "acme/widgets",
+        }),
+      });
+      await service.mergePullRequest(
+        {
+          ...input,
+          worktreeId: worktree.id,
+          deleteWorktree: false,
+          moveTicketToDone,
+        },
+        "WORKTREE_AUTOMATION",
+      );
+      expect(jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
+      const tick = () =>
+        (
+          service as unknown as { reconcileAutoMerge(): Promise<void> }
+        ).reconcileAutoMerge();
+      await tick();
+      await tick();
+      expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledTimes(
+        moveTicketToDone ? 1 : 0,
+      );
+      if (moveTicketToDone)
+        expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledWith(
+          "APP-41",
+        );
+      expect(github.mergePullRequest).toHaveBeenCalledOnce();
+    },
+  );
   test("unchecked submitted options replace existing pending cleanup", async () => {
     const { service, prisma } = setup();
     await service.mergePullRequest(

@@ -797,6 +797,7 @@ export class JiraService {
       completedStatusIds: parseStringArray(project.completedStatusIdsJson),
       excludedStatusIds: parseStringArray(project.excludedStatusIdsJson),
       doneStatusId: project.doneStatusId,
+      autoMergeStatusId: project.autoMergeStatusId,
       inReviewStatusId: project.inReviewStatusId,
       defaultResolutionId: project.defaultResolutionId,
       branchNamingScript:
@@ -885,6 +886,7 @@ export class JiraService {
     completedStatusIds: string[];
     excludedStatusIds?: string[] | null;
     doneStatusId?: string | null;
+    autoMergeStatusId?: string | null;
     inReviewStatusId?: string | null;
     defaultResolutionId?: string | null;
   }): Promise<JiraProjectView[]> {
@@ -907,13 +909,23 @@ export class JiraService {
       input.inReviewStatusId === undefined
         ? undefined
         : input.inReviewStatusId?.trim() || null;
-    if (doneStatusId || inReviewStatusId) {
+    const autoMergeStatusId =
+      input.autoMergeStatusId === undefined
+        ? undefined
+        : input.autoMergeStatusId?.trim() || null;
+    if (doneStatusId || inReviewStatusId || autoMergeStatusId) {
       const available = await this.projectStatuses(input.projectId);
       if (
         doneStatusId &&
         !available.some((status) => status.id === doneStatusId)
       ) {
         throw new Error("The selected Jira done status is not available");
+      }
+      if (
+        autoMergeStatusId &&
+        !available.some((status) => status.id === autoMergeStatusId)
+      ) {
+        throw new Error("The selected Jira auto merge status is not available");
       }
       if (
         inReviewStatusId &&
@@ -956,6 +968,7 @@ export class JiraService {
               ),
             }),
         ...(doneStatusId === undefined ? {} : { doneStatusId }),
+        ...(autoMergeStatusId === undefined ? {} : { autoMergeStatusId }),
         ...(inReviewStatusId === undefined ? {} : { inReviewStatusId }),
         ...(defaultResolutionId === undefined ? {} : { defaultResolutionId }),
       },
@@ -2090,6 +2103,34 @@ export class JiraService {
     if (!transition) {
       throw new Error(
         `Jira does not currently offer a transition to the configured in review status for ${key}. Open the ticket to update its status.`,
+      );
+    }
+    return this.transitionTicket(key, transition.id);
+  }
+
+  async transitionTicketToConfiguredAutoMerge(
+    issueKey: string,
+  ): Promise<JiraTicketDetail | null> {
+    const key = normalizeIssueKey(issueKey);
+    const projectKey = key.split("-")[0] ?? "";
+    const prisma = await getPrismaClient();
+    const project = await prisma.jiraProject.findUnique({
+      where: { key: projectKey },
+      select: { autoMergeStatusId: true },
+    });
+    if (!project?.autoMergeStatusId) return null;
+    const ticket = await this.ticket(key);
+    if (ticket.statusId === project.autoMergeStatusId) return ticket;
+    const transition = (await this.ticketTransitions(key))
+      .filter((item) => item.toStatusId === project.autoMergeStatusId)
+      .sort(
+        (first, second) =>
+          (first.unresolvedRequiredFields ?? first.requiredFields).length -
+          (second.unresolvedRequiredFields ?? second.requiredFields).length,
+      )[0];
+    if (!transition) {
+      throw new Error(
+        `Jira does not currently offer a transition to the configured auto merge status for ${key}. Open the ticket to update its status.`,
       );
     }
     return this.transitionTicket(key, transition.id);
