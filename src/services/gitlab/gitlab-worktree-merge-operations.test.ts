@@ -21,7 +21,9 @@ let directory: string;
 beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "aide-gitlab-merge-recovery-"));
   const path = join(directory, "test.db");
-  const database = new Database(path);
+  // Replay migrations in memory to avoid syncing every schema statement on CI.
+  // Prisma still exercises the resulting on-disk database.
+  const database = new Database(":memory:");
   try {
     for (const migration of readdirSync("prisma/migrations").sort()) {
       const migrationPath = join(
@@ -32,6 +34,7 @@ beforeAll(async () => {
       if (existsSync(migrationPath))
         database.exec(readFileSync(migrationPath, "utf8"));
     }
+    await database.backup(path);
   } finally {
     database.close();
   }
