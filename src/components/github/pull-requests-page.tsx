@@ -35,6 +35,7 @@ import {
 } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
+import { MergeOperationLabel } from "@/components/github/post-merge-switch-client";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import {
   githubMergeOperationKey,
@@ -949,7 +950,7 @@ function PullRequestActionsMenu({
 }) {
   const t = useTranslations("pullRequests");
   const [mergeOpen, setMergeOpen] = useState(false);
-  const { pending: merging } = useMergeOperation(
+  const { pending: merging, postMergeSwitch } = useMergeOperation(
     githubMergeOperationKey(pullRequest),
   );
 
@@ -980,7 +981,7 @@ function PullRequestActionsMenu({
               {t("openInGitHub")}
             </a>
           </DropdownMenuItem>
-          {pullRequest.state === "OPEN" && (
+          {(pullRequest.state === "OPEN" || postMergeSwitch) && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -988,7 +989,11 @@ function PullRequestActionsMenu({
                 onSelect={() => setMergeOpen(true)}
               >
                 {merging ? <Spinner aria-hidden="true" /> : <GitMerge />}
-                {t(merging ? "merging" : "merge")}
+                <MergeOperationLabel
+                  operationKey={githubMergeOperationKey(pullRequest)}
+                  idleLabel={t("merge")}
+                  pendingLabel={t("merging")}
+                />
               </DropdownMenuItem>
             </>
           )}

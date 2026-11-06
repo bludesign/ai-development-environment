@@ -3061,6 +3061,12 @@
       "MERGING": "Zusammenführen",
       "ACTION_REQUIRED": "Aktion erforderlich"
     },
+    "switchToDefaultBranchAfterMerge": "Nach dem Merge zu {branch} wechseln",
+    "switchToDefaultBranchDescription": "Den zusammengeführten Code vor dem Wechsel dieses primären Checkouts abrufen. Lokale Änderungen bleiben unverändert.",
+    "updatingDefaultBranch": "{branch} wird aktualisiert…",
+    "switchedToDefaultBranch": "Zu {branch} gewechselt.",
+    "switchToDefaultBranchFailed": "Merge abgeschlossen; der Wechsel zu {branch} erfordert Aufmerksamkeit.",
+    "retryMergeFollowUps": "Folgeaktionen erneut versuchen",
     "continueInBackground": "Im Hintergrund fortfahren",
     "mergeNeedsAttention": "Merge erfordert Aufmerksamkeit",
     "reviewMergeError": "Merge-Fehler prüfen",

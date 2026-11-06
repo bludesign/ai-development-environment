@@ -200,6 +200,8 @@ export type GitLabMergeRequestSummaryField =
   "APPROVAL_STATE" | "UNRESOLVED_DISCUSSIONS_COUNT";
 
 export type GitLabMergeRequestView = {
+  mergeCommitSha?: string | null;
+  squashCommitSha?: string | null;
   projectPath?: string | null;
   sourceProjectId?: string | null;
   worktreeId?: string | null;
@@ -237,6 +239,11 @@ export type GitLabMergeRequestView = {
 };
 
 export type GitLabMergeOperationView = {
+  postMergeSwitch?: {
+    branch: string;
+    state: string;
+    lastError: string | null;
+  } | null;
   autoSync?: boolean;
   baseBranchUpdateResults?: MergeBaseBranchUpdateResult[];
   id: string;
@@ -252,6 +259,10 @@ export type GitLabMergeOperationView = {
 };
 
 export type GitLabMergeOptions = {
+  canSwitchToDefaultBranch?: boolean;
+  defaultSwitchToDefaultBranch?: boolean;
+  switchToDefaultBranchName?: string | null;
+  switchToDefaultBranchUnavailableReason?: string | null;
   canAutoMergeWithSync?: boolean;
   autoSyncBlockedReason?: string | null;
   defaultAutoSync?: boolean;
@@ -287,6 +298,7 @@ export type GitLabMergeOptions = {
 };
 
 export type SubmitGitLabMergeRequestMergeInput = {
+  switchToDefaultBranch?: boolean | null;
   autoSync?: boolean | null;
   baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   projectId: string;

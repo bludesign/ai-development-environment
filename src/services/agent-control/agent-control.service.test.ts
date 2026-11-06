@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { CODEBASE_BRANCHES_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
+import { WORKTREE_POST_MERGE_SWITCH_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 
 import { CodebaseBusyError } from "@/lib/codebase-busy";
 
@@ -52,6 +53,35 @@ function persistedJob(status: string, resultJson: string | null = null) {
     resultJson,
   };
 }
+
+test("accepts only complete reviewed post-merge switch jobs", () => {
+  const payload = {
+    codebaseId: "codebase",
+    folder: "/repo",
+    gitDirectory: "/repo/.git",
+    expectedOrigin: "github.com/example/repo",
+    expectedBranch: "feature/reviewed",
+    expectedHeadSha: "a".repeat(40),
+    branch: "main",
+    mergeCommitSha: "b".repeat(40),
+  };
+  expect(SUPPORTED_AGENT_JOBS).toContain(WORKTREE_POST_MERGE_SWITCH_JOB_KIND);
+  expect(() =>
+    validateJob(WORKTREE_POST_MERGE_SWITCH_JOB_KIND, payload),
+  ).not.toThrow();
+  expect(() =>
+    validateJob(WORKTREE_POST_MERGE_SWITCH_JOB_KIND, {
+      ...payload,
+      mergeCommitSha: null,
+    }),
+  ).toThrow();
+  expect(() =>
+    validateJob(WORKTREE_POST_MERGE_SWITCH_JOB_KIND, {
+      ...payload,
+      force: true,
+    }),
+  ).toThrow();
+});
 
 describe("AgentControlService.getJobCommandName", () => {
   beforeEach(() => vi.clearAllMocks());

@@ -14,7 +14,6 @@ import {
   CheckCircle2,
   GitBranch,
   ExternalLink,
-  GitMerge,
   GitFork,
   Play,
   RefreshCw,
@@ -30,6 +29,10 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { MergeOperationError } from "@/components/github/merge-operation-error";
+import {
+  MergeOperationLabel,
+  MergeOperationIcon,
+} from "@/components/github/post-merge-switch-client";
 import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergeRequestDialog } from "./merge-request-dialog";
 import { GitLabProjectManagerDialog } from "./project-manager-dialog";
@@ -895,8 +898,16 @@ export function GitLabMergeRequestDetailPage({
           {(mr.state === "OPENED" || mr.mergeOperation) && (
             <>
               <Button onClick={() => setMergeOpen(true)} variant="outline">
-                <GitMerge />
-                {t(mr.state === "MERGED" ? "mergeFollowUps" : "mergeOptions")}
+                <MergeOperationIcon
+                  operationKey={gitlabMergeOperationKey(mr)}
+                />
+                <MergeOperationLabel
+                  operationKey={gitlabMergeOperationKey(mr)}
+                  idleLabel={t(
+                    mr.state === "MERGED" ? "mergeFollowUps" : "mergeOptions",
+                  )}
+                  pendingLabel={t("mergeOptions")}
+                />
               </Button>
               {!mergeOpen && (
                 <MergeOperationError

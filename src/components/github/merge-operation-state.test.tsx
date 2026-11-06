@@ -3,6 +3,9 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
   clearMergeOperation,
+  dismissMergeOperationProgress,
+  recordPostMergeSwitch,
+  useMergeOperationProgress,
   githubMergeOperationKey,
   gitlabMergeOperationKey,
   runMergeOperation,
@@ -86,4 +89,25 @@ test("keeps a confirmed result when retrying its follow-ups fails", async () => 
   const reopened = renderHook(() => useMergeOperation<typeof result>(first));
   expect(reopened.result.current.result).toBe(result);
   expect(reopened.result.current.error).toBe("Connection lost");
+});
+
+test("dismissing a completed progress card preserves the result and trigger status across polling", async () => {
+  const merged = { state: "MERGED" };
+  await runMergeOperation(first, "merge", async () => merged);
+  const status = { branch: "main", state: "COMPLETED", lastError: null };
+  const view = renderHook(() => ({
+    operation: useMergeOperation(first),
+    progress: useMergeOperationProgress(),
+  }));
+  act(() => recordPostMergeSwitch(first, status));
+  expect(view.result.current.progress).toHaveLength(1);
+  act(() => dismissMergeOperationProgress(first));
+  act(() => recordPostMergeSwitch(first, { ...status }));
+  expect(view.result.current.progress).toHaveLength(0);
+  expect(view.result.current.operation.result).toBe(merged);
+  expect(view.result.current.operation.postMergeSwitch).toEqual(status);
+  await act(async () => {
+    await runMergeOperation(first, "retry", async () => merged);
+  });
+  expect(view.result.current.progress).toHaveLength(1);
 });

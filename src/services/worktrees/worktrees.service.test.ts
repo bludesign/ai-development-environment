@@ -10,6 +10,7 @@ import { CODEBASE_DEFAULT_BRANCHES_CAPABILITY } from "@ai-development-environmen
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
@@ -191,6 +192,78 @@ function autoSyncWorktreeRecord() {
 
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test("dispatches a reviewed primary switch idempotently and rejects changed checkout identity", async () => {
+    const payload = {
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      expectedOrigin: "github.com/openai/codex",
+      expectedBranch: "feature/reviewed",
+      expectedHeadSha: "a".repeat(40),
+      branch: "main",
+      mergeCommitSha: "b".repeat(40),
+    };
+    const runnable = {
+      id: "worktree-1",
+      ...payload,
+      primary: true,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([
+            WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+            OPERATION_RESOURCES_CAPABILITY,
+          ]),
+        },
+        repository: { canonicalOrigin: payload.expectedOrigin },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "switch-job" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+    const worktrees = service(control);
+    const input = {
+      ...payload,
+      worktreeId: "worktree-1",
+      requestId: "merge-1",
+    };
+    await expect(worktrees.postMergeSwitch(input)).resolves.toEqual({
+      id: "switch-job",
+    });
+    expect(createJob).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-1",
+      kind: WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+      payload,
+      idempotencyKey: "worktree:post-merge-switch:merge-1:worktree-1",
+      timeoutSeconds: 180,
+    });
+    for (const mismatch of [
+      { folder: "/different" },
+      { gitDirectory: "/different/.git" },
+      { expectedOrigin: "github.com/another/repo" },
+    ]) {
+      await expect(
+        worktrees.postMergeSwitch({ ...input, ...mismatch }),
+      ).rejects.toThrow("identity changed");
+    }
+    runnable.primary = false;
+    await expect(worktrees.postMergeSwitch(input)).rejects.toThrow(
+      "identity changed",
+    );
+    expect(createJob).toHaveBeenCalledOnce();
+  });
 
   test("classifies current default branches and derives maintenance pauses independently of their base", () => {
     const original = storedWorktreeRecord();

@@ -617,10 +617,20 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
 };
 
 export type GitHubPullRequestMergeOptions = {
+  state?: "OPEN" | "CLOSED" | "MERGED";
+  canSwitchToDefaultBranch?: boolean;
+  defaultSwitchToDefaultBranch?: boolean;
+  switchToDefaultBranchName?: string | null;
+  switchToDefaultBranchUnavailableReason?: string | null;
+  baseRefName?: string;
   canAutoMergeWithSync?: boolean;
   autoSyncBlockedReason?: string | null;
   defaultAutoSync?: boolean;
   autoMergeOperation?: {
+    worktreeId?: string;
+    postMergeSwitch?:
+      | import("@/services/worktrees/post-merge-switch").PostMergeSwitchStatus
+      | null;
     autoSync: boolean;
     state: string;
     lastError: string | null;
@@ -651,6 +661,8 @@ export type GitHubPullRequestMergeOptions = {
 };
 
 export type GitHubPullRequestAutomationState = {
+  baseRefName?: string;
+  mergeCommitSha?: string | null;
   id: string;
   state: "OPEN" | "CLOSED" | "MERGED";
   url: string;
@@ -666,6 +678,7 @@ export type GitHubPullRequestAutomationState = {
 };
 
 export type GitHubPullRequestMergeInput = {
+  switchToDefaultBranch?: boolean;
   baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
   owner: string;
   name: string;
@@ -680,6 +693,13 @@ export type GitHubPullRequestMergeInput = {
 };
 
 export type GitHubPullRequestMergeResult = {
+  worktreeId?: string | null;
+  postMergeSwitch?:
+    | import("@/services/worktrees/post-merge-switch").PostMergeSwitchStatus
+    | null;
+  mergeCommitSha?: string | null;
+  headRefOid?: string;
+  baseRefName?: string;
   postMergeError?: string | null;
   ticketKey?: string | null;
   id: string;

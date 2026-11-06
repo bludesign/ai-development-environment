@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
@@ -16,6 +17,7 @@ import {
 } from "@/components/github/merge-operation-state";
 import type { GitLabMergeOptions } from "@/services/gitlab";
 
+import { MergeOperationLabel } from "@/components/github/post-merge-switch-client";
 import { MergeRequestDialog } from "./merge-request-dialog";
 
 vi.mock("@/lib/control-plane-client", () => ({ controlPlaneRequest: vi.fn() }));
@@ -75,6 +77,126 @@ afterEach(async () => {
 });
 
 describe("GitLab merge options", () => {
+  test("defaults to switching the primary checkout and retains background progress until completion", async () => {
+    let finish!: (value: unknown) => void;
+    const observation = new Promise((resolve) => {
+      finish = resolve;
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...options,
+            canDeleteWorktree: false,
+            canSwitchToDefaultBranch: true,
+            defaultSwitchToDefaultBranch: true,
+            switchToDefaultBranchName: "main",
+          },
+        } as never;
+      if (query.includes("query GitLabMergeOperation"))
+        return (await observation) as never;
+      return {
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: { ...target, state: "MERGED" },
+          operation: {
+            ...operation,
+            state: "POST_MERGE",
+            lastError: null,
+            postMergeSwitch: {
+              branch: "main",
+              state: "PENDING",
+              lastError: null,
+            },
+          },
+          postMergeError: null,
+        },
+      } as never;
+    });
+    function View() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button onClick={() => setOpen(true)}>
+            <MergeOperationLabel
+              operationKey={gitlabMergeOperationKey(target)}
+              idleLabel="Merge"
+              pendingLabel="Merging…"
+            />
+          </button>
+          <MergeRequestDialog
+            mergeRequest={target}
+            onOpenChange={setOpen}
+            open={open}
+          />
+        </>
+      );
+    }
+    render(<View />);
+    expect(
+      (
+        await screen.findByRole("checkbox", {
+          name: "Switch to main after merge",
+        })
+      ).getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Merge now" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Updating main…" }),
+    ).toBeDefined();
+    await act(async () => {
+      finish({
+        gitlabMergeOperation: {
+          ...operation,
+          state: "COMPLETED",
+          lastError: null,
+          postMergeSwitch: {
+            branch: "main",
+            state: "COMPLETED",
+            lastError: null,
+          },
+        },
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Switched to main." }),
+    ).toBeDefined();
+    const mutations = request.mock.calls.filter(([query]) =>
+      query.includes("mutation SubmitGitLabMergeRequestMerge"),
+    );
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]?.[1]).toMatchObject({
+      input: { switchToDefaultBranch: true },
+    });
+  });
+
+  test("shows why switching is unavailable and permits a merge without it", async () => {
+    request.mockResolvedValue({
+      gitlabMergeRequestMergeOptions: {
+        ...options,
+        switchToDefaultBranchName: "trunk",
+        canSwitchToDefaultBranch: false,
+        defaultSwitchToDefaultBranch: false,
+        switchToDefaultBranchUnavailableReason: "Update the agent first",
+      },
+    } as never);
+    show();
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Switch to trunk after merge",
+    });
+    expect(checkbox.hasAttribute("disabled")).toBe(true);
+    expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("Update the agent first")).toBeDefined();
+    expect(
+      screen
+        .getByRole("button", { name: "Merge now" })
+        .hasAttribute("disabled"),
+    ).toBe(false);
+  });
+
   test("keeps the confirmed result visible when refreshing the parent fails", async () => {
     request.mockImplementation(async (query) =>
       query.includes("query GitLabMergeRequestMergeOptions")
@@ -125,6 +247,58 @@ describe("GitLab merge options", () => {
     fireEvent.click(oldSubmit);
     expect(
       request.mock.calls.some(([query]) => query.includes("mutation")),
+    ).toBe(false);
+  });
+
+  test("keeps Jira failure and follow-up retry after the checkout switch completed", async () => {
+    let retried = false;
+    const switched = { branch: "main", state: "COMPLETED", lastError: null };
+    const savedOperation = { ...operation, postMergeSwitch: switched };
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        return {
+          gitlabMergeRequestMergeOptions: {
+            ...options,
+            state: "MERGED",
+            operation: savedOperation,
+          },
+        } as never;
+      if (query.includes("query GitLabMergeOperation"))
+        return {
+          gitlabMergeOperation: {
+            ...savedOperation,
+            state: retried ? "COMPLETED" : "ACTION_REQUIRED",
+            lastError: retried ? null : "Jira unavailable",
+          },
+        } as never;
+      retried = true;
+      return {
+        retryGitLabMergeFollowUps: {
+          mergeRequest: { ...target, state: "MERGED" },
+          postMergeError: null,
+          operation: { ...savedOperation, state: "COMPLETED", lastError: null },
+        },
+      } as never;
+    });
+    show();
+    await screen.findByText("Switched to main.");
+    expect(screen.getByText("Jira unavailable")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry follow-ups" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Jira unavailable")).toBeNull(),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry follow-ups" }),
+    ).toBeNull();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation RetryGitLabMergeFollowUps"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      request.mock.calls.some(([query]) =>
+        query.includes("mutation SubmitGitLabMergeRequestMerge"),
+      ),
     ).toBe(false);
   });
 
@@ -569,6 +743,7 @@ describe("GitLab merge options", () => {
             worktreeId: "worktree-1",
             deleteWorktree: true,
             moveTicketToDone: true,
+            switchToDefaultBranch: false,
           },
         },
       ),

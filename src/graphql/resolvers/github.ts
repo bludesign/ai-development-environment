@@ -99,6 +99,22 @@ export const createGitHubResolvers = (
   withIntegrationConfigurationEvents(
     {
       Query: {
+        githubPullRequestMergeOperation: (
+          _root: unknown,
+          {
+            owner,
+            name,
+            number,
+          }: { owner: string; name: string; number: number },
+          context: GraphQLContext,
+        ) => {
+          requireControlPlane(context);
+          return worktreeAutomationService.pullRequestMergeOperation(
+            owner,
+            name,
+            number,
+          );
+        },
         githubSettings: (
           _root: unknown,
           _args: unknown,

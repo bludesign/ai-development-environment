@@ -3061,6 +3061,12 @@
       "MERGING": "Fusionando",
       "ACTION_REQUIRED": "Acción requerida"
     },
+    "switchToDefaultBranchAfterMerge": "Cambiar a {branch} después de fusionar",
+    "switchToDefaultBranchDescription": "Obtener el código fusionado antes de cambiar este checkout principal. Los cambios locales se conservarán.",
+    "updatingDefaultBranch": "Actualizando {branch}…",
+    "switchedToDefaultBranch": "Se cambió a {branch}.",
+    "switchToDefaultBranchFailed": "Fusión completada; el cambio a {branch} requiere atención.",
+    "retryMergeFollowUps": "Reintentar acciones posteriores",
     "continueInBackground": "Continuar en segundo plano",
     "mergeNeedsAttention": "La fusión requiere atención",
     "reviewMergeError": "Revisar error de fusión",

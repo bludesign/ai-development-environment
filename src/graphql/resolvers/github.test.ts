@@ -135,6 +135,37 @@ describe("GitHub resolvers", () => {
     expect(service.clearWebhookDeliveries).not.toHaveBeenCalled();
   });
 
+  test("restores persisted checkout-switch progress only for control-plane clients", async () => {
+    const operation = {
+      state: "POST_MERGE",
+      postMergeSwitch: { branch: "main", state: "UPDATING", lastError: null },
+    };
+    const automation = {
+      pullRequestMergeOperation: vi.fn().mockResolvedValue(operation),
+    };
+    const resolvers = createGitHubResolvers(
+      {} as GitHubService,
+      worktreesService(),
+      automation as unknown as WorktreeAutomationService,
+    );
+    const args = { owner: "acme", name: "widgets", number: 17 };
+    await expect(
+      resolvers.Query.githubPullRequestMergeOperation({}, args, context(null)),
+    ).resolves.toBe(operation);
+    expect(automation.pullRequestMergeOperation).toHaveBeenCalledWith(
+      "acme",
+      "widgets",
+      17,
+    );
+    expect(() =>
+      resolvers.Query.githubPullRequestMergeOperation(
+        {},
+        args,
+        context("agent-1"),
+      ),
+    ).toThrow("control-plane");
+  });
+
   test("delegates webhook availability and delivery pagination", async () => {
     const page = {
       enabled: true,

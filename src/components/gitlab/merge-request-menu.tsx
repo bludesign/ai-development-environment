@@ -5,7 +5,15 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { MergeOperationError } from "@/components/github/merge-operation-error";
-import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
+import {
+  MergeOperationLabel,
+  MergeOperationIcon,
+  usePostMergeSwitchRecovery,
+} from "@/components/github/post-merge-switch-client";
+import {
+  gitlabMergeOperationKey,
+  useMergeOperation,
+} from "@/components/github/merge-operation-state";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -25,6 +33,7 @@ type MergeRequestMenuTarget = {
   webUrl: string;
   state?: string;
   worktreeId?: string | null;
+  mergeOperation?: { postMergeSwitch?: unknown } | null;
 };
 
 export function MergeRequestMenu({
@@ -43,6 +52,22 @@ export function MergeRequestMenu({
   const gitLabT = useTranslations("gitlabPages");
   const worktreesT = useTranslations("worktrees");
   const [mergeOpen, setMergeOpen] = useState(false);
+  const operationKey = gitlabMergeOperationKey({
+    projectId: mergeRequest.projectId ?? "",
+    iid: mergeRequest.iid,
+  });
+  const { pending } = useMergeOperation(operationKey);
+  usePostMergeSwitchRecovery(
+    operationKey,
+    {
+      provider: "gitlab",
+      projectId: mergeRequest.projectId ?? "",
+      iid: mergeRequest.iid,
+    },
+    Boolean(mergeRequest.projectId) &&
+      (mergeRequest.state === "MERGED" ||
+        Boolean(mergeRequest.mergeOperation?.postMergeSwitch)),
+  );
 
   return (
     <>
@@ -51,14 +76,22 @@ export function MergeRequestMenu({
           {variant === "actions" ? (
             <Button
               aria-label={`${gitLabT("actions")}: !${mergeRequest.iid}`}
+              aria-busy={pending}
               size="icon-sm"
               variant="outline"
             >
-              <MoreHorizontal />
+              <MergeOperationIcon operationKey={operationKey}>
+                <MoreHorizontal />
+              </MergeOperationIcon>
             </Button>
           ) : (
             <Badge asChild className="cursor-pointer hover:bg-primary/80">
-              <button type="button">{label}</button>
+              <button aria-busy={pending} type="button">
+                <MergeOperationIcon operationKey={operationKey}>
+                  {null}
+                </MergeOperationIcon>
+                {label}
+              </button>
             </Badge>
           )}
         </DropdownMenuTrigger>
@@ -89,12 +122,16 @@ export function MergeRequestMenu({
                       onMergeOptions ? onMergeOptions() : setMergeOpen(true)
                     }
                   >
-                    <GitMerge />
-                    {gitLabT(
-                      mergeRequest.state === "MERGED"
-                        ? "mergeFollowUps"
-                        : "mergeOptions",
-                    )}
+                    <MergeOperationIcon operationKey={operationKey} />
+                    <MergeOperationLabel
+                      operationKey={operationKey}
+                      idleLabel={gitLabT(
+                        mergeRequest.state === "MERGED"
+                          ? "mergeFollowUps"
+                          : "mergeOptions",
+                      )}
+                      pendingLabel={gitLabT("mergeOptions")}
+                    />
                   </DropdownMenuItem>
                 </>
               )}
@@ -119,6 +156,7 @@ export function MergeRequestMenu({
             iid: mergeRequest.iid,
             projectId: mergeRequest.projectId,
             title: mergeRequest.title,
+            state: mergeRequest.state,
           }}
           onOpenChange={setMergeOpen}
           open={mergeOpen}

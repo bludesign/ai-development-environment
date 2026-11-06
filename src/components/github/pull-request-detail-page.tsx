@@ -328,6 +328,7 @@ export function PullRequestDetailPage({
             pullRequest={pullRequest}
             requestSource="PULL_REQUEST_DETAILS"
             showTrigger={pullRequest.state === "OPEN"}
+            showProgressTrigger
             size="default"
           />
           <Button

@@ -71,6 +71,9 @@ export type WorktreeAutoSync = {
 };
 
 export type WorktreeAutoMerge = {
+  postMergeSwitch?:
+    | import("@/components/github/merge-operation-state").PostMergeSwitchStatus
+    | null;
   ticketTransitionError?: string | null;
   autoSync?: boolean;
   worktreeId: string;

@@ -319,8 +319,20 @@ extend type AgentJob {
   worktreeOperationResult: WorktreeOperationResult
 }
 
+"Progress of returning a primary checkout to its default branch after a merge."
+type PostMergeSwitchStatus {
+  "Reviewed default branch to check out after the confirmed merge."
+  branch: String!
+  "Durable switch lifecycle: PENDING, UPDATING, COMPLETED, or ACTION_REQUIRED."
+  state: String!
+  "Reason the post-merge switch needs attention, when one exists."
+  lastError: String
+}
+
 "Represents a worktree auto merge in the GraphQL API."
 type WorktreeAutoMerge {
+  "Progress of returning the primary checkout to the updated default branch."
+  postMergeSwitch: PostMergeSwitchStatus
   "Jira transition warning returned after activation; auto merge remains enabled."
   ticketTransitionError: String
   "Whether AIDE syncs the linked branch and waits for passing CI before merging."
@@ -1114,6 +1126,8 @@ input ConfigureWorktreeAutoSyncInput {
 
 "Values used to configure a worktree auto merge."
 input ConfigureWorktreeAutoMergeInput {
+  "Return the primary checkout to the updated default branch after merging."
+  switchToDefaultBranch: Boolean = false
   "Rebase and push the linked branch before waiting for passing CI and merging."
   autoSync: Boolean = false
   "Reviewed source revision, required when autoSync is selected."

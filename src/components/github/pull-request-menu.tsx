@@ -4,6 +4,7 @@ import { ExternalLink, GitMerge, GitPullRequest } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { MergeOperationLabel } from "@/components/github/post-merge-switch-client";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import {
   githubMergeOperationKey,
@@ -74,7 +75,11 @@ export function PullRequestMenu({
             onSelect={() => setMergeOpen(true)}
           >
             {merging ? <Spinner aria-hidden="true" /> : <GitMerge />}
-            {pullRequestsT(merging ? "merging" : "merge")}
+            <MergeOperationLabel
+              operationKey={githubMergeOperationKey(pullRequest)}
+              idleLabel={pullRequestsT("merge")}
+              pendingLabel={pullRequestsT("merging")}
+            />
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

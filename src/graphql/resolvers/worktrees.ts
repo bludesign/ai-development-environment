@@ -1,4 +1,5 @@
 import { baseBranchUpdateResults } from "@/services/worktrees/merge-base-branch-updates";
+import { postMergeSwitchView } from "@/services/worktrees/post-merge-switch";
 import {
   JIRA_BRANCH_GENERATE_JOB_KIND,
   validGitBranchName,
@@ -74,11 +75,15 @@ export const createWorktreeResolvers = (
       autoMerge?: {
         updatedAt: Date;
         baseBranchUpdatesJson?: string | null;
+        postMergeSwitchJson?: string | null;
       } | null;
     }) =>
       value.autoMerge
         ? {
             ...value.autoMerge,
+            postMergeSwitch: postMergeSwitchView(
+              value.autoMerge.postMergeSwitchJson,
+            ),
             baseBranchUpdateResults: baseBranchUpdateResults(
               value.autoMerge.baseBranchUpdatesJson,
             ),
@@ -606,6 +611,7 @@ export const createWorktreeResolvers = (
         input,
       }: {
         input: {
+          switchToDefaultBranch?: boolean | null;
           autoSync?: boolean | null;
           expectedHeadSha?: string | null;
           worktreeId: string;

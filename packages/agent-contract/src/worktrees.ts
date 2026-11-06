@@ -25,6 +25,7 @@ export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
+export const WORKTREE_POST_MERGE_SWITCH_JOB_KIND = "worktree.post-merge-switch";
 export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
 export const WORKTREE_MOVE_CHECKOUT_JOB_KIND = "worktree.move.checkout";
@@ -43,6 +44,7 @@ export const WORKTREE_JOB_KINDS = [
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_WATCH_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   JIRA_BRANCH_GENERATE_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
@@ -705,6 +707,55 @@ export function parseCodebaseWorktreeReport(
       parseWorktreeInventoryItem(item, `worktree report.worktrees[${index}]`),
     ),
   };
+}
+
+export type WorktreePostMergeSwitchPayload = {
+  codebaseId: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  expectedBranch: string;
+  expectedHeadSha: string;
+  branch: string;
+  mergeCommitSha: string;
+};
+
+export function worktreePostMergeSwitchJobPayload(
+  value: unknown,
+): WorktreePostMergeSwitchPayload {
+  const payload = objectValue(value, "post-merge switch payload");
+  const fields = [
+    "codebaseId",
+    "folder",
+    "gitDirectory",
+    "expectedOrigin",
+    "expectedBranch",
+    "expectedHeadSha",
+    "branch",
+    "mergeCommitSha",
+  ] as const;
+  const unexpected = Object.keys(payload).find(
+    (key) => !fields.includes(key as (typeof fields)[number]),
+  );
+  if (unexpected)
+    throw new Error(
+      `Unexpected post-merge switch payload field: ${unexpected}`,
+    );
+  const parsed = Object.fromEntries(
+    fields.map((field) => [
+      field,
+      stringValue(payload[field], `post-merge switch payload.${field}`),
+    ]),
+  ) as WorktreePostMergeSwitchPayload;
+  for (const field of ["expectedBranch", "branch"] as const) {
+    if (!validGitBranchName(parsed[field]))
+      throw new Error(`Invalid post-merge switch ${field}`);
+  }
+  for (const field of ["expectedHeadSha", "mergeCommitSha"] as const) {
+    if (!/^(?:[a-f\d]{40}|[a-f\d]{64})$/i.test(parsed[field]))
+      throw new Error(`Invalid post-merge switch ${field}`);
+  }
+  return parsed;
 }
 
 export function worktreeBranchJobPayload(value: unknown): {

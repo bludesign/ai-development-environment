@@ -6,6 +6,7 @@ import {
   worktreeDiffPayload,
   worktreeGitInspectPayload,
   worktreePreparationJobPayload,
+  worktreePostMergeSwitchJobPayload,
 } from "./worktrees.js";
 
 const identity = {
@@ -14,6 +15,35 @@ const identity = {
   gitDirectory: "/repo/.git",
   expectedOrigin: "github.com/openai/codex",
 };
+
+describe("post-merge switch contract", () => {
+  const payload = {
+    ...identity,
+    expectedBranch: "feature/reviewed",
+    expectedHeadSha: "a".repeat(40),
+    branch: "main",
+    mergeCommitSha: "b".repeat(40),
+  };
+  test("requires a complete immutable checkout and merge identity", () => {
+    expect(worktreePostMergeSwitchJobPayload(payload)).toEqual(payload);
+    for (const key of Object.keys(payload)) {
+      const missing: Record<string, unknown> = { ...payload };
+      delete missing[key];
+      expect(() => worktreePostMergeSwitchJobPayload(missing)).toThrow();
+    }
+    expect(() =>
+      worktreePostMergeSwitchJobPayload({ ...payload, stashChanges: true }),
+    ).toThrow("Unexpected");
+  });
+  test.each(["expectedBranch", "branch", "expectedHeadSha", "mergeCommitSha"])(
+    "rejects invalid %s",
+    (field) => {
+      expect(() =>
+        worktreePostMergeSwitchJobPayload({ ...payload, [field]: "HEAD~1" }),
+      ).toThrow();
+    },
+  );
+});
 
 describe("worktree Git refresh contract", () => {
   const clean = {

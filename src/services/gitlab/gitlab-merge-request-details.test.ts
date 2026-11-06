@@ -88,6 +88,23 @@ function setup({
 afterEach(() => vi.restoreAllMocks());
 
 describe("GitLab merge request metadata", () => {
+  test("preserves separate merge and squash commit evidence from provider responses", async () => {
+    const { service, read } = setup();
+    read.mockResolvedValueOnce({
+      data: {
+        ...mergeRequest,
+        state: "merged",
+        merge_commit_sha: "merge-commit",
+        squash_commit_sha: "squash-commit",
+      },
+      headers: new Headers(),
+    });
+    expect(await service.mergeRequestState("21", 42)).toMatchObject({
+      mergeCommitSha: "merge-commit",
+      squashCommitSha: "squash-commit",
+      sha: mergeRequest.sha,
+    });
+  });
   test.each([
     {
       approval: { approvals_required: 2, approved_by: [{ user: author }] },

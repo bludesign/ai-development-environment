@@ -4,6 +4,7 @@ import {
   type OperationDescriptor,
   type OperationResource,
 } from "@ai-development-environment/agent-contract/operation-resources";
+import { WORKTREE_POST_MERGE_SWITCH_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import { posix, win32 } from "node:path";
@@ -344,6 +345,17 @@ export async function jobOperationDescriptor(
         });
       }
     }
+    if (
+      input.kind === WORKTREE_POST_MERGE_SWITCH_JOB_KIND &&
+      typeof p.branch === "string"
+    )
+      resources.push(
+        sourceBranchResource(
+          worktree.codebase.repository.canonicalOrigin,
+          p.branch,
+          "WRITE",
+        ),
+      );
     if (mode !== "READ" && worktree.branch) {
       resources.push(
         sourceBranchResource(

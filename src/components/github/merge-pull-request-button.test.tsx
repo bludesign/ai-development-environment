@@ -42,6 +42,201 @@ afterEach(async () => {
 });
 
 describe("MergePullRequestButton", () => {
+  test("defaults to switching the primary checkout and keeps progress after dismissal and navigation", async () => {
+    let finish!: (value: unknown) => void;
+    const observation = new Promise((resolve) => {
+      finish = resolve;
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestMergeOptions"))
+        return {
+          githubPullRequestMergeOptions: {
+            availableMethods: ["SQUASH"],
+            commitEmails: [],
+            defaultCommitHeadline: "Switch checkout",
+            defaultCommitBody: "",
+            canMerge: true,
+            worktreeId: "primary",
+            canSwitchToDefaultBranch: true,
+            defaultSwitchToDefaultBranch: true,
+            switchToDefaultBranchName: "main",
+          },
+        } as never;
+      if (query.includes("query GitHubPullRequestMergeOperation"))
+        return (await observation) as never;
+      return {
+        mergeGitHubPullRequest: {
+          state: "MERGED",
+          worktreeId: "primary",
+          postMergeSwitch: {
+            branch: "main",
+            state: "PENDING",
+            lastError: null,
+          },
+        },
+      } as never;
+    });
+    const original = render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    const checkbox = await screen.findByRole("checkbox", {
+      name: "Switch to main after merge",
+    });
+    expect(checkbox.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "Updating main…" })
+        .getAttribute("aria-busy"),
+    ).toBe("true");
+    original.unmount();
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Updating main…" }),
+    ).toBeDefined();
+    await act(async () => {
+      finish({
+        githubPullRequestMergeOperation: {
+          state: "COMPLETED",
+          postMergeSwitch: {
+            branch: "main",
+            state: "COMPLETED",
+            lastError: null,
+          },
+        },
+      });
+    });
+    expect(
+      await screen.findByRole("button", { name: "Switched to main." }),
+    ).toBeDefined();
+    const mutations = request.mock.calls.filter(([query]) =>
+      query.includes("mutation MergeGitHubPullRequest"),
+    );
+    expect(mutations).toHaveLength(1);
+    expect(mutations[0]?.[1]).toMatchObject({
+      input: { switchToDefaultBranch: true },
+    });
+  });
+
+  test("restores a completed switch for a merged pull request even when its merge trigger is hidden", async () => {
+    request.mockResolvedValue({
+      githubPullRequestMergeOperation: {
+        state: "COMPLETED",
+        postMergeSwitch: {
+          branch: "main",
+          state: "COMPLETED",
+          lastError: null,
+        },
+      },
+    } as never);
+    render(
+      <MergePullRequestButton
+        pullRequest={{ ...pullRequest, state: "MERGED" }}
+        requestSource="PULL_REQUEST_DETAILS"
+        showTrigger={false}
+        showProgressTrigger
+      />,
+    );
+    expect(
+      await screen.findByRole("button", { name: "Switched to main." }),
+    ).toBeDefined();
+    expect(
+      request.mock.calls.every(([query]) => !query.includes("mutation")),
+    ).toBe(true);
+  });
+
+  test.each(["ACTION_REQUIRED", "COMPLETED"])(
+    "retries failed follow-ups without another merge when checkout is %s",
+    async (checkoutState) => {
+      let retried = false;
+      const warning =
+        checkoutState === "COMPLETED"
+          ? "Jira unavailable"
+          : "Local changes need attention";
+      const failed = {
+        branch: "main",
+        state: checkoutState,
+        lastError: checkoutState === "COMPLETED" ? null : warning,
+      };
+      request.mockImplementation(async (query) => {
+        if (query.includes("query GitHubPullRequestMergeOptions"))
+          return {
+            githubPullRequestMergeOptions: {
+              availableMethods: ["SQUASH"],
+              commitEmails: [],
+              defaultCommitHeadline: "Already merged",
+              defaultCommitBody: "",
+              canMerge: false,
+              worktreeId: "primary",
+              autoMergeOperation: {
+                state: "ACTION_REQUIRED",
+                autoSync: false,
+                lastError: warning,
+                postMergeSwitch: failed,
+              },
+            },
+          } as never;
+        if (query.includes("mutation RetryWorktreeAutoMerge")) {
+          retried = true;
+          return {
+            retryWorktreeAutoMerge: {
+              state: "POST_MERGE",
+              postMergeSwitch: {
+                ...failed,
+                state: checkoutState === "COMPLETED" ? "COMPLETED" : "PENDING",
+                lastError: null,
+              },
+            },
+          } as never;
+        }
+        return {
+          githubPullRequestMergeOperation: {
+            state: retried ? "COMPLETED" : "ACTION_REQUIRED",
+            lastError: retried ? null : warning,
+            postMergeSwitch: retried
+              ? { ...failed, state: "COMPLETED", lastError: null }
+              : failed,
+          },
+        } as never;
+      });
+      render(
+        <MergePullRequestButton
+          pullRequest={pullRequest}
+          requestSource="PULL_REQUEST_DETAILS"
+          open
+        />,
+      );
+      await screen.findAllByText(warning);
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Retry follow-ups" }),
+      );
+      await screen.findAllByText("Switched to main.");
+      await waitFor(() => expect(screen.queryByText(warning)).toBeNull());
+      expect(
+        request.mock.calls.filter(([query]) =>
+          query.includes("mutation RetryWorktreeAutoMerge"),
+        ),
+      ).toHaveLength(1);
+      expect(
+        request.mock.calls.some(([query]) =>
+          query.includes("mutation MergeGitHubPullRequest"),
+        ),
+      ).toBe(false);
+    },
+  );
+
   test("retains a confirmed merge when refreshing its originating view fails", async () => {
     request.mockImplementation(async (query) =>
       query.includes("query GitHubPullRequestMergeOptions")
@@ -368,6 +563,7 @@ describe("MergePullRequestButton", () => {
             worktreeId: undefined,
             deleteWorktree: false,
             moveTicketToDone: false,
+            switchToDefaultBranch: false,
           },
           source: "PULL_REQUEST_DETAILS",
         });
