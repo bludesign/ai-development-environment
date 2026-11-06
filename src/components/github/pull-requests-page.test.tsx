@@ -10,6 +10,10 @@ import {
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  clearMergeOperation,
+  githubMergeOperationKey,
+} from "./merge-operation-state";
 
 import { PullRequestsPage } from "./pull-requests-page";
 
@@ -150,6 +154,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   requestMock.mockReset();
+  clearMergeOperation(githubMergeOperationKey(pullRequest));
 });
 
 function configureRequests() {
@@ -268,6 +273,60 @@ function configureRequests() {
 }
 
 describe("PullRequestsPage", () => {
+  test("shows a background merge in the actions trigger and menu and clears progress on failure", async () => {
+    configureRequests();
+    const configuredRequest = requestMock.getMockImplementation()!;
+    let rejectMerge!: (reason: Error) => void;
+    const pendingMerge = new Promise<never>((_resolve, reject) => {
+      rejectMerge = reject;
+    });
+    requestMock.mockImplementation(async (...args) =>
+      args[0].includes("mutation MergeGitHubPullRequest")
+        ? pendingMerge
+        : configuredRequest(...args),
+    );
+    render(<PullRequestsPage />);
+    const row = await screen.findByRole("row", {
+      name: /APP-42 Add the API/,
+    });
+    const trigger = within(row).getByRole("button", {
+      name: "Actions: #17",
+    });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Merge" }));
+    await screen.findByDisplayValue(pullRequest.title);
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(trigger.getAttribute("aria-busy")).toBe("true");
+    expect(trigger.querySelector('[data-slot="spinner"]')).not.toBeNull();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    const progress = screen.getByRole("menuitem", { name: "Merging…" });
+    expect(progress.getAttribute("aria-busy")).toBe("true");
+    expect(progress.querySelector('[data-slot="spinner"]')).not.toBeNull();
+    fireEvent.click(progress);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    await act(async () =>
+      rejectMerge(new Error("The reviewed commit changed")),
+    );
+    expect(trigger.getAttribute("aria-busy")).toBe("false");
+    expect(trigger.querySelector('[data-slot="spinner"]')).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      within(row).getByRole("button", { name: "Merge needs attention" }),
+    ).toBeDefined();
+    expect(
+      requestMock.mock.calls.filter(([query]) =>
+        query.includes("mutation MergeGitHubPullRequest"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test.each(["mouse", "keyboard"])(
     "opens and uses the merge dialog from the %s menu without navigating to the pull request",
     async (activation) => {

@@ -369,6 +369,7 @@ export function MergePullRequestButton({
       {showTrigger && (
         <>
           <Button
+            aria-busy={merging}
             className={className}
             onClick={(event) => {
               event.stopPropagation();
@@ -378,8 +379,8 @@ export function MergePullRequestButton({
             type="button"
             variant={variant}
           >
-            <GitMerge />
-            {t("merge")}
+            {merging ? <Spinner aria-hidden="true" /> : <GitMerge />}
+            {t(merging ? "merging" : "merge")}
           </Button>
         </>
       )}

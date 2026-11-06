@@ -151,6 +151,9 @@ describe("MergePullRequestButton", () => {
     expect(background.hasAttribute("disabled")).toBe(false);
     fireEvent.click(background);
     expect(screen.queryByRole("dialog")).toBeNull();
+    const merging = screen.getByRole("button", { name: "Merging…" });
+    expect(merging.getAttribute("aria-busy")).toBe("true");
+    expect(merging.querySelector('[data-slot="spinner"]')).not.toBeNull();
     original.unmount();
     render(
       <MergePullRequestButton
@@ -158,7 +161,7 @@ describe("MergePullRequestButton", () => {
         requestSource="PULL_REQUEST_DETAILS"
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(screen.getByRole("button", { name: "Merging…" }));
     fireEvent.click(
       await screen.findByRole("button", { name: "Continue in background" }),
     );
@@ -166,6 +169,9 @@ describe("MergePullRequestButton", () => {
       rejectMerge(new Error("The reviewed commit changed")),
     );
     expect(screen.queryByRole("dialog")).toBeNull();
+    const idle = screen.getByRole("button", { name: "Merge" });
+    expect(idle.getAttribute("aria-busy")).toBe("false");
+    expect(idle.querySelector('[data-slot="spinner"]')).toBeNull();
     const attention = await screen.findByRole("button", {
       name: "Merge needs attention",
     });
@@ -213,6 +219,11 @@ describe("MergePullRequestButton", () => {
     fireEvent.click(
       await screen.findByRole("button", { name: "Continue in background" }),
     );
+    expect(
+      screen
+        .getByRole("button", { name: "Merging…" })
+        .getAttribute("aria-busy"),
+    ).toBe("true");
     await act(async () =>
       finishMerge({
         mergeGitHubPullRequest: { state: "MERGED", postMergeError: null },
@@ -220,6 +231,10 @@ describe("MergePullRequestButton", () => {
     );
     expect(onMerged).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Merging…" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Merge" }).getAttribute("aria-busy"),
+    ).toBe("false");
     expect(
       screen.queryByRole("button", { name: "Merge needs attention" }),
     ).toBeNull();

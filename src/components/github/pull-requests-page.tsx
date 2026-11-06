@@ -36,6 +36,10 @@ import {
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
+import {
+  githubMergeOperationKey,
+  useMergeOperation,
+} from "@/components/github/merge-operation-state";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import {
   pullRequestCommentsHref,
@@ -945,6 +949,9 @@ function PullRequestActionsMenu({
 }) {
   const t = useTranslations("pullRequests");
   const [mergeOpen, setMergeOpen] = useState(false);
+  const { pending: merging } = useMergeOperation(
+    githubMergeOperationKey(pullRequest),
+  );
 
   return (
     <>
@@ -952,11 +959,12 @@ function PullRequestActionsMenu({
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={`${t("actions")}: #${pullRequest.number}`}
+            aria-busy={merging}
             onClick={(event) => event.stopPropagation()}
             size="icon-sm"
             variant="outline"
           >
-            <MoreHorizontal />
+            {merging ? <Spinner aria-hidden="true" /> : <MoreHorizontal />}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
@@ -975,9 +983,12 @@ function PullRequestActionsMenu({
           {pullRequest.state === "OPEN" && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => setMergeOpen(true)}>
-                <GitMerge />
-                {t("merge")}
+              <DropdownMenuItem
+                aria-busy={merging}
+                onSelect={() => setMergeOpen(true)}
+              >
+                {merging ? <Spinner aria-hidden="true" /> : <GitMerge />}
+                {t(merging ? "merging" : "merge")}
               </DropdownMenuItem>
             </>
           )}
