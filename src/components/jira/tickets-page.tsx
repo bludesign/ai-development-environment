@@ -1055,7 +1055,7 @@ function JiraManagerDialog({
         <div className="grid min-w-0 gap-6 md:grid-cols-2">
           <section className="min-w-0 space-y-3">
             <h3 className="font-medium">{t("projects")}</h3>
-            <div className="flex min-w-0 gap-2">
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2">
               {open && (
                 <JiraAvailableProjectSelect
                   value={availableProject}
