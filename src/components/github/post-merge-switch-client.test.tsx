@@ -67,6 +67,202 @@ test("restores a merge already in progress before its checkout follow-up starts"
   expect(view.result.current.postMergeSwitch).toEqual(completed);
 });
 
+test.each(["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS"])(
+  "continues observing %s after a transient polling failure",
+  async (state) => {
+    vi.useFakeTimers();
+    request
+      .mockResolvedValueOnce({
+        githubPullRequestMergeOperation: { state, postMergeSwitch: pending },
+      } as never)
+      .mockRejectedValueOnce(new Error("Connection lost"))
+      .mockResolvedValueOnce({
+        githubPullRequestMergeOperation: {
+          state: "COMPLETED",
+          postMergeSwitch: completed,
+        },
+      } as never);
+    const view = renderHook(() => useMergeOperation(key));
+    let watch!: Promise<void>;
+    await act(async () => {
+      watch = trackPostMergeSwitch(key, target);
+    });
+    expect(view.result.current.pending).toBe(false);
+    expect(view.result.current.postMergeSwitch).toBeUndefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+      await watch;
+    });
+    expect(request).toHaveBeenCalledTimes(3);
+    expect(view.result.current.postMergeSwitch).toEqual(completed);
+    expect(view.result.current.error).toBeNull();
+  },
+);
+
+test("reports repeated polling failures while auto-merge waits for CI", async () => {
+  vi.useFakeTimers();
+  request
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "WAITING_CI",
+        postMergeSwitch: pending,
+      },
+    } as never)
+    .mockRejectedValue(new Error("Connection lost"));
+  const view = renderHook(() => useMergeOperation(key));
+  let watch!: Promise<void>;
+  await act(async () => {
+    watch = trackPostMergeSwitch(key, target);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(6000);
+    await watch;
+  });
+  expect(request).toHaveBeenCalledTimes(4);
+  expect(view.result.current.pending).toBe(false);
+  expect(view.result.current.error).toBe("Connection lost");
+});
+
+test("retries an initial recovery failure before the coordinator is known", async () => {
+  vi.useFakeTimers();
+  request
+    .mockRejectedValueOnce(new Error("Connection lost"))
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "WAITING_CI",
+        postMergeSwitch: pending,
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "COMPLETED",
+        postMergeSwitch: completed,
+      },
+    } as never);
+  const view = renderHook(() => useMergeOperation(key));
+  let watch!: Promise<void>;
+  await act(async () => {
+    watch = trackPostMergeSwitch(key, target);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+    await watch;
+  });
+  expect(request).toHaveBeenCalledTimes(3);
+  expect(view.result.current.postMergeSwitch).toEqual(completed);
+  expect(view.result.current.error).toBeNull();
+});
+
+test("bounds failed recovery probes without reporting an unknown operation", async () => {
+  vi.useFakeTimers();
+  request.mockRejectedValue(new Error("Connection lost"));
+  const view = renderHook(() => useMergeOperation(key));
+  let watch!: Promise<void>;
+  await act(async () => {
+    watch = trackPostMergeSwitch(key, target);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(4000);
+    await watch;
+  });
+  expect(request).toHaveBeenCalledTimes(3);
+  expect(view.result.current.error).toBeNull();
+});
+
+test("clears canceled coordinator progress after its saved operation disappears", async () => {
+  vi.useFakeTimers();
+  request
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "WAITING_CI",
+        postMergeSwitch: pending,
+      },
+    } as never)
+    .mockResolvedValueOnce({ githubPullRequestMergeOperation: null } as never);
+  const view = renderHook(() => useMergeOperation(key));
+  let watch!: Promise<void>;
+  await act(async () => {
+    watch = trackPostMergeSwitch(key, target);
+    await runMergeOperation(key, "cancel", async () => null);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+    await watch;
+  });
+  expect(view.result.current.followUpOperation).toBeUndefined();
+  expect(view.result.current.pending).toBe(false);
+  expect(view.result.current.error).toBeNull();
+});
+
+test("keeps a confirmed result and completed checkout after coordinator cleanup", async () => {
+  const result = { state: "MERGED" };
+  await runMergeOperation(key, "merge", async () => result);
+  recordMergeOperationProgress(key, false, null, undefined, "COMPLETED");
+  recordPostMergeSwitch(key, completed);
+  request.mockResolvedValue({ githubPullRequestMergeOperation: null } as never);
+  const view = renderHook(() => useMergeOperation(key));
+  await act(async () => {
+    await trackPostMergeSwitch(key, target);
+  });
+  expect(view.result.current.followUpOperation).toBeUndefined();
+  expect(view.result.current.result).toBe(result);
+  expect(view.result.current.postMergeSwitch).toEqual(completed);
+});
+
+test("waits for cancellation to settle when the provider may already have merged", async () => {
+  vi.useFakeTimers();
+  request
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "WAITING_CI",
+        postMergeSwitch: pending,
+      },
+    } as never)
+    .mockResolvedValueOnce({ githubPullRequestMergeOperation: null } as never)
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "POST_MERGE",
+        postMergeSwitch: pending,
+      },
+    } as never)
+    .mockResolvedValueOnce({
+      githubPullRequestMergeOperation: {
+        state: "COMPLETED",
+        postMergeSwitch: completed,
+      },
+    } as never);
+  let finishCancel!: () => void;
+  const cancellation = new Promise<void>((resolve) => {
+    finishCancel = resolve;
+  });
+  const result = { state: "MERGED" };
+  const view = renderHook(() => useMergeOperation(key));
+  let watch!: Promise<void>;
+  let cancel!: ReturnType<typeof runMergeOperation>;
+  await act(async () => {
+    watch = trackPostMergeSwitch(key, target);
+    cancel = runMergeOperation(key, "cancel", async () => {
+      await cancellation;
+      return result;
+    });
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+  });
+  expect(view.result.current.pending).toBe(true);
+  expect(view.result.current.followUpOperation?.state).toBe("WAITING_CI");
+  await act(async () => {
+    finishCancel();
+    await cancel;
+    await vi.advanceTimersByTimeAsync(4000);
+    await watch;
+  });
+  expect(request).toHaveBeenCalledTimes(4);
+  expect(view.result.current.result).toBe(result);
+  expect(view.result.current.postMergeSwitch).toEqual(completed);
+  expect(view.result.current.error).toBeNull();
+});
+
 test("stops pending progress when the coordinator requires attention", async () => {
   request.mockResolvedValue({
     githubPullRequestMergeOperation: {

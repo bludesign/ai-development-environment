@@ -534,6 +534,73 @@ describe("MergePullRequestButton", () => {
     },
   );
 
+  test("allows merging again after canceling auto-merge with a checkout follow-up", async () => {
+    let canceled = false;
+    const status = { branch: "main", state: "PENDING", lastError: null };
+    const operation = {
+      autoSync: true,
+      state: "WAITING_CI",
+      lastError: null,
+      postMergeSwitch: status,
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestMergeOptions"))
+        return {
+          githubPullRequestMergeOptions: {
+            availableMethods: ["SQUASH"],
+            commitEmails: [],
+            defaultCommitHeadline: "APP-42 Add API",
+            defaultCommitBody: "",
+            canMerge: true,
+            worktreeId: "wt",
+            autoMergeOperation: canceled ? null : operation,
+          },
+        } as never;
+      if (query.includes("query GitHubPullRequestMergeOperation"))
+        return {
+          githubPullRequestMergeOperation: canceled ? null : operation,
+        } as never;
+      if (query.includes("mutation CancelWorktreeAutoMerge")) {
+        canceled = true;
+        return { cancelWorktreeAutoMerge: true } as never;
+      }
+      return {
+        mergeGitHubPullRequest: { state: "MERGED", postMergeError: null },
+      } as never;
+    });
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        open
+      />,
+    );
+    await screen.findByText("Waiting for CI");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel Auto Merge" }));
+    const merge = await screen.findByRole(
+      "button",
+      { name: "Merge pull request" },
+      { timeout: 3500 },
+    );
+    expect(merge.hasAttribute("disabled")).toBe(false);
+    expect(
+      screen.queryByRole("button", { name: "Cancel Auto Merge" }),
+    ).toBeNull();
+    fireEvent.click(merge);
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          query.includes("mutation MergeGitHubPullRequest"),
+        ),
+      ).toHaveLength(1),
+    );
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation CancelWorktreeAutoMerge"),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("shows only enabled methods and submits the selected commit details", async () => {
     const onMerged = vi.fn();
     request.mockImplementation(async (query, variables) => {

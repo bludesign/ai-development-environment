@@ -15,7 +15,6 @@ import {
   PostMergeSwitchProgress,
   POST_MERGE_SWITCH_FIELDS,
   trackPostMergeSwitch,
-  usePostMergeSwitchRecovery,
 } from "@/components/github/post-merge-switch-client";
 import {
   githubMergeOperationKey,
@@ -516,16 +515,6 @@ function GitHubAutoMergeButton({
       : null);
   const trackedKey = githubMergeOperationKey(
     trackedRequest ?? { repositoryNameWithOwner: "", number: 0 },
-  );
-  usePostMergeSwitchRecovery(
-    trackedKey,
-    {
-      provider: "github",
-      owner: trackedRequest?.repositoryNameWithOwner.split("/")[0] ?? "",
-      name: trackedRequest?.repositoryNameWithOwner.split("/")[1] ?? "",
-      number: trackedRequest?.number ?? 0,
-    },
-    Boolean(currentRule?.postMergeSwitch),
   );
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);

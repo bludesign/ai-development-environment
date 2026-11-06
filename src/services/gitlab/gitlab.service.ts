@@ -890,6 +890,10 @@ export class GitLabService {
     return this.mergeCoordinator?.operation(projectId, iid) ?? null;
   }
 
+  async worktreeMergeOperations(worktreeIds: string[]) {
+    return this.mergeCoordinator?.worktreeMergeOperations(worktreeIds) ?? [];
+  }
+
   async mergeReadiness(projectId: string, iid: number, force = true) {
     const mr = (
       await this.get<RawGitLabMergeRequest>({

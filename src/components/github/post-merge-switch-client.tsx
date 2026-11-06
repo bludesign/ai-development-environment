@@ -11,6 +11,7 @@ import {
   postMergeSwitchPending,
   recordPostMergeSwitch,
   recordMergeOperationProgress,
+  clearMergeOperationProgress,
   useMergeOperation,
   type PostMergeSwitchStatus,
 } from "./merge-operation-state";
@@ -27,6 +28,13 @@ type Target =
   | { provider: "gitlab"; projectId: string; iid: number };
 
 const watchers = new Map<string, Promise<void>>();
+const ACTIVE_OPERATION_STATES = new Set([
+  "SYNCING",
+  "WAITING_CI",
+  "WAITING_REQUIREMENTS",
+  "MERGING",
+  "POST_MERGE",
+]);
 
 async function loadOperation(target: Target): Promise<Operation | null> {
   if (target.provider === "github") {
@@ -85,12 +93,19 @@ export function trackPostMergeSwitch(
         const operation = await loadOperation(target);
         const status = operation?.postMergeSwitch;
         if (!status) {
-          if (
-            !postMergeSwitchPending(
-              getMergeOperationSnapshot(key).postMergeSwitch,
-            )
-          )
+          const snapshot = getMergeOperationSnapshot(key);
+          // A cancellation can race the provider confirming the merge. Let its
+          // mutation settle before discarding the coordinator's previous state.
+          if (snapshot.mutationPending) {
+            await new Promise<void>((resolve) =>
+              window.setTimeout(resolve, 2000),
+            );
+            continue;
+          }
+          if (!postMergeSwitchPending(snapshot.postMergeSwitch)) {
+            clearMergeOperationProgress(key);
             return;
+          }
           if (++failures >= 3)
             throw new Error(
               "The merge follow-up could not be found. Refresh and retry.",
@@ -163,9 +178,17 @@ export function trackPostMergeSwitch(
         )
           return;
       } catch (error) {
-        const status = getMergeOperationSnapshot(key).postMergeSwitch;
-        if (!status && !getMergeOperationSnapshot(key).pending) return;
+        const snapshot = getMergeOperationSnapshot(key);
+        const status = snapshot.postMergeSwitch;
         if (++failures >= 3) {
+          if (
+            !status &&
+            !snapshot.pending &&
+            !ACTIVE_OPERATION_STATES.has(
+              snapshot.followUpOperation?.state ?? "",
+            )
+          )
+            return;
           if (!status) {
             recordMergeOperationProgress(
               key,

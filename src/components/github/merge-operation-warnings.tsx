@@ -20,15 +20,20 @@ import {
 /** Kept outside result rows, which can disappear after a confirmed merge refreshes. */
 export function MergeOperationWarnings({
   provider,
+  operationKeys,
 }: {
   provider?: "github" | "gitlab";
+  operationKeys?: readonly string[];
 }) {
   const t = useTranslations("pullRequests");
-  const errors = useMergeOperationErrors().filter(
-    (entry) => !provider || JSON.parse(entry.key)[0] === provider,
+  const included = (key: string) =>
+    (!provider || JSON.parse(key)[0] === provider) &&
+    (!operationKeys || operationKeys.includes(key));
+  const errors = useMergeOperationErrors().filter((entry) =>
+    included(entry.key),
   );
-  const progress = useMergeOperationProgress().filter(
-    (entry) => !provider || JSON.parse(entry.key)[0] === provider,
+  const progress = useMergeOperationProgress().filter((entry) =>
+    included(entry.key),
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const selected = [...errors, ...progress].find(

@@ -99,6 +99,14 @@ export const createGitLabResolvers = (
         canCancel: (job: GitLabJobView) => job.canCancel ?? false,
       },
       Query: {
+        gitlabWorktreeMergeOperations: (
+          _root: unknown,
+          args: { worktreeIds: string[] },
+          context: GraphQLContext,
+        ) =>
+          checked(context, () =>
+            gitLabService.worktreeMergeOperations(args.worktreeIds),
+          ),
         gitlabMergeOperation: (
           _root: unknown,
           args: { projectId: string; iid: number },

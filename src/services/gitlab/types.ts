@@ -239,6 +239,8 @@ export type GitLabMergeRequestView = {
 };
 
 export type GitLabMergeOperationView = {
+  projectId: string;
+  iid: number;
   postMergeSwitch?: {
     branch: string;
     state: string;

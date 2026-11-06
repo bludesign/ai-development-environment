@@ -951,6 +951,11 @@ type GitLabReviewerDirectory {
 }
 
 extend type Query {
+  "Unfinished persisted checkout follow-ups for the selected worktrees, including after their branches change."
+  gitlabWorktreeMergeOperations(
+    "Checkout identifiers whose saved follow-ups should be recovered."
+    worktreeIds: [ID!]!
+  ): [GitLabMergeOperation!]!
   "Persisted merge and follow-up status without a provider request."
   gitlabMergeOperation(
     "Target project identifier."
@@ -1254,6 +1259,10 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Target project identifier for the saved merge request."
+  projectId: ID!
+  "Project-scoped merge-request number."
+  iid: Int!
   "Progress of returning the primary checkout to the default branch."
   postMergeSwitch: PostMergeSwitchStatus
   "Whether AIDE syncs the linked branch before merging."

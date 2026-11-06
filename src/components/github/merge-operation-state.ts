@@ -286,6 +286,18 @@ export function recordMergeOperationProgress(
   });
 }
 
+export function clearMergeOperationProgress(key: string) {
+  const previous = getMergeOperationSnapshot(key);
+  publish(key, {
+    ...previous,
+    followUpOperation: undefined,
+    managedPending: false,
+    pending:
+      Boolean(previous.mutationPending) ||
+      postMergeSwitchPending(previous.postMergeSwitch),
+  });
+}
+
 export function dismissMergeOperationProgress(key: string) {
   const state = operations.get(key);
   if (state && !state.pending && state.postMergeSwitch?.state === "COMPLETED")

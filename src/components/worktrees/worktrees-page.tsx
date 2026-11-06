@@ -2,6 +2,7 @@
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 import { WorktreeActiveOperations } from "./worktree-active-operations";
+import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
 
 import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 
@@ -1095,6 +1096,9 @@ export function WorktreesPage({
 
   return (
     <section className="flex w-full flex-col gap-6">
+      <WorktreeMergeFollowUps
+        groups={overview?.agents.flatMap((agent) => agent.codebases) ?? []}
+      />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">

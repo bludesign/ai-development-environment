@@ -71,6 +71,8 @@ export function gitLabMergeOperationView(
 ): GitLabMergeOperationView {
   return {
     id: row.id,
+    projectId: row.projectId,
+    iid: row.iid,
     postMergeSwitch: postMergeSwitchView(row.postMergeSwitchJson),
     baseBranchUpdateResults: baseBranchUpdateResults(row.baseBranchUpdatesJson),
     state: row.state,
@@ -206,6 +208,27 @@ export class GitLabMergeService {
   async operation(projectId: string, iid: number) {
     const row = await this.record(projectId, iid);
     return row ? gitLabMergeOperationView(row) : null;
+  }
+
+  async worktreeMergeOperations(
+    worktreeIds: string[],
+  ): Promise<GitLabMergeOperationView[]> {
+    const ids = [...new Set(worktreeIds)];
+    if (!ids.length) return [];
+    const settings = await this.gitlab.getSettings();
+    if (!settings.configured || !settings.baseUrl) return [];
+    const rows = await (
+      await getPrismaClient()
+    ).gitLabMergeOperation.findMany({
+      where: {
+        instanceUrl: settings.baseUrl,
+        worktreeId: { in: ids },
+        postMergeSwitchJson: { not: null },
+        state: { notIn: ["COMPLETED", "CANCELED", "CANCELLED"] },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    });
+    return rows.map(gitLabMergeOperationView);
   }
 
   private async context(
