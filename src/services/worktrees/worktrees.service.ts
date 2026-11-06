@@ -1983,7 +1983,13 @@ export class WorktreesService {
     return {
       agents: [...agentGroups.values()].map((group) => ({
         agent: group.agent,
-        codebases: group.codebases,
+        codebases: group.codebases.sort(
+          (left, right) =>
+            left.repository.name.localeCompare(right.repository.name) ||
+            left.repository.id.localeCompare(right.repository.id) ||
+            left.codebase.folder.localeCompare(right.codebase.folder) ||
+            left.codebase.id.localeCompare(right.codebase.id),
+        ),
       })),
       tags,
       settings,

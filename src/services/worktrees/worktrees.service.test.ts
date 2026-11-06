@@ -259,6 +259,111 @@ describe("WorktreesService", () => {
     expect(view().defaultBranchUpdateEnabled).toBe(false);
   });
 
+  test("keeps overview codebases ordered by repository and checkout when branches change", async () => {
+    const original = storedWorktreeRecord();
+    const repository = {
+      ...original.codebase.repository,
+      id: "repository-1",
+      name: "universal-search",
+    };
+    const agent = {
+      ...original.codebase.agent,
+      id: "agent-1",
+      name: "Server-5",
+    };
+    const row = (
+      id: string,
+      codebaseId: string,
+      folder: string,
+      branch: string,
+      repo = repository,
+    ) => ({
+      ...original,
+      id,
+      codebaseId,
+      branch,
+      folder: `${folder}/${id}`,
+      pullRequest: null,
+      codebase: {
+        ...original.codebase,
+        id: codebaseId,
+        folder,
+        agent,
+        repository: repo,
+      },
+    });
+    const checkoutA = row("a-main", "codebase-z", "/repos/a", "main");
+    const checkoutAFeature = row(
+      "a-feature",
+      "codebase-z",
+      "/repos/a",
+      "feature/b",
+    );
+    const checkoutB = row("b-main", "codebase-a", "/repos/b", "feature/a");
+    const sameNameRepository = row(
+      "other-main",
+      "codebase-other",
+      "/repos/0",
+      "main",
+      { ...repository, id: "repository-2" },
+    );
+    const ios = row("ios-main", "codebase-ios", "/repos/ios", "main", {
+      ...repository,
+      id: "repository-0",
+      name: "universal-search-ios",
+    });
+    const findMany = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        deleteMany: vi.fn(),
+        findMany,
+        count: vi.fn().mockResolvedValue(0),
+      },
+      worktreeTag: { findMany: vi.fn().mockResolvedValue([]) },
+      worktreeSettings: {
+        upsert: vi.fn().mockResolvedValue({ editorVariant: "CODE" }),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
+      workflow: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {
+        storedSummaries: vi.fn().mockResolvedValue(new Map()),
+      } as unknown as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+    );
+
+    for (const branch of ["main", "feature/0", "main"]) {
+      checkoutA.branch = branch;
+      // A branch change can alter the query's first-seen codebase order.
+      const records =
+        branch === "main"
+          ? [checkoutB, checkoutAFeature, checkoutA, sameNameRepository, ios]
+          : [checkoutA, checkoutB, checkoutAFeature, sameNameRepository, ios];
+      findMany.mockResolvedValue(records);
+      const overview = await worktrees.overview(undefined, undefined, true);
+      const codebases = overview.agents[0]!.codebases;
+      expect(codebases.map((group) => group.codebase.id)).toEqual([
+        "codebase-z",
+        "codebase-a",
+        "codebase-other",
+        "codebase-ios",
+      ]);
+      expect(codebases[0]!.worktrees.map((worktree) => worktree.id)).toEqual(
+        branch === "main" ? ["a-feature", "a-main"] : ["a-main", "a-feature"],
+      );
+      expect(
+        codebases[0]!.worktrees.find((worktree) => worktree.id === "a-main")!
+          .isDefaultBranch,
+      ).toBe(branch === "main");
+    }
+  });
+
   test("notifies after a successful new worktree projection with a worktree link", async () => {
     let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
     const control = {

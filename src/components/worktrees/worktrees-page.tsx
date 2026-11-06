@@ -463,21 +463,24 @@ function worktreeIsDefaultBranch(
   );
 }
 
-/** Keep defaults below every ordinary checkout in the selected top-level group. */
+/** Keep defaults last within each checkout subgroup without moving subgroups. */
 export function defaultBranchSections<
   T extends { group: WorktreeCodebaseGroup },
 >(entries: T[]): T[] {
-  return [false, true].flatMap((isDefault) =>
-    entries.flatMap((entry) => {
-      const worktrees = entry.group.worktrees.filter(
-        (worktree) =>
-          worktreeIsDefaultBranch(worktree, entry.group) === isDefault,
-      );
-      return worktrees.length
-        ? [{ ...entry, group: { ...entry.group, worktrees } }]
-        : [];
-    }),
-  );
+  return entries.map((entry) => {
+    const ordinary: Worktree[] = [];
+    const defaults: Worktree[] = [];
+    for (const worktree of entry.group.worktrees) {
+      (worktreeIsDefaultBranch(worktree, entry.group)
+        ? defaults
+        : ordinary
+      ).push(worktree);
+    }
+    return {
+      ...entry,
+      group: { ...entry.group, worktrees: [...ordinary, ...defaults] },
+    };
+  });
 }
 
 export function groupWorktreesByRepository(
@@ -1728,10 +1731,7 @@ function AgentSection({
       {defaultBranchSections(
         agentGroup.codebases.map((group) => ({ group })),
       ).map(({ group }) => (
-        <section
-          className="space-y-3"
-          key={`${group.codebase.id}:${worktreeIsDefaultBranch(group.worktrees[0], group)}`}
-        >
+        <section className="space-y-3" key={group.codebase.id}>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 className="font-medium">{group.repository.name}</h3>
@@ -1764,10 +1764,7 @@ function RepositorySection({
       </div>
       {defaultBranchSections(repositoryGroup.entries).map(
         ({ agentGroup, group }) => (
-          <section
-            className="space-y-3"
-            key={`${group.codebase.id}:${worktreeIsDefaultBranch(group.worktrees[0], group)}`}
-          >
+          <section className="space-y-3" key={group.codebase.id}>
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h3 className="font-medium">{agentGroup.agent.name}</h3>
