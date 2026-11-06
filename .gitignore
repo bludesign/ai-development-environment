@@ -3,6 +3,8 @@
 # dependencies
 /node_modules
 /packages/control-agent/node_modules
+/.bundle/
+/vendor/bundle/
 /.pnp
 .pnp.*
 .yarn/*

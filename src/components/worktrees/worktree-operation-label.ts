@@ -63,6 +63,7 @@ const kindLabels: Record<string, string> = {
   [worktrees.WORKTREE_GIT_OPERATION_JOB_KIND]: "gitOperation",
   [worktrees.WORKTREE_COMMIT_JOB_KIND]: "commit",
   [worktrees.WORKTREE_AUTO_SYNC_JOB_KIND]: "autoSync",
+  [worktrees.WORKTREE_POST_MERGE_SWITCH_JOB_KIND]: "switchBranch",
   [worktrees.WORKTREE_PREPARATION_JOB_KIND]: "preparations",
   [worktrees.WORKTREE_BRANCH_JOB_KIND]: "manageBranch",
   [worktrees.WORKTREE_MOVE_PUSH_JOB_KIND]: "movePush",

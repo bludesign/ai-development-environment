@@ -904,6 +904,15 @@ const mockTranslations = {
     githubDefaultEmail: "Use GitHub account default",
     cancelMerge: "Cancel",
     merging: "Merging…",
+    switchToDefaultBranchAfterMerge: "Switch to {branch} after merge",
+    switchToDefaultBranchDescription:
+      "Fetch the merged code before switching this primary checkout. Local changes will be left untouched.",
+    updatingDefaultBranch: "Updating {branch}\u2026",
+    switchedToDefaultBranch: "Switched to {branch}.",
+    switchToDefaultBranchFailed:
+      "Merge completed; switching to {branch} needs attention.",
+    retryMergeFollowUps: "Retry follow-ups",
+
     pipelineStates: {
       ACTION_REQUIRED: "Action required",
       CANCELLED: "Cancelled",

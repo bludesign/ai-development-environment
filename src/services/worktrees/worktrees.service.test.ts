@@ -10,6 +10,7 @@ import { CODEBASE_DEFAULT_BRANCHES_CAPABILITY } from "@ai-development-environmen
 import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import {
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
@@ -192,6 +193,78 @@ function autoSyncWorktreeRecord() {
 describe("WorktreesService", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  test("dispatches a reviewed primary switch idempotently and rejects changed checkout identity", async () => {
+    const payload = {
+      codebaseId: "codebase-1",
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      expectedOrigin: "github.com/openai/codex",
+      expectedBranch: "feature/reviewed",
+      expectedHeadSha: "a".repeat(40),
+      branch: "main",
+      mergeCommitSha: "b".repeat(40),
+    };
+    const runnable = {
+      id: "worktree-1",
+      ...payload,
+      primary: true,
+      missingAt: null,
+      availability: "AVAILABLE",
+      codebase: {
+        agentId: "agent-1",
+        agent: {
+          lastSeenAt: new Date(),
+          disconnectedAt: null,
+          capabilitiesJson: JSON.stringify([
+            WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+            OPERATION_RESOURCES_CAPABILITY,
+          ]),
+        },
+        repository: { canonicalOrigin: payload.expectedOrigin },
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      worktree: { findUnique: vi.fn().mockResolvedValue(runnable) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "switch-job" });
+    const control = {
+      registerCompletionHandler: vi.fn(),
+      createJob,
+    } as unknown as AgentControlService;
+    const worktrees = service(control);
+    const input = {
+      ...payload,
+      worktreeId: "worktree-1",
+      requestId: "merge-1",
+    };
+    await expect(worktrees.postMergeSwitch(input)).resolves.toEqual({
+      id: "switch-job",
+    });
+    expect(createJob).toHaveBeenCalledWith({
+      agentId: "agent-1",
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-1",
+      kind: WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+      payload,
+      idempotencyKey: "worktree:post-merge-switch:merge-1:worktree-1",
+      timeoutSeconds: 180,
+    });
+    for (const mismatch of [
+      { folder: "/different" },
+      { gitDirectory: "/different/.git" },
+      { expectedOrigin: "github.com/another/repo" },
+    ]) {
+      await expect(
+        worktrees.postMergeSwitch({ ...input, ...mismatch }),
+      ).rejects.toThrow("identity changed");
+    }
+    runnable.primary = false;
+    await expect(worktrees.postMergeSwitch(input)).rejects.toThrow(
+      "identity changed",
+    );
+    expect(createJob).toHaveBeenCalledOnce();
+  });
+
   test("classifies current default branches and derives maintenance pauses independently of their base", () => {
     const original = storedWorktreeRecord();
     const record = {
@@ -257,6 +330,111 @@ describe("WorktreesService", () => {
     expect(view().isDefaultBranch).toBe(true);
     record.codebase.agent.capabilitiesJson = "[]";
     expect(view().defaultBranchUpdateEnabled).toBe(false);
+  });
+
+  test("keeps overview codebases ordered by repository and checkout when branches change", async () => {
+    const original = storedWorktreeRecord();
+    const repository = {
+      ...original.codebase.repository,
+      id: "repository-1",
+      name: "universal-search",
+    };
+    const agent = {
+      ...original.codebase.agent,
+      id: "agent-1",
+      name: "Server-5",
+    };
+    const row = (
+      id: string,
+      codebaseId: string,
+      folder: string,
+      branch: string,
+      repo = repository,
+    ) => ({
+      ...original,
+      id,
+      codebaseId,
+      branch,
+      folder: `${folder}/${id}`,
+      pullRequest: null,
+      codebase: {
+        ...original.codebase,
+        id: codebaseId,
+        folder,
+        agent,
+        repository: repo,
+      },
+    });
+    const checkoutA = row("a-main", "codebase-z", "/repos/a", "main");
+    const checkoutAFeature = row(
+      "a-feature",
+      "codebase-z",
+      "/repos/a",
+      "feature/b",
+    );
+    const checkoutB = row("b-main", "codebase-a", "/repos/b", "feature/a");
+    const sameNameRepository = row(
+      "other-main",
+      "codebase-other",
+      "/repos/0",
+      "main",
+      { ...repository, id: "repository-2" },
+    );
+    const ios = row("ios-main", "codebase-ios", "/repos/ios", "main", {
+      ...repository,
+      id: "repository-0",
+      name: "universal-search-ios",
+    });
+    const findMany = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      worktree: {
+        deleteMany: vi.fn(),
+        findMany,
+        count: vi.fn().mockResolvedValue(0),
+      },
+      worktreeTag: { findMany: vi.fn().mockResolvedValue([]) },
+      worktreeSettings: {
+        upsert: vi.fn().mockResolvedValue({ editorVariant: "CODE" }),
+      },
+      codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
+      workflow: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const worktrees = new WorktreesService(
+      { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
+      {
+        storedSummaries: vi.fn().mockResolvedValue(new Map()),
+      } as unknown as JiraService,
+      {} as GitHubService,
+      undefined,
+      undefined,
+      pipelineStatus,
+    );
+
+    for (const branch of ["main", "feature/0", "main"]) {
+      checkoutA.branch = branch;
+      // A branch change can alter the query's first-seen codebase order.
+      const records =
+        branch === "main"
+          ? [checkoutB, checkoutAFeature, checkoutA, sameNameRepository, ios]
+          : [checkoutA, checkoutB, checkoutAFeature, sameNameRepository, ios];
+      findMany.mockResolvedValue(records);
+      const overview = await worktrees.overview(undefined, undefined, true);
+      const codebases = overview.agents[0]!.codebases;
+      expect(codebases.map((group) => group.codebase.id)).toEqual([
+        "codebase-z",
+        "codebase-a",
+        "codebase-other",
+        "codebase-ios",
+      ]);
+      expect(codebases[0]!.worktrees.map((worktree) => worktree.id)).toEqual(
+        branch === "main" ? ["a-feature", "a-main"] : ["a-main", "a-feature"],
+      );
+      expect(
+        codebases[0]!.worktrees.find((worktree) => worktree.id === "a-main")!
+          .isDefaultBranch,
+      ).toBe(branch === "main");
+    }
   });
 
   test("notifies after a successful new worktree projection with a worktree link", async () => {

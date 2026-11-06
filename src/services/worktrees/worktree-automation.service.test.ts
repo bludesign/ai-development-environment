@@ -85,6 +85,7 @@ function retargetFixture() {
     state: "WAITING_REQUIREMENTS",
     autoSync: false,
     syncStateJson: null,
+    postMergeSwitchJson: null,
     baseBranchUpdatesJson: null,
     repositoryNameWithOwner: "acme/widgets",
     pullRequestNumber: 17,

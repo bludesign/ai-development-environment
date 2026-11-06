@@ -24,6 +24,14 @@ import {
 import type { WorktreesService } from "@/services/worktrees";
 import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
+import {
+  advancePostMergeSwitch,
+  getPostMergeSwitchOptions,
+  postMergeSwitchView,
+  preparePostMergeSwitch,
+  retryPostMergeSwitch,
+  updatePostMergeSwitchSource,
+} from "@/services/worktrees/post-merge-switch";
 import { publishIntegrationConfiguration } from "@/services/integration-configuration-events";
 import { GitLabRequestError, type GitLabService } from "./gitlab.service";
 import {
@@ -63,6 +71,9 @@ export function gitLabMergeOperationView(
 ): GitLabMergeOperationView {
   return {
     id: row.id,
+    projectId: row.projectId,
+    iid: row.iid,
+    postMergeSwitch: postMergeSwitchView(row.postMergeSwitchJson),
     baseBranchUpdateResults: baseBranchUpdateResults(row.baseBranchUpdatesJson),
     state: row.state,
     autoMerge: row.autoMerge,
@@ -199,6 +210,27 @@ export class GitLabMergeService {
     return row ? gitLabMergeOperationView(row) : null;
   }
 
+  async worktreeMergeOperations(
+    worktreeIds: string[],
+  ): Promise<GitLabMergeOperationView[]> {
+    const ids = [...new Set(worktreeIds)];
+    if (!ids.length) return [];
+    const settings = await this.gitlab.getSettings();
+    if (!settings.configured || !settings.baseUrl) return [];
+    const rows = await (
+      await getPrismaClient()
+    ).gitLabMergeOperation.findMany({
+      where: {
+        instanceUrl: settings.baseUrl,
+        worktreeId: { in: ids },
+        postMergeSwitchJson: { not: null },
+        state: { notIn: ["COMPLETED", "CANCELED", "CANCELLED"] },
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    });
+    return rows.map(gitLabMergeOperationView);
+  }
+
   private async context(
     mr: GitLabMergeRequestView,
     worktreeId?: string | null,
@@ -245,6 +277,9 @@ export class GitLabMergeService {
       : null;
     return {
       projectPath: project.path_with_namespace,
+      targetOrigin: normalizeGitOrigin(project.web_url).canonicalOrigin,
+      targetMergeMethod: project.merge_method,
+      automaticRebaseEnabled: project.automatic_rebase_enabled,
       sourceOrigin,
       worktree,
       ticketKey,
@@ -319,6 +354,14 @@ export class GitLabMergeService {
         )
       : null;
     return {
+      ...(await getPostMergeSwitchOptions(
+        mr.state === "MERGED"
+          ? (saved?.worktreeId ?? null)
+          : (context.worktree?.id ?? null),
+        context.targetOrigin,
+        mr.targetBranch,
+        saved?.postMergeSwitchJson,
+      )),
       canAutoMergeWithSync:
         !autoSyncBlockedReason &&
         canMerge &&
@@ -457,6 +500,27 @@ export class GitLabMergeService {
           input.iid,
         );
         const context = await this.context(mr, input.worktreeId);
+        const preparedSwitch = await preparePostMergeSwitch(
+          options.worktreeId,
+          {
+            origin: context.targetOrigin,
+            branch: mr.targetBranch,
+            sourceBranch: mr.sourceBranch,
+            sourceSha: input.sha,
+          },
+          Boolean(input.switchToDefaultBranch),
+        );
+        const postMergeSwitchJson = preparedSwitch
+          ? JSON.stringify({
+              ...(JSON.parse(preparedSwitch) as object),
+              // A later policy change must not authorize treating a rewritten
+              // result as the original source commit.
+              gitlabFastForwardSourceShaAllowed:
+                context.targetMergeMethod === "ff" &&
+                context.automaticRebaseEnabled === false &&
+                !squash,
+            })
+          : null;
         if (
           input.autoMerge &&
           context.worktree &&
@@ -471,6 +535,7 @@ export class GitLabMergeService {
           autoSync: false,
           syncStateJson: null as string | null,
           baseBranchUpdatesJson,
+          postMergeSwitchJson,
           sourceProjectId: mr.sourceProjectId ?? null,
           sourceOrigin: context.sourceOrigin,
           branch: mr.sourceBranch,
@@ -799,6 +864,41 @@ export class GitLabMergeService {
           this.worktrees,
         );
       }
+      if (row.postMergeSwitchJson) {
+        const project = await this.gitlab.mergeProject(row.projectId, true);
+        const savedPolicy = JSON.parse(row.postMergeSwitchJson) as {
+          gitlabFastForwardSourceShaAllowed?: boolean;
+        };
+        const mergeCommitSha =
+          confirmed.mergeCommitSha ??
+          confirmed.squashCommitSha ??
+          (savedPolicy.gitlabFastForwardSourceShaAllowed === true &&
+          project.merge_method === "ff" &&
+          project.automatic_rebase_enabled === false &&
+          !row.squash &&
+          !confirmed.squashOnMerge
+            ? confirmed.sha
+            : null);
+        const completed = await advancePostMergeSwitch(
+          row.postMergeSwitchJson,
+          {
+            origin: normalizeGitOrigin(project.web_url).canonicalOrigin,
+            branch: confirmed.targetBranch,
+            sourceBranch: confirmed.sourceBranch,
+            sourceSha: confirmed.sha,
+            mergeCommitSha,
+          },
+          this.worktrees,
+          this.agents,
+          async (postMergeSwitchJson) => {
+            row = await prisma.gitLabMergeOperation.update({
+              where: { id: row.id },
+              data: { postMergeSwitchJson },
+            });
+          },
+        );
+        if (!completed) return;
+      }
       if (row.moveTicketToDone && row.ticketKey && !row.ticketMovedAt) {
         const ticketMovedAt = await completeMergeTicketFollowUp(this.jira, row);
         row = await prisma.gitLabMergeOperation.update({
@@ -1059,11 +1159,16 @@ export class GitLabMergeService {
       const job = row.deleteJobId
         ? await this.agents.getJob(row.deleteJobId)
         : null;
+      const postMergeSwitchJson = await retryPostMergeSwitch(
+        row.postMergeSwitchJson ?? null,
+        this.agents,
+      );
       row = await prisma.gitLabMergeOperation.update({
         where: { id: row.id },
         data: {
           state: "POST_MERGE",
           lastError: null,
+          postMergeSwitchJson,
           ...(job && TERMINAL_JOBS.has(job.status) && job.status !== "SUCCEEDED"
             ? { deleteJobId: null, deleteRequestId: null }
             : {}),
@@ -1275,6 +1380,14 @@ export class GitLabMergeService {
                       data: {
                         ...data,
                         ...(acceptedHeadSha ? { sha: acceptedHeadSha } : {}),
+                        ...(acceptedHeadSha
+                          ? {
+                              postMergeSwitchJson: updatePostMergeSwitchSource(
+                                current.postMergeSwitchJson ?? null,
+                                acceptedHeadSha,
+                              ),
+                            }
+                          : {}),
                       },
                     }),
                   merge: async (sha, targetSha) => {

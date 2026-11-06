@@ -248,6 +248,10 @@ type GitLabProjectCandidatePage {
 
 "GitLabMergeRequest values exposed by the GitLab integration."
 type GitLabMergeRequest implements SourceControlRequest {
+  "Commit created when GitLab merged this request, when available."
+  mergeCommitSha: String
+  "Commit created by squashing the source branch, when available."
+  squashCommitSha: String
   "Project namespace and name."
   projectPath: String
   "Source project identity, including fork sources."
@@ -414,6 +418,10 @@ type GitLabCommentPage {
 
 "GitLabMergeRequestDetail values exposed by the GitLab integration."
 type GitLabMergeRequestDetail {
+  "Commit created when GitLab merged this request, when available."
+  mergeCommitSha: String
+  "Commit created by squashing the source branch, when available."
+  squashCommitSha: String
   "Project namespace and name."
   projectPath: String
   "Source project identity, including fork sources."
@@ -943,6 +951,18 @@ type GitLabReviewerDirectory {
 }
 
 extend type Query {
+  "Unfinished persisted checkout follow-ups for the selected worktrees, including after their branches change."
+  gitlabWorktreeMergeOperations(
+    "Checkout identifiers whose saved follow-ups should be recovered."
+    worktreeIds: [ID!]!
+  ): [GitLabMergeOperation!]!
+  "Persisted merge and follow-up status without a provider request."
+  gitlabMergeOperation(
+    "Target project identifier."
+    projectId: ID!
+    "Project-scoped merge-request number."
+    iid: Int!
+  ): GitLabMergeOperation
   "List durable reviewer membership cached separately from live approvals."
   gitlabReviewerDirectories: [GitLabReviewerDirectory!]!
   "Source control integration state for Query."
@@ -1239,6 +1259,12 @@ extend type Subscription {
 
 "Persisted merge intent and independently retryable follow-ups."
 type GitLabMergeOperation {
+  "Target project identifier for the saved merge request."
+  projectId: ID!
+  "Project-scoped merge-request number."
+  iid: Int!
+  "Progress of returning the primary checkout to the default branch."
+  postMergeSwitch: PostMergeSwitchStatus
   "Whether AIDE syncs the linked branch before merging."
   autoSync: Boolean!
   "Recorded outcomes for selected targeting worktrees."
@@ -1267,6 +1293,14 @@ type GitLabMergeOperation {
 
 "Current GitLab project policy, readiness, defaults and linked follow-ups."
 type GitLabMergeOptions {
+  "Whether the linked primary checkout can return to the default branch."
+  canSwitchToDefaultBranch: Boolean!
+  "Whether returning to the default branch is selected by default."
+  defaultSwitchToDefaultBranch: Boolean!
+  "Reviewed repository default branch."
+  switchToDefaultBranchName: String
+  "Reason returning to the default branch is unavailable."
+  switchToDefaultBranchUnavailableReason: String
   "Whether the linked worktree supports managed sync and merge."
   canAutoMergeWithSync: Boolean!
   "Reason branch syncing is unavailable."
@@ -1347,6 +1381,8 @@ type GitLabMergeResult {
 
 "Submit the SHA reviewed in the merge sheet. Omitted messages use GitLab defaults."
 input SubmitGitLabMergeRequestMergeInput {
+  "Return the linked primary checkout to the updated default branch after merge."
+  switchToDefaultBranch: Boolean = false
   "Rebase and push the linked branch before waiting for passing CI and merging."
   autoSync: Boolean = false
   "Selected targeting worktrees to update only after the merge is confirmed."

@@ -130,6 +130,8 @@ const mergeResult: GitLabMergeResult = {
   },
   operation: {
     id: "operation-1",
+    projectId: "7",
+    iid: 3,
     state: "ACTION_REQUIRED",
     autoMerge: false,
     worktreeId: "worktree-1",
@@ -176,6 +178,8 @@ const mergeOptions: GitLabMergeOptions = {
 
 function mergeResolvers() {
   const coordinator = {
+    operation: vi.fn().mockResolvedValue(mergeResult.operation),
+    worktreeMergeOperations: vi.fn().mockResolvedValue([mergeResult.operation]),
     options: vi.fn().mockResolvedValue(mergeOptions),
     submit: vi.fn().mockResolvedValue(mergeResult),
     cancel: vi.fn().mockResolvedValue(mergeResult),
@@ -196,6 +200,33 @@ function mergeResolvers() {
 }
 
 describe("GitLab merge API contracts", () => {
+  test("recovers persisted follow-ups by checkout without reading the provider", async () => {
+    const { resolvers, coordinator, state } = mergeResolvers();
+    await expect(
+      resolvers.Query.gitlabWorktreeMergeOperations(
+        {},
+        { worktreeIds: ["worktree-1", "worktree-2"] },
+        context(null),
+      ),
+    ).resolves.toEqual([mergeResult.operation]);
+    expect(coordinator.worktreeMergeOperations).toHaveBeenCalledExactlyOnceWith(
+      ["worktree-1", "worktree-2"],
+    );
+    expect(state).not.toHaveBeenCalled();
+  });
+
+  test("reads persisted background merge progress without a provider read", async () => {
+    const { resolvers, coordinator, state } = mergeResolvers();
+    expect(
+      await resolvers.Query.gitlabMergeOperation(
+        {},
+        { projectId: "7", iid: 3 },
+        context(null),
+      ),
+    ).toBe(mergeResult.operation);
+    expect(coordinator.operation).toHaveBeenCalledExactlyOnceWith("7", 3);
+    expect(state).not.toHaveBeenCalled();
+  });
   test.each([undefined, null, "worktree-1"])(
     "loads policy and follow-up options with worktree context %s",
     async (worktreeId) => {
@@ -223,6 +254,7 @@ describe("GitLab merge API contracts", () => {
       sha: "reviewed-sha",
       autoMerge: false,
       squash: true,
+      switchToDefaultBranch: true,
       removeSourceBranch: false,
       mergeCommitMessage: "Merge reviewed changes",
       squashCommitMessage: "Improve GitLab",
@@ -294,6 +326,13 @@ describe("GitLab merge API contracts", () => {
     const input = { ...args, sha: "reviewed-sha" };
     const agent = context("agent-1");
     for (const call of [
+      () =>
+        resolvers.Query.gitlabWorktreeMergeOperations(
+          {},
+          { worktreeIds: ["worktree-1"] },
+          agent,
+        ),
+      () => resolvers.Query.gitlabMergeOperation({}, args, agent),
       () => resolvers.Query.gitlabMergeRequestMergeOptions({}, args, agent),
       () =>
         resolvers.Mutation.submitGitLabMergeRequestMerge({}, { input }, agent),

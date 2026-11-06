@@ -1,4 +1,6 @@
-export const GITLAB_MERGE_OPERATION_FIELDS = `baseBranchUpdateResults { worktreeId folder status reason } id state autoMerge autoSync worktreeId ticketKey lastError mergeConfirmedAt ticketMovedAt worktreeDeletedAt updatedAt`;
+import { POST_MERGE_SWITCH_FIELDS } from "@/components/github/post-merge-switch-client";
+
+export const GITLAB_MERGE_OPERATION_FIELDS = `baseBranchUpdateResults { worktreeId folder status reason } ${POST_MERGE_SWITCH_FIELDS} id state autoMerge autoSync worktreeId ticketKey lastError mergeConfirmedAt ticketMovedAt worktreeDeletedAt updatedAt`;
 
 export const GITLAB_MERGE_REQUEST_FIELDS = `id iid projectId projectPath sourceProjectId title description state draft webUrl sourceBranch targetBranch sha
   author { id username name avatarUrl webUrl } reviewers { id username name avatarUrl webUrl }

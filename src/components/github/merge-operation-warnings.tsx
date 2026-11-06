@@ -8,33 +8,73 @@ import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
+import { PostMergeSwitchProgress } from "./post-merge-switch-client";
 import { MergePullRequestButton } from "./merge-pull-request-button";
 import {
   dismissMergeOperationError,
+  dismissMergeOperationProgress,
   useMergeOperationErrors,
+  useMergeOperationProgress,
 } from "./merge-operation-state";
 
 /** Kept outside result rows, which can disappear after a confirmed merge refreshes. */
 export function MergeOperationWarnings({
   provider,
+  operationKeys,
 }: {
   provider?: "github" | "gitlab";
+  operationKeys?: readonly string[];
 }) {
   const t = useTranslations("pullRequests");
-  const errors = useMergeOperationErrors().filter(
-    (entry) => !provider || JSON.parse(entry.key)[0] === provider,
+  const included = (key: string) =>
+    (!provider || JSON.parse(key)[0] === provider) &&
+    (!operationKeys || operationKeys.includes(key));
+  const errors = useMergeOperationErrors().filter((entry) =>
+    included(entry.key),
+  );
+  const progress = useMergeOperationProgress().filter((entry) =>
+    included(entry.key),
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selected = errors.find((entry) => entry.key === selectedKey);
+  const selected = [...errors, ...progress].find(
+    (entry) => entry.key === selectedKey,
+  );
   const target = selected
     ? (JSON.parse(selected.key) as ["github" | "gitlab", string, number])
     : null;
   const close = (open: boolean) => {
     if (!open) setSelectedKey(null);
   };
-  if (!errors.length) return null;
+  if (!errors.length && !progress.length) return null;
   return (
     <div className="space-y-2">
+      {progress.map((entry) => (
+        <Alert key={entry.key}>
+          <AlertDescription className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{entry.label}</p>
+              <PostMergeSwitchProgress operationKey={entry.key} />
+            </div>
+            <Button
+              onClick={() => setSelectedKey(entry.key)}
+              size="sm"
+              variant="outline"
+            >
+              {t("details")}
+            </Button>
+            {entry.status.state === "COMPLETED" && (
+              <Button
+                aria-label={t("closeMergeResult")}
+                onClick={() => dismissMergeOperationProgress(entry.key)}
+                size="icon-sm"
+                variant="ghost"
+              >
+                <X />
+              </Button>
+            )}
+          </AlertDescription>
+        </Alert>
+      ))}
       {errors.map((entry) => (
         <Alert key={entry.key} variant="destructive">
           <AlertDescription className="flex flex-wrap items-center gap-2">

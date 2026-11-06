@@ -829,6 +829,7 @@ model WorktreeAutoSync {
 }
 
 model WorktreeAutoMerge {
+  postMergeSwitchJson      String?
   autoSync                Boolean   @default(false)
   syncStateJson           String?
   baseBranchUpdatesJson   String?
@@ -4095,6 +4096,7 @@ model SseHistorySavedFilter {
 
 // Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
 model GitLabMergeOperation {
+  postMergeSwitchJson    String?
   autoSync              Boolean   @default(false)
   syncStateJson         String?
   baseBranchUpdatesJson String?

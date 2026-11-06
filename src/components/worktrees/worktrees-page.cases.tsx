@@ -424,37 +424,90 @@ export function registerWorktreesPageTests(
         ]);
       });
 
-      test("puts defaults below ordinary worktrees across checkout subgroups", () => {
-        const entries = groups.flatMap((agentGroup) =>
-          agentGroup.codebases.map((group) => ({
+      test("keeps checkout subgroups in place and stably puts defaults last inside each", () => {
+        const agentGroup = groups[0]!;
+        const source = agentGroup.codebases[0]!;
+        const worktree = source.worktrees[0]!;
+        const entries = [
+          {
             agentGroup,
             group: {
-              ...group,
+              ...source,
               worktrees: [
                 {
-                  ...group.worktrees[0]!,
-                  id: `${group.codebase.id}-default`,
+                  ...worktree,
+                  id: "release",
+                  branch: "release/1",
                   isDefaultBranch: true,
                 },
                 {
-                  ...group.worktrees[0]!,
-                  id: `${group.codebase.id}-feature`,
+                  ...worktree,
+                  id: "explicit-feature",
+                  branch: "main",
                   isDefaultBranch: false,
                 },
+                { ...worktree, id: "fallback-default", branch: "main" },
+                { ...worktree, id: "detached", branch: null },
+                { ...worktree, id: "feature", branch: "feature/AIDE-25" },
               ],
             },
-          })),
-        );
-        expect(
-          defaultBranchSections(entries).flatMap(({ group }) =>
-            group.worktrees.map((worktree) => worktree.id),
-          ),
-        ).toEqual([
-          "codebase-1-feature",
-          "codebase-2-feature",
-          "codebase-1-default",
-          "codebase-2-default",
+          },
+          {
+            agentGroup,
+            group: {
+              ...source,
+              codebase: { ...source.codebase, id: "default-only" },
+              worktrees: [
+                { ...worktree, id: "default-only", isDefaultBranch: true },
+              ],
+            },
+          },
+          {
+            agentGroup,
+            group: {
+              ...source,
+              codebase: { ...source.codebase, id: "feature-only" },
+              worktrees: [
+                { ...worktree, id: "feature-only", isDefaultBranch: false },
+              ],
+            },
+          },
+          {
+            agentGroup,
+            group: {
+              ...source,
+              codebase: { ...source.codebase, id: "empty" },
+              worktrees: [],
+            },
+          },
+        ];
+        const original = structuredClone(entries);
+        const result = defaultBranchSections(entries);
+
+        expect(result.map(({ group }) => group.codebase.id)).toEqual([
+          "codebase-1",
+          "default-only",
+          "feature-only",
+          "empty",
         ]);
+        expect(
+          result.map(({ group }) => group.worktrees.map(({ id }) => id)),
+        ).toEqual([
+          [
+            "explicit-feature",
+            "detached",
+            "feature",
+            "release",
+            "fallback-default",
+          ],
+          ["default-only"],
+          ["feature-only"],
+          [],
+        ]);
+        expect(result.every((entry) => entry.agentGroup === agentGroup)).toBe(
+          true,
+        );
+        expect(entries).toEqual(original);
       });
 
       test("uses server classification for matched release branches", () => {
@@ -1066,6 +1119,126 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each(
+        ["cards", "table"].flatMap((layout) =>
+          ["agent", "repository"].map((groupBy) => ({ layout, groupBy })),
+        ),
+      )(
+        "keeps subgroup order through branch changes in $layout grouped by $groupBy",
+        async ({ layout, groupBy }) => {
+          window.localStorage.setItem("worktrees-layout", layout);
+          window.localStorage.setItem("worktrees-group-by", groupBy);
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const firstAgent = response.worktreeOverview.agents[0]!;
+          const firstGroup = firstAgent.codebases[0]!;
+          const source = firstGroup.worktrees[0]!;
+          const makeWorktree = (
+            id: string,
+            codebaseId: string,
+            branch: string,
+            isDefaultBranch: boolean,
+          ): Worktree => ({
+            ...source,
+            id,
+            codebaseId,
+            folder: `/workspaces/${id}`,
+            relativePath: id,
+            primary: false,
+            branch,
+            isDefaultBranch,
+            ticketKey: null,
+            ticketTitle: null,
+            ticketStatus: null,
+            pullRequest: null,
+            latestBuild: null,
+            tags: [],
+          });
+          firstAgent.agent.name = "Server-5";
+          firstGroup.repository.name = "universal-search";
+          firstGroup.worktrees = [
+            makeWorktree("default-first", firstGroup.codebase.id, "main", true),
+            makeWorktree(
+              "feature-first",
+              firstGroup.codebase.id,
+              "feature/first",
+              false,
+            ),
+          ];
+          const secondGroup = structuredClone(firstGroup);
+          secondGroup.codebase.id = "codebase-2";
+          secondGroup.codebase.folder = "/workspaces/second";
+          secondGroup.worktrees = [
+            makeWorktree(
+              "default-second",
+              secondGroup.codebase.id,
+              "main",
+              true,
+            ),
+            makeWorktree(
+              "feature-second",
+              secondGroup.codebase.id,
+              "feature/second",
+              false,
+            ),
+          ];
+          if (groupBy === "agent") {
+            secondGroup.repository.id = "repository-2";
+            secondGroup.repository.name = "universal-search-ios";
+            firstAgent.codebases.push(secondGroup);
+          } else {
+            const secondAgent = structuredClone(firstAgent);
+            secondAgent.agent.id = "agent-2";
+            secondAgent.agent.name = "Server-6";
+            secondAgent.codebases = [secondGroup];
+            response.worktreeOverview.agents.push(secondAgent);
+          }
+          render(<WorktreesPage />);
+          await screen.findByRole("button", { name: "feature/first" });
+          const subgroupNames =
+            groupBy === "agent"
+              ? ["universal-search", "universal-search-ios"]
+              : ["Server-5", "Server-6"];
+          const subgroupSections = screen
+            .getAllByRole("heading", { level: 3 })
+            .map((heading) => heading.closest("section")!);
+          const assertOrder = (firstBranches: string[]) => {
+            const headings = screen.getAllByRole("heading", { level: 3 });
+            expect(headings.map((heading) => heading.textContent)).toEqual(
+              subgroupNames,
+            );
+            headings.forEach((heading, index) => {
+              expect(heading.closest("section")).toBe(subgroupSections[index]);
+              const branches = within(heading.closest("section")!)
+                .getAllByRole("button", { name: /^(main|feature\/)/ })
+                .map((button) => button.textContent);
+              expect(branches).toEqual(
+                index === 0 ? firstBranches : ["feature/second", "main"],
+              );
+            });
+          };
+          assertOrder(["feature/first", "main"]);
+
+          const changingWorktree = firstGroup.worktrees[0]!;
+          Object.assign(changingWorktree, {
+            branch: "feature/changed",
+            isDefaultBranch: false,
+          });
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() =>
+            assertOrder(["feature/changed", "feature/first"]),
+          );
+
+          Object.assign(changingWorktree, {
+            branch: "main",
+            isDefaultBranch: true,
+          });
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() => assertOrder(["feature/first", "main"]));
+        },
+      );
+
       test.each(["cards", "table"])(
         "marks default branches and uses gray only without an explicit color in %s",
         async (layout) => {

@@ -74,6 +74,28 @@ docker run --name ai-development-environment \
 
 Full instructions, including enrolling a control agent, are in the [Quickstart](https://ai-development-environment.mintlify.app/quickstart).
 
+## Local Ruby and Fastlane tools
+
+`.tool-versions` pins Node.js and Ruby 4.0.9. `Gemfile` and `Gemfile.lock` pin
+Fastlane 2.241.2, the Firebase App Distribution plugin 1.0.0, and their dependencies.
+With asdf and its Node.js and Ruby plugins installed, run from the repository root:
+
+```bash
+asdf install
+gem update --system 4.0.24
+gem install bundler --version 4.0.24
+bundle install
+bundle exec fastlane --version
+```
+
+Skip the RubyGems and Bundler commands if both are already version 4.0.24. Use
+`bundle exec fastlane` for this repository's pinned tools; no Fastlane lanes are
+configured here.
+
+For intentional upgrades, update Ruby in `.tool-versions` and the direct gem
+versions in `Gemfile`, then run `asdf install` and `bundle update` to refresh the
+lockfile. Commit the version files together.
+
 ## License
 
 MIT. See [`LICENSE.md`](LICENSE.md).

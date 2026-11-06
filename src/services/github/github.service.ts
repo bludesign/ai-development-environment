@@ -395,6 +395,7 @@ type RawPullRequestDetail = Omit<RawPullRequest, "reviewThreads"> & {
 };
 
 type RawPullRequestMergeState = {
+  mergeCommit?: { oid: string } | null;
   id: string;
   title: string;
   body: string;
@@ -5902,7 +5903,8 @@ export class GitHubService {
           pullRequest(number: $number) {
             id title body url state isDraft mergeable mergeStateStatus
             headRefOid headRefName headRepository { nameWithOwner } mergedAt
-            ${includeSyncReadiness ? `baseRefName baseRefOid statusCheckRollup { state contexts(first: 100) { nodes { ${PIPELINE_CONTEXT_FIELDS} } pageInfo { hasNextPage endCursor } } }` : ""}
+            baseRefName mergeCommit { oid }
+            ${includeSyncReadiness ? `baseRefOid statusCheckRollup { state contexts(first: 100) { nodes { ${PIPELINE_CONTEXT_FIELDS} } pageInfo { hasNextPage endCursor } } }` : ""}
             autoMergeRequest { enabledAt }
             viewerCanEnableAutoMerge
             viewerCanDisableAutoMerge
@@ -6015,6 +6017,12 @@ export class GitHubService {
         : localBlockedReason);
     const settings = await this.getSettings();
     return {
+      baseRefName: state.pullRequest.baseRefName,
+      state: state.pullRequest.state,
+      canSwitchToDefaultBranch: false,
+      defaultSwitchToDefaultBranch: false,
+      switchToDefaultBranchName: null,
+      switchToDefaultBranchUnavailableReason: null,
       defaultMethod: state.availableMethods.includes(
         settings.defaultMergeMethod,
       )
@@ -6155,6 +6163,8 @@ export class GitHubService {
 
   private automationStateView(pullRequest: RawPullRequestMergeState) {
     return {
+      baseRefName: pullRequest.baseRefName,
+      mergeCommitSha: pullRequest.mergeCommit?.oid ?? null,
       id: pullRequest.id,
       state: pullRequest.mergedAt ? ("MERGED" as const) : pullRequest.state,
       url: pullRequest.url,
@@ -6447,6 +6457,9 @@ export class GitHubService {
                 state: "OPEN" | "CLOSED" | "MERGED";
                 url: string;
                 mergedAt: string | null;
+                headRefOid?: string;
+                baseRefName?: string;
+                mergeCommit?: { oid: string } | null;
               } | null;
             };
           }>(
@@ -6466,7 +6479,7 @@ export class GitHubService {
           authorEmail: $authorEmail
           expectedHeadOid: $expectedHeadOid
         }) {
-          pullRequest { id state url mergedAt }
+          pullRequest { id state url mergedAt headRefOid baseRefName mergeCommit { oid } }
         }
       }`,
             {
@@ -6483,7 +6496,8 @@ export class GitHubService {
           const pullRequest = data.mergePullRequest.pullRequest;
           if (!pullRequest)
             throw new Error("GitHub did not return the merged pull request");
-          return pullRequest;
+          const { mergeCommit, ...result } = pullRequest;
+          return { ...result, mergeCommitSha: mergeCommit?.oid ?? null };
         } catch (error) {
           const status =
             error instanceof GitHubRequestError ? error.statusCode : null;
@@ -6503,6 +6517,9 @@ export class GitHubService {
                 state: observed.pullRequest.state,
                 url: observed.pullRequest.url,
                 mergedAt: observed.pullRequest.mergedAt,
+                baseRefName: observed.pullRequest.baseRefName,
+                headRefOid: observed.pullRequest.headRefOid,
+                mergeCommitSha: observed.pullRequest.mergeCommit?.oid ?? null,
               };
           } catch {
             /* Keep the reservation until a fresh provider read resolves it. */

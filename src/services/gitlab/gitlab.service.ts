@@ -153,6 +153,7 @@ type RawGitLabProject = {
   default_branch?: string | null;
   visibility: string;
   merge_method?: string;
+  automatic_rebase_enabled?: boolean;
   squash_option?: string;
   remove_source_branch_after_merge?: boolean;
 };
@@ -225,6 +226,8 @@ type RawGitLabMergeRequest = {
   created_at: string;
   updated_at: string;
   merged_at?: string | null;
+  merge_commit_sha?: string | null;
+  squash_commit_sha?: string | null;
 };
 
 type RawGitLabDiscussion = {
@@ -485,6 +488,8 @@ function mapMergeRequest(mr: RawGitLabMergeRequest): GitLabMergeRequestView {
     createdAt: mr.created_at,
     updatedAt: mr.updated_at,
     mergedAt: mr.merged_at ?? null,
+    mergeCommitSha: mr.merge_commit_sha ?? null,
+    squashCommitSha: mr.squash_commit_sha ?? null,
   };
 }
 
@@ -885,6 +890,10 @@ export class GitLabService {
     return this.mergeCoordinator?.operation(projectId, iid) ?? null;
   }
 
+  async worktreeMergeOperations(worktreeIds: string[]) {
+    return this.mergeCoordinator?.worktreeMergeOperations(worktreeIds) ?? [];
+  }
+
   async mergeReadiness(projectId: string, iid: number, force = true) {
     const mr = (
       await this.get<RawGitLabMergeRequest>({
@@ -1013,12 +1022,13 @@ export class GitLabService {
     };
   }
 
-  async mergeProject(projectId: string) {
+  async mergeProject(projectId: string, force = false) {
     return (
       await this.get<RawGitLabProject>({
         path: `/projects/${encodeURIComponent(projectId)}`,
         operation: "GitLabMergeProject",
         source: "MERGE_REQUEST_DETAILS",
+        ...(force ? { force: true, allowStaleOnError: false } : {}),
       })
     ).data;
   }

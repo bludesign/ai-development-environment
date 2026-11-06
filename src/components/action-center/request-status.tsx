@@ -1,8 +1,11 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { GitMerge } from "lucide-react";
 import { useTranslations } from "next-intl";
+import {
+  MergeOperationLabel,
+  MergeOperationIcon,
+} from "@/components/github/post-merge-switch-client";
 import { MergeOperationError } from "@/components/github/merge-operation-error";
 import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
@@ -115,8 +118,20 @@ export function RequestMergeAction({
           onClick={() => setOpen(true)}
           size={compact ? "xs" : "sm"}
         >
-          <GitMerge />
-          {t("merge")}
+          <MergeOperationIcon
+            operationKey={gitlabMergeOperationKey({
+              projectId: request.repositoryId,
+              iid: request.number,
+            })}
+          />
+          <MergeOperationLabel
+            operationKey={gitlabMergeOperationKey({
+              projectId: request.repositoryId,
+              iid: request.number,
+            })}
+            idleLabel={t("merge")}
+            pendingLabel={t("merge")}
+          />
         </Button>
       )}
       {request.provider === "GITLAB" && !open && (

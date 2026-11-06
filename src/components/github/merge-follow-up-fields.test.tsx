@@ -83,3 +83,41 @@ test("hides the section when no worktrees target the merging branch", () => {
   );
   expect(screen.queryByText("Update targeting worktrees")).toBeNull();
 });
+
+test("shows the configured default branch and disables an unavailable switch without changing the selection", () => {
+  const change = vi.fn();
+  const props = {
+    options: {
+      ...options,
+      baseBranchUpdateOptions: null,
+      switchToDefaultBranchName: "trunk",
+      canSwitchToDefaultBranch: true,
+    },
+    disabled: false,
+    deleteWorktree: false,
+    moveTicketToDone: false,
+    switchToDefaultBranch: true,
+    onSwitchToDefaultBranchChange: change,
+    onDeleteWorktreeChange: vi.fn(),
+    onMoveTicketToDoneChange: vi.fn(),
+  };
+  const view = render(<MergeFollowUpFields {...props} />);
+  const checkbox = screen.getByRole("checkbox", {
+    name: "Switch to trunk after merge",
+  });
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(checkbox);
+  expect(change).toHaveBeenCalledWith(false);
+  view.rerender(
+    <MergeFollowUpFields
+      {...props}
+      options={{
+        ...props.options,
+        canSwitchToDefaultBranch: false,
+        switchToDefaultBranchUnavailableReason: "Update the agent first",
+      }}
+    />,
+  );
+  expect(checkbox.hasAttribute("disabled")).toBe(true);
+  expect(screen.getByText("Update the agent first")).toBeDefined();
+});

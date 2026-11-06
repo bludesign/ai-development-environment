@@ -58,6 +58,54 @@ beforeEach(() => {
 });
 
 describe("job execution resource derivation", () => {
+  test("reserves the destination branch exclusively for a post-merge switch, including replay", async () => {
+    for (const branch of ["main", a.branch]) {
+      const descriptor = await jobOperationDescriptor(
+        job("worktree.post-merge-switch", { branch }),
+        true,
+      );
+      expect(descriptor.resources).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ kind: "WORKTREE", mode: "WRITE" }),
+          expect.objectContaining({
+            kind: "PATH",
+            path: a.folder,
+            mode: "WRITE",
+          }),
+          {
+            kind: "BRANCH",
+            key: `branch:github.com/example/app:${branch}`,
+            mode: "WRITE",
+          },
+        ]),
+      );
+      expect(
+        operationDescriptorsConflict(descriptor, {
+          version: 1,
+          resources: [
+            {
+              kind: "BRANCH",
+              key: `branch:github.com/example/app:${branch}`,
+              mode: "INTENT",
+            },
+          ],
+        }),
+      ).toBe(true);
+    }
+    findFirst.mockResolvedValue({ ...a, branch: null });
+    expect(
+      (
+        await jobOperationDescriptor(
+          job("worktree.post-merge-switch", { branch: "main" }),
+          true,
+        )
+      ).resources,
+    ).toContainEqual({
+      kind: "BRANCH",
+      key: "branch:github.com/example/app:main",
+      mode: "WRITE",
+    });
+  });
   test("allows sibling builds and sibling Git mutations while protecting the building checkout", async () => {
     const buildA = await jobOperationDescriptor(
       job("ios.build.run", {

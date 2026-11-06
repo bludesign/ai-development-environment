@@ -21,6 +21,8 @@ import {
   parseWorktreeRefreshState,
   validGitBranchName,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+  worktreePostMergeSwitchJobPayload,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_REVIEWED_SYNC_CAPABILITY,
@@ -50,6 +52,7 @@ import {
   type WorktreePreparationAction,
   type WorktreePreparationState,
   type WorktreeDiffScope,
+  type WorktreePostMergeSwitchPayload,
 } from "@ai-development-environment/agent-contract/worktrees";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -128,6 +131,7 @@ const ACTIVE_WORKTREE_GIT_JOB_KINDS = [
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_GIT_OPERATION_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
@@ -647,6 +651,10 @@ export class WorktreesService {
     this.agentControl.registerCompletionHandler(
       WORKTREE_GIT_OPERATION_JOB_KIND,
       (job) => this.projectOperation(job),
+    );
+    this.agentControl.registerCompletionHandler(
+      WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+      (job) => this.projectPostMergeSwitch(job),
     );
     this.agentControl.registerCompletionHandler(
       WORKTREE_BRANCH_JOB_KIND,
@@ -1983,7 +1991,13 @@ export class WorktreesService {
     return {
       agents: [...agentGroups.values()].map((group) => ({
         agent: group.agent,
-        codebases: group.codebases,
+        codebases: group.codebases.sort(
+          (left, right) =>
+            left.repository.name.localeCompare(right.repository.name) ||
+            left.repository.id.localeCompare(right.repository.id) ||
+            left.codebase.folder.localeCompare(right.codebase.folder) ||
+            left.codebase.id.localeCompare(right.codebase.id),
+        ),
       })),
       tags,
       settings,
@@ -3923,6 +3937,40 @@ export class WorktreesService {
     return pending;
   }
 
+  async postMergeSwitch(
+    input: WorktreePostMergeSwitchPayload & {
+      worktreeId: string;
+      requestId: string;
+    },
+  ) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    const { worktreeId, requestId, ...value } = input;
+    const payload = worktreePostMergeSwitchJobPayload(value);
+    const worktree = await this.requireRunnable(
+      worktreeId,
+      WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+    );
+    if (
+      !worktree.primary ||
+      worktree.codebaseId !== payload.codebaseId ||
+      worktree.folder !== payload.folder ||
+      worktree.gitDirectory !== payload.gitDirectory ||
+      worktree.codebase.repository.canonicalOrigin !== payload.expectedOrigin
+    )
+      throw new Error(
+        "The linked primary worktree identity changed after merge.",
+      );
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId,
+      kind: WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+      payload,
+      idempotencyKey: `worktree:post-merge-switch:${requestId}:${worktreeId}`,
+      timeoutSeconds: 180,
+    });
+  }
+
   async runGitOperation(input: {
     worktreeId: string;
     operation: WorktreeGitOperation;
@@ -4856,11 +4904,123 @@ export class WorktreesService {
     }
   }
 
-  private async projectOperation(job: {
+  private async projectPostMergeSwitch(job: {
+    agentId: string;
+    codebaseId: string | null;
     worktreeId: string | null;
+    payloadJson: string;
     resultJson: string | null;
     status: string;
   }) {
+    if (
+      !job.codebaseId ||
+      !job.worktreeId ||
+      job.status !== "SUCCEEDED" ||
+      !job.resultJson
+    )
+      return;
+    const payload = worktreePostMergeSwitchJobPayload(
+      JSON.parse(job.payloadJson),
+    );
+    const result = resultObject({ ...job, error: null });
+    if (!result.worktree) return;
+    const item = parseWorktreeInventoryItem(result.worktree);
+    if (
+      !item.primary ||
+      item.availability !== "AVAILABLE" ||
+      item.branch !== payload.branch ||
+      item.folder !== payload.folder ||
+      item.gitDirectory !== payload.gitDirectory ||
+      job.codebaseId !== payload.codebaseId
+    )
+      return;
+    await this.projectOperation(job, { ...payload, agentId: job.agentId });
+    const checkedAt = new Date(item.checkedAt);
+    const prisma = await getPrismaClient();
+    const changed = await prisma.$transaction(async (transaction) => {
+      const current = await transaction.worktree.findUnique({
+        where: { id: job.worktreeId! },
+        include: { codebase: { include: { repository: true } } },
+      });
+      if (
+        !current ||
+        !current.primary ||
+        current.missingAt ||
+        current.codebaseId !== payload.codebaseId ||
+        current.folder !== payload.folder ||
+        current.gitDirectory !== payload.gitDirectory ||
+        current.lastCheckedAt?.getTime() !== checkedAt.getTime() ||
+        current.branch !== item.branch ||
+        current.headSha !== item.headSha
+      )
+        return false;
+      const codebase = current.codebase;
+      if (
+        codebase.agentId !== job.agentId ||
+        codebase.folder !== payload.folder ||
+        codebase.repository.canonicalOrigin !== payload.expectedOrigin
+      )
+        return false;
+      // A targeted result may add its known branch, but must not overwrite a
+      // newer checkout observation or full branch inventory.
+      const branches = new Set(parseBranches(codebase.localBranchesJson));
+      branches.add(payload.branch);
+      const updated = await transaction.codebase.updateMany({
+        where: {
+          id: job.codebaseId!,
+          agentId: job.agentId,
+          folder: payload.folder,
+          repository: { canonicalOrigin: payload.expectedOrigin },
+          localBranchesJson: codebase.localBranchesJson,
+          AND: [
+            {
+              OR: [
+                { lastCheckedAt: null },
+                { lastCheckedAt: { lt: checkedAt } },
+              ],
+            },
+            {
+              OR: [
+                { worktreeInventoryObservedAt: null },
+                { worktreeInventoryObservedAt: { lte: checkedAt } },
+              ],
+            },
+            {
+              OR: [
+                { localBranchInventoryAttemptedAt: null },
+                { localBranchInventoryAttemptedAt: { lte: checkedAt } },
+              ],
+            },
+          ],
+        },
+        data: {
+          branch: item.branch,
+          headSha: item.headSha,
+          upstream: item.upstream,
+          ahead: item.ahead,
+          behind: item.behind,
+          syncState: item.syncState,
+          availability: item.availability,
+          statusError: item.error,
+          lastCheckedAt: checkedAt,
+          localBranchesJson: JSON.stringify(
+            [...branches].sort((left, right) => left.localeCompare(right)),
+          ),
+        },
+      });
+      return updated.count > 0;
+    });
+    if (changed) this.publish(job.worktreeId, job.codebaseId);
+  }
+
+  private async projectOperation(
+    job: {
+      worktreeId: string | null;
+      resultJson: string | null;
+      status: string;
+    },
+    expected?: WorktreePostMergeSwitchPayload & { agentId: string },
+  ) {
     if (!job.worktreeId || !job.resultJson) return;
     await this.projectPreparationResults(job.worktreeId, job.resultJson);
     if (job.status !== "SUCCEEDED") return;
@@ -4876,6 +5036,20 @@ export class WorktreesService {
     const updated = await prisma.worktree.updateMany({
       where: {
         id: current.id,
+        ...(expected
+          ? {
+              codebaseId: expected.codebaseId,
+              folder: expected.folder,
+              gitDirectory: expected.gitDirectory,
+              primary: true,
+              missingAt: null,
+              codebase: {
+                agentId: expected.agentId,
+                folder: expected.folder,
+                repository: { canonicalOrigin: expected.expectedOrigin },
+              },
+            }
+          : {}),
         OR: [{ lastCheckedAt: null }, { lastCheckedAt: { lt: checkedAt } }],
       },
       data: {

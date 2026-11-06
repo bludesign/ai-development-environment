@@ -7,6 +7,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   MergeFollowUpFields,
   BASE_BRANCH_UPDATE_FIELDS,
+  POST_MERGE_SWITCH_OPTION_FIELDS,
 } from "@/components/github/merge-follow-up-fields";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -44,6 +45,12 @@ import {
 } from "./merge-request-status";
 
 import {
+  PostMergeSwitchProgress,
+  trackPostMergeSwitch,
+  usePostMergeSwitchRecovery,
+} from "@/components/github/post-merge-switch-client";
+
+import {
   clearMergeOperation,
   getMergeOperationSnapshot,
   gitlabMergeOperationKey,
@@ -52,7 +59,7 @@ import {
   useMergeOperation,
 } from "@/components/github/merge-operation-state";
 
-const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
+const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} ${POST_MERGE_SWITCH_OPTION_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
   canRemoveSourceBranch canMerge canAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
   defaultMoveTicketToDone defaultDeleteWorktree operation { ${GITLAB_MERGE_OPERATION_FIELDS} }`;
@@ -65,7 +72,12 @@ export function MergeRequestDialog({
   onOpenChange,
   open,
 }: {
-  mergeRequest: { iid: number; projectId: string; title: string };
+  mergeRequest: {
+    iid: number;
+    projectId: string;
+    title: string;
+    state?: string;
+  };
   worktreeId?: string | null;
   onMerged?: (mergeRequest: GitLabMergeRequestView) => void | Promise<void>;
   onOpenChange: (open: boolean) => void;
@@ -84,6 +96,16 @@ export function MergeRequestDialog({
   const options =
     loadedOptions?.key === operationKey ? loadedOptions.value : null;
   const mergeOperation = useMergeOperation<GitLabMergeResult>(operationKey);
+  const switchTarget = {
+    provider: "gitlab" as const,
+    projectId: mergeRequest.projectId,
+    iid: mergeRequest.iid,
+  };
+  usePostMergeSwitchRecovery(
+    operationKey,
+    switchTarget,
+    mergeRequest.state === "MERGED",
+  );
   const busy = mergeOperation.pending;
   const result = mergeOperation.result;
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +125,7 @@ export function MergeRequestDialog({
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
+  const [switchToDefaultBranch, setSwitchToDefaultBranch] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
 
   const load = useCallback(
@@ -129,6 +152,17 @@ export function MergeRequestDialog({
         setLoadedOptions({ key: operationKey, value: next });
         clearMergeOperation(operationKey, !replaceOutcome, operationAtLoad);
         setAutoSync(next.defaultAutoSync ?? false);
+        setSwitchToDefaultBranch(
+          Boolean(
+            next.canSwitchToDefaultBranch && next.defaultSwitchToDefaultBranch,
+          ),
+        );
+        if (next.operation?.postMergeSwitch)
+          void trackPostMergeSwitch(operationKey, {
+            provider: "gitlab",
+            projectId: mergeRequest.projectId,
+            iid: mergeRequest.iid,
+          });
         setSelectedWorktreeIds(
           next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
         );
@@ -168,7 +202,20 @@ export function MergeRequestDialog({
     };
   }, [cancelLoad, load, open]);
 
-  const operation = result?.operation ?? options?.operation;
+  const savedOperation = result?.operation ?? options?.operation;
+  const switchStatus = mergeOperation.postMergeSwitch;
+  const liveOperation = mergeOperation.followUpOperation;
+  const operation =
+    savedOperation && liveOperation
+      ? {
+          ...savedOperation,
+          ...liveOperation,
+          postMergeSwitch: switchStatus ?? savedOperation.postMergeSwitch,
+        }
+      : savedOperation;
+  const postMergeError = liveOperation
+    ? liveOperation.lastError
+    : result?.postMergeError;
   const baseUpdateResults = operation?.baseBranchUpdateResults ?? [];
   const confirmed =
     result?.mergeRequest.state === "MERGED" ||
@@ -262,19 +309,36 @@ export function MergeRequestDialog({
                   : {}),
                 deleteWorktree,
                 moveTicketToDone,
+                switchToDefaultBranch,
               },
             },
           );
           next = data.submitGitLabMergeRequestMerge;
         }
+        if (next.operation?.postMergeSwitch)
+          void trackPostMergeSwitch(
+            operationKey,
+            switchTarget,
+            next.mergeRequest.state === "MERGED"
+              ? next.operation.postMergeSwitch
+              : null,
+            `GitLab !${mergeRequest.iid} · ${mergeRequest.title}`,
+          );
         return next;
       },
-      (next) =>
-        next.postMergeError ??
-        next.ticketTransitionError ??
-        (next.operation?.state === "ACTION_REQUIRED"
-          ? next.operation.lastError
-          : null),
+      (next) => {
+        const live = getMergeOperationSnapshot(operationKey).followUpOperation;
+        return (
+          (live
+            ? live.lastError
+            : (next.postMergeError ??
+              (next.operation?.state === "ACTION_REQUIRED"
+                ? next.operation.lastError
+                : null))) ??
+          next.ticketTransitionError ??
+          null
+        );
+      },
       `GitLab !${mergeRequest.iid} · ${mergeRequest.title}`,
     );
     if (!outcome) return;
@@ -294,6 +358,7 @@ export function MergeRequestDialog({
     if (
       !next.postMergeError &&
       !next.ticketTransitionError &&
+      !next.operation?.postMergeSwitch &&
       next.operation?.state !== "ACTION_REQUIRED" &&
       currentSheet.current.key === operationKey &&
       currentSheet.current.open
@@ -301,14 +366,14 @@ export function MergeRequestDialog({
       onOpenChange(false);
   };
   const savedResultError =
-    result?.postMergeError ??
-    result?.ticketTransitionError ??
-    operation?.lastError;
+    postMergeError ?? result?.ticketTransitionError ?? operation?.lastError;
   const displayedError =
     error ??
     (mergeOperation.error !== savedResultError ? mergeOperation.error : null);
   const backgroundAvailable =
-    busy && ["merge", "auto"].includes(mergeOperation.action ?? "");
+    busy &&
+    (Boolean(mergeOperation.postMergeSwitch) ||
+      ["merge", "auto"].includes(mergeOperation.action ?? ""));
 
   return (
     <Dialog
@@ -324,19 +389,20 @@ export function MergeRequestDialog({
             !{mergeRequest.iid} · {options?.title ?? mergeRequest.title}
           </DialogDescription>
         </DialogHeader>
+        <PostMergeSwitchProgress operationKey={operationKey} />
         {displayedError && (
           <Alert variant="destructive">
             <AlertDescription>{displayedError}</AlertDescription>
           </Alert>
         )}
-        {(result?.postMergeError ||
+        {(postMergeError ||
           result?.ticketTransitionError ||
           operation?.lastError) && (
           <Alert variant="destructive">
             <AlertDescription>
               {confirmed && <p>{t("mergeFollowUpFailed")}</p>}
               <p>
-                {result?.postMergeError ??
+                {postMergeError ??
                   result?.ticketTransitionError ??
                   operation?.lastError}
               </p>
@@ -526,6 +592,8 @@ export function MergeRequestDialog({
                     disabled={disabled}
                     deleteWorktree={deleteWorktree}
                     moveTicketToDone={moveTicketToDone}
+                    switchToDefaultBranch={switchToDefaultBranch}
+                    onSwitchToDefaultBranchChange={setSwitchToDefaultBranch}
                     onDeleteWorktreeChange={setDeleteWorktree}
                     onMoveTicketToDoneChange={setMoveTicketToDone}
                   />
@@ -598,7 +666,9 @@ export function MergeRequestDialog({
               <Spinner aria-hidden="true" />
               {tp("continueInBackground")}
             </Button>
-          ) : confirmed && operation?.state === "ACTION_REQUIRED" ? (
+          ) : confirmed &&
+            (operation?.state === "ACTION_REQUIRED" ||
+              mergeOperation.postMergeSwitch?.state === "ACTION_REQUIRED") ? (
             <Button disabled={disabled} onClick={() => void perform("retry")}>
               {busy && <Spinner aria-hidden="true" />}
               {t("retryFollowUps")}

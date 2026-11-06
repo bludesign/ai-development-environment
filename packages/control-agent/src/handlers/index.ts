@@ -31,6 +31,7 @@ import { CLI_HEALTH_JOB_KIND } from "@ai-development-environment/agent-contract/
 
 import { runCommand } from "./commands.js";
 import { deleteLocalBranches } from "./branches.js";
+import { postMergeSwitch } from "./post-merge-switch.js";
 import { cloneCodebase, inspectCloneDestination } from "./codebase-clone.js";
 import { importCoverageReport } from "./coverage.js";
 import { symbolicateCrash } from "./crashes.js";
@@ -52,6 +53,7 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
@@ -250,6 +252,7 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [WORKTREE_INSPECT_JOB_KIND]: inspectWorktree,
   [WORKTREE_AUTO_SYNC_JOB_KIND]: autoSyncWorktree,
   [WORKTREE_BRANCH_JOB_KIND]: branchWorktree,
+  [WORKTREE_POST_MERGE_SWITCH_JOB_KIND]: postMergeSwitch,
   [WORKTREE_COMMIT_JOB_KIND]: commitWorktree,
   [WORKTREE_MOVE_PUSH_JOB_KIND]: pushMovedWorktree,
   [WORKTREE_MOVE_CHECKOUT_JOB_KIND]: checkoutMovedWorktree,

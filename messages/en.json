@@ -3061,6 +3061,12 @@
       "MERGING": "Merging",
       "ACTION_REQUIRED": "Action required"
     },
+    "switchToDefaultBranchAfterMerge": "Switch to {branch} after merge",
+    "switchToDefaultBranchDescription": "Fetch the merged code before switching this primary checkout. Local changes will be left untouched.",
+    "updatingDefaultBranch": "Updating {branch}…",
+    "switchedToDefaultBranch": "Switched to {branch}.",
+    "switchToDefaultBranchFailed": "Merge completed; switching to {branch} needs attention.",
+    "retryMergeFollowUps": "Retry follow-ups",
     "continueInBackground": "Continue in background",
     "mergeNeedsAttention": "Merge needs attention",
     "reviewMergeError": "Review merge error",

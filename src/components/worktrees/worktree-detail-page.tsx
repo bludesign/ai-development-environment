@@ -83,6 +83,7 @@ import {
   WorktreeDetailPanel,
 } from "./worktree-detail-panel";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
+import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
 import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
 import {
   inspectWorktree,
@@ -717,6 +718,7 @@ function LoadedWorktreeDetail({
 
   return (
     <section className="flex w-full flex-col gap-5">
+      <WorktreeMergeFollowUps groups={[entry.group]} />
       <div
         className={cn(
           "flex flex-wrap items-start justify-between gap-4",

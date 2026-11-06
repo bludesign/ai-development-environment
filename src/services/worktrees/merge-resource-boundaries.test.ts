@@ -62,6 +62,64 @@ function github() {
 }
 
 describe("provider merge resource boundaries", () => {
+  test("retains GitHub's resulting commit and target for squash-merge follow-ups", async () => {
+    const f = github();
+    f.submit.mockResolvedValueOnce({
+      mergePullRequest: {
+        pullRequest: {
+          id: "pr",
+          state: "MERGED",
+          headRefOid: "source",
+          baseRefName: "main",
+          mergeCommit: { oid: "squashed" },
+        },
+      },
+    });
+    await expect(
+      f.service.mergePullRequest({
+        owner: "team",
+        name: "repo",
+        number: 1,
+        method: "SQUASH",
+        commitHeadline: "Ship",
+        commitBody: "",
+      }),
+    ).resolves.toMatchObject({
+      state: "MERGED",
+      mergeCommitSha: "squashed",
+      headRefOid: "source",
+      baseRefName: "main",
+    });
+  });
+
+  test("recovers squash-merge evidence after an uncertain GitHub response", async () => {
+    const f = github();
+    f.submit.mockImplementationOnce(async () => {
+      Object.assign(f.state.pullRequest, {
+        state: "MERGED",
+        baseRefName: "main",
+        mergeCommit: { oid: "squashed" },
+      });
+      throw new Error("network timeout after merging");
+    });
+    await expect(
+      f.service.mergePullRequest({
+        owner: "team",
+        name: "repo",
+        number: 1,
+        method: "SQUASH",
+        commitHeadline: "Ship",
+        commitBody: "",
+      }),
+    ).resolves.toMatchObject({
+      state: "MERGED",
+      mergeCommitSha: "squashed",
+      headRefOid: "sha",
+      baseRefName: "main",
+    });
+    expect(f.submit).toHaveBeenCalledOnce();
+  });
+
   test("direct GitHub callers cannot bypass a source build reservation", async () => {
     const f = github();
     locks.reserve.mockRejectedValueOnce(

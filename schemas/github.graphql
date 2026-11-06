@@ -1232,6 +1232,14 @@ type GitHubPullRequestDetail {
 
 "Represents GitHub pull request merge options in the GraphQL API."
 type GitHubPullRequestMergeOptions {
+  "Whether the linked primary checkout can return to the default branch."
+  canSwitchToDefaultBranch: Boolean!
+  "Whether returning to the default branch is selected by default."
+  defaultSwitchToDefaultBranch: Boolean!
+  "Reviewed repository default branch."
+  switchToDefaultBranchName: String
+  "Reason returning to the default branch is unavailable."
+  switchToDefaultBranchUnavailableReason: String
   "Whether the linked worktree supports managed sync and merge."
   canAutoMergeWithSync: Boolean!
   "Reason branch syncing is unavailable."
@@ -1286,6 +1294,10 @@ type GitHubPullRequestMergeOptions {
 
 "The result of GitHub pull request merge."
 type GitHubPullRequestMergeResult {
+  "Checkout associated with the persisted merge follow-ups."
+  worktreeId: ID
+  "Progress of returning the primary checkout to the updated default branch."
+  postMergeSwitch: PostMergeSwitchStatus
   "Error raised while scheduling or performing post-merge actions. May be null when the actions succeed or are not requested."
   postMergeError: String
   "Key of the Jira ticket associated with post-merge actions. May be null when no ticket is linked."
@@ -1370,6 +1382,8 @@ input UpdateGitHubRepositoryInput {
 
 "Values used to merge a GitHub pull request."
 input MergeGitHubPullRequestInput {
+  "Return the primary checkout to the updated default branch after merging."
+  switchToDefaultBranch: Boolean = false
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Identifier of the linked worktree to use for validation and post-merge actions."
@@ -1425,6 +1439,15 @@ input SetGitHubPullRequestLabelsInput {
 }
 
 extend type Query {
+  "Persisted merge follow-up progress, including after the primary checkout switches branches."
+  githubPullRequestMergeOperation(
+    "Owner of the GitHub target repository."
+    owner: String!
+    "Name of the GitHub target repository."
+    name: String!
+    "Pull request number within the target repository."
+    number: Int!
+  ): WorktreeAutoMerge
   "Returns GitHub settings."
   githubSettings: GitHubSettings!
   "Returns GitHub cache TTL overrides."

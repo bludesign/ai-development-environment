@@ -124,6 +124,7 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DIFF_JOB_KIND,
   WORKTREE_DIFF_ASSET_JOB_KIND,
@@ -140,6 +141,7 @@ import {
   worktreeCommitJobPayload,
   worktreeAutoSyncJobPayload,
   worktreeBranchJobPayload,
+  worktreePostMergeSwitchJobPayload,
   worktreeDeleteJobPayload,
   worktreeDiffPayload,
   worktreeGitInspectPayload,
@@ -369,6 +371,10 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === WORKTREE_BRANCH_JOB_KIND) {
     worktreeBranchJobPayload(value);
+    return;
+  }
+  if (kind === WORKTREE_POST_MERGE_SWITCH_JOB_KIND) {
+    worktreePostMergeSwitchJobPayload(value);
     return;
   }
   if (kind === WORKTREE_COMMIT_JOB_KIND) {

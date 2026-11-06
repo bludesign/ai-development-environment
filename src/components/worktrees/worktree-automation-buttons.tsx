@@ -1,6 +1,6 @@
 "use client";
 
-import { GitMerge, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useState } from "react";
 
@@ -9,7 +9,17 @@ import {
   MERGE_FOLLOW_UP_FIELDS,
 } from "@/components/github/merge-follow-up-fields";
 import { MergeOperationError } from "@/components/github/merge-operation-error";
-import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
+import {
+  MergeOperationLabel,
+  MergeOperationIcon,
+  PostMergeSwitchProgress,
+  POST_MERGE_SWITCH_FIELDS,
+  trackPostMergeSwitch,
+} from "@/components/github/post-merge-switch-client";
+import {
+  githubMergeOperationKey,
+  gitlabMergeOperationKey,
+} from "@/components/github/merge-operation-state";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import {
   MergeSyncFields,
@@ -430,14 +440,28 @@ function GitLabAutoMergeButton({
           setOpen(true);
         }}
       >
-        <GitMerge />
-        {completed
-          ? t("autoMergeComplete")
-          : paused
-            ? t("autoMergePaused")
-            : active
-              ? t("autoMerging")
-              : tg(canMergeNow ? "merge" : "autoMerge")}
+        <MergeOperationIcon
+          operationKey={gitlabMergeOperationKey({
+            projectId: request.projectId,
+            iid: request.number,
+          })}
+        />
+        <MergeOperationLabel
+          operationKey={gitlabMergeOperationKey({
+            projectId: request.projectId,
+            iid: request.number,
+          })}
+          pendingLabel={t("autoMerging")}
+          idleLabel={
+            completed
+              ? t("autoMergeComplete")
+              : paused
+                ? t("autoMergePaused")
+                : active
+                  ? t("autoMerging")
+                  : tg(canMergeNow ? "merge" : "autoMerge")
+          }
+        />
       </Button>
       {!open && (
         <MergeOperationError
@@ -453,6 +477,7 @@ function GitLabAutoMergeButton({
           projectId: request.projectId,
           iid: request.number,
           title: request.title,
+          state: request.state,
         }}
         worktreeId={worktree.id}
         onMerged={onCompleted}
@@ -480,6 +505,17 @@ function GitHubAutoMergeButton({
   const [manualOpen, setManualOpen] = useState(false);
   const repositoryName = pullRequest?.repositoryNameWithOwner;
   const pullRequestNumber = pullRequest?.number;
+  const trackedRequest =
+    pullRequest ??
+    (currentRule
+      ? {
+          repositoryNameWithOwner: currentRule.repositoryNameWithOwner,
+          number: currentRule.pullRequestNumber,
+        }
+      : null);
+  const trackedKey = githubMergeOperationKey(
+    trackedRequest ?? { repositoryNameWithOwner: "", number: 0 },
+  );
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -494,6 +530,7 @@ function GitHubAutoMergeButton({
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
+  const [switchToDefaultBranch, setSwitchToDefaultBranch] = useState(false);
 
   useEffect(() => {
     if (!open || !repositoryName || !pullRequestNumber) return;
@@ -533,6 +570,12 @@ function GitHubAutoMergeButton({
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
           setAutoSync(next.defaultAutoSync ?? false);
+          setSwitchToDefaultBranch(
+            Boolean(
+              next.canSwitchToDefaultBranch &&
+              next.defaultSwitchToDefaultBranch,
+            ),
+          );
           setSelectedWorktreeIds(
             next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
           );
@@ -593,12 +636,25 @@ function GitHubAutoMergeButton({
     setError(null);
     try {
       if (postMerge) {
-        await controlPlaneRequest(
+        const retried = await controlPlaneRequest<{
+          retryWorktreeAutoMerge: WorktreeAutoMerge;
+        }>(
           `mutation RetryWorktreeAutoMerge($worktreeId: ID!) {
-          retryWorktreeAutoMerge(worktreeId: $worktreeId) { worktreeId state }
+          retryWorktreeAutoMerge(worktreeId: $worktreeId) { worktreeId state ${POST_MERGE_SWITCH_FIELDS} }
         }`,
           { worktreeId: worktree.id },
         );
+        if (retried.retryWorktreeAutoMerge.postMergeSwitch && trackedRequest)
+          void trackPostMergeSwitch(
+            trackedKey,
+            {
+              provider: "github",
+              owner: trackedRequest.repositoryNameWithOwner.split("/")[0]!,
+              name: trackedRequest.repositoryNameWithOwner.split("/")[1]!,
+              number: trackedRequest.number,
+            },
+            retried.retryWorktreeAutoMerge.postMergeSwitch,
+          );
         onError(null);
         setOpen(false);
         await onCompleted();
@@ -614,7 +670,7 @@ function GitHubAutoMergeButton({
             worktreeId state repositoryNameWithOwner pullRequestNumber
             mergeMethod commitHeadline commitBody authorEmail deleteWorktree
             moveTicketToDone ticketKey lastError updatedAt
-            autoSync ticketTransitionError
+            autoSync ticketTransitionError ${POST_MERGE_SWITCH_FIELDS}
           }
         }`,
         {
@@ -641,9 +697,17 @@ function GitHubAutoMergeButton({
               : {}),
             deleteWorktree,
             moveTicketToDone,
+            switchToDefaultBranch,
           },
         },
       );
+      if (result.configureWorktreeAutoMerge.postMergeSwitch)
+        void trackPostMergeSwitch(githubMergeOperationKey(pullRequest), {
+          provider: "github",
+          owner: pullRequest.repositoryNameWithOwner.split("/")[0]!,
+          name: pullRequest.repositoryNameWithOwner.split("/")[1]!,
+          number: pullRequest.number,
+        });
       onError(null);
       await onCompleted();
       if (result.configureWorktreeAutoMerge.ticketTransitionError)
@@ -703,14 +767,20 @@ function GitHubAutoMergeButton({
           paused ? "destructive" : active || completed ? "default" : "outline"
         }
       >
-        <GitMerge />
-        {completed
-          ? t("autoMergeComplete")
-          : paused
-            ? t("autoMergePaused")
-            : active
-              ? t("autoMerging")
-              : t("autoMerge")}
+        <MergeOperationIcon operationKey={trackedKey} />
+        <MergeOperationLabel
+          operationKey={trackedKey}
+          pendingLabel={t("autoMerging")}
+          idleLabel={
+            completed
+              ? t("autoMergeComplete")
+              : paused
+                ? t("autoMergePaused")
+                : active
+                  ? t("autoMerging")
+                  : t("autoMerge")
+          }
+        />
       </Button>
       <Dialog onOpenChange={(next) => !busy && setOpen(next)} open={open}>
         <DialogContent className="sm:max-w-xl">
@@ -718,6 +788,7 @@ function GitHubAutoMergeButton({
             <DialogTitle>{t("autoMergeTitle")}</DialogTitle>
             <DialogDescription>{t("autoMergeDescription")}</DialogDescription>
           </DialogHeader>
+          <PostMergeSwitchProgress operationKey={trackedKey} />
           {loading || (!options && !error) ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
               <Spinner /> {tp("loadingMergeOptions")}
@@ -813,6 +884,8 @@ function GitHubAutoMergeButton({
                     disabled={busy || postMerge}
                     deleteWorktree={deleteWorktree}
                     moveTicketToDone={moveTicketToDone}
+                    switchToDefaultBranch={switchToDefaultBranch}
+                    onSwitchToDefaultBranchChange={setSwitchToDefaultBranch}
                     onDeleteWorktreeChange={setDeleteWorktree}
                     onMoveTicketToDoneChange={setMoveTicketToDone}
                   />

@@ -20,7 +20,11 @@ const database = vi.hoisted(() => ({
     upsert: vi.fn(),
     update: vi.fn(),
   },
-  worktree: { findUnique: vi.fn() },
+  worktree: {
+    findUnique: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
+    findMany: vi.fn(),
+  },
   agentJob: { findFirst: vi.fn() },
 }));
 vi.mock("@/data/prisma-client", () => ({
@@ -119,6 +123,11 @@ function setup() {
     mergeMergeRequestDirect: vi
       .fn()
       .mockResolvedValue({ ...mr, state: "MERGED" }),
+    mergeProject: vi.fn().mockResolvedValue({
+      web_url: "https://gitlab.test/team/repo",
+      merge_method: "merge",
+      automatic_rebase_enabled: false,
+    }),
     cancelAutoMergeDirect: vi.fn().mockResolvedValue(undefined),
   };
   const jira = {
@@ -128,6 +137,7 @@ function setup() {
   const worktrees = {
     publishAutomationChange: vi.fn(),
     deleteWorktree: vi.fn().mockResolvedValue({ id: "job-1" }),
+    postMergeSwitch: vi.fn().mockResolvedValue({ id: "switch-job" }),
   };
   const agents = {
     registerCompletionObserver: vi.fn(),
@@ -142,17 +152,65 @@ function setup() {
   );
   vi.spyOn(service, "wake").mockImplementation(() => {});
   vi.spyOn(service, "options").mockResolvedValue({ ...options });
-  vi.spyOn(
-    service as unknown as { context: () => Promise<unknown> },
-    "context",
-  ).mockResolvedValue({
-    sourceOrigin: "gitlab.test/fork/repo",
+  const context = vi
+    .spyOn(service as unknown as { context: () => Promise<unknown> }, "context")
+    .mockResolvedValue({
+      sourceOrigin: "gitlab.test/fork/repo",
+      targetOrigin: "gitlab.test/team/repo",
+      projectPath: "team/repo",
+      worktree: null,
+      ticketKey: "AIDE-145",
+      ticketDoneStatusConfigured: true,
+    });
+  return { service, gitlab, jira, worktrees, agents, context };
+}
+
+function setupPrimarySwitch(
+  policy: {
+    mergeMethod: string;
+    automaticRebaseEnabled: boolean | undefined;
+  } = {
+    mergeMethod: "merge",
+    automaticRebaseEnabled: false,
+  },
+) {
+  const fixture = setup();
+  const primary = {
+    id: "primary",
+    codebaseId: "checkout",
+    folder: "/checkout",
+    gitDirectory: "/checkout/.git",
+    primary: true,
+    missingAt: null,
+    availability: "AVAILABLE",
+    branch: mr.sourceBranch,
+    headSha: mr.sha,
+    codebase: {
+      defaultBranch: "main",
+      repository: { canonicalOrigin: "gitlab.test/team/repo" },
+      agent: {
+        capabilitiesJson: JSON.stringify(["worktree.post-merge-switch"]),
+      },
+    },
+  };
+  database.worktree.findUnique.mockResolvedValue(primary);
+  database.worktree.findUniqueOrThrow.mockResolvedValue(primary);
+  fixture.context.mockResolvedValue({
+    sourceOrigin: "gitlab.test/team/repo",
+    targetOrigin: "gitlab.test/team/repo",
+    targetMergeMethod: policy.mergeMethod,
+    automaticRebaseEnabled: policy.automaticRebaseEnabled,
     projectPath: "team/repo",
-    worktree: null,
+    worktree: primary,
     ticketKey: "AIDE-145",
     ticketDoneStatusConfigured: true,
   });
-  return { service, gitlab, jira, worktrees, agents };
+  vi.mocked(fixture.service.options).mockResolvedValue({
+    ...options,
+    worktreeId: primary.id,
+    worktreeFolder: primary.folder,
+  });
+  return { ...fixture, primary };
 }
 
 beforeEach(() => {
@@ -184,6 +242,9 @@ beforeEach(() => {
     return database.row;
   });
   database.agentJob.findFirst.mockResolvedValue(null);
+  database.worktree.findUnique.mockReset();
+  database.worktree.findUniqueOrThrow.mockReset();
+  database.worktree.findMany.mockResolvedValue([]);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -216,6 +277,288 @@ describe("merge readiness", () => {
     expect(
       gitLabMergeBlocker({ ...mr, detailedMergeStatus: "future_policy" }, true),
     ).toBeTruthy();
+  });
+});
+
+describe("returning the primary checkout after merge", () => {
+  const switchInput = {
+    ...input,
+    worktreeId: "primary",
+    switchToDefaultBranch: true,
+  };
+
+  test("selects the option for eligible primary checkouts and preserves an explicit opt-out", async () => {
+    const { service } = setupPrimarySwitch();
+    vi.mocked(service.options).mockRestore();
+    expect(await service.options("7", 3)).toMatchObject({
+      canSwitchToDefaultBranch: true,
+      defaultSwitchToDefaultBranch: true,
+      switchToDefaultBranchName: "main",
+    });
+    await service.submit(input);
+    expect(await service.options("7", 3)).toMatchObject({
+      defaultSwitchToDefaultBranch: false,
+    });
+  });
+
+  test("persists the switch before merging, uses the merge result and waits before Jira", async () => {
+    const { service, gitlab, worktrees, jira, agents } = setupPrimarySwitch();
+    const merged = {
+      ...mr,
+      state: "MERGED",
+      mergeCommitSha: "merge-result",
+      squashCommitSha: "squash-result",
+    };
+    gitlab.mergeMergeRequestDirect.mockImplementationOnce(async () => {
+      expect(JSON.parse(database.row!.postMergeSwitchJson!)).toMatchObject({
+        expectedBranch: mr.sourceBranch,
+        expectedHeadSha: mr.sha,
+        branch: "main",
+        expectedOrigin: "gitlab.test/team/repo",
+      });
+      return merged;
+    });
+    gitlab.mergeRequestState.mockResolvedValue(merged);
+    const result = await service.submit({
+      ...switchInput,
+      squash: true,
+      moveTicketToDone: true,
+    });
+    expect(result.operation?.state).toBe("POST_MERGE");
+    expect(result.operation?.postMergeSwitch?.state).toBe("UPDATING");
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktreeId: "primary",
+        expectedBranch: mr.sourceBranch,
+        expectedHeadSha: mr.sha,
+        branch: "main",
+        mergeCommitSha: "merge-result",
+      }),
+    );
+    expect(jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
+    agents.getJob.mockResolvedValue({ id: "switch-job", status: "SUCCEEDED" });
+    await service.reconcile();
+    expect(database.row?.state).toBe("COMPLETED");
+    expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledOnce();
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledOnce();
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+  });
+
+  test("uses the squash result for squash with fast-forward and a removed remote source", async () => {
+    const { service, gitlab, worktrees } = setupPrimarySwitch();
+    gitlab.mergeProject.mockResolvedValue({
+      web_url: "https://gitlab.test/team/repo",
+      merge_method: "ff",
+      automatic_rebase_enabled: true,
+    });
+    gitlab.mergeRequestState.mockResolvedValue({
+      ...mr,
+      state: "MERGED",
+      squashOnMerge: true,
+      squashCommitSha: "squash-result",
+    });
+    await service.submit({
+      ...switchInput,
+      squash: true,
+      removeSourceBranch: true,
+    });
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledWith(
+      expect.objectContaining({ mergeCommitSha: "squash-result" }),
+    );
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledWith(
+      expect.objectContaining({ removeSourceBranch: true }),
+    );
+  });
+
+  test.each([false, true, undefined])(
+    "only falls back to source SHA when fast-forward automatic rebasing is explicitly disabled (%s)",
+    async (automaticRebase) => {
+      const { service, gitlab, worktrees } = setupPrimarySwitch({
+        mergeMethod: "ff",
+        automaticRebaseEnabled: automaticRebase,
+      });
+      gitlab.mergeProject.mockResolvedValue({
+        web_url: "https://gitlab.test/team/repo",
+        merge_method: "ff",
+        automatic_rebase_enabled: automaticRebase,
+      });
+      await service.submit(switchInput);
+      if (automaticRebase === false) {
+        expect(worktrees.postMergeSwitch).toHaveBeenCalledWith(
+          expect.objectContaining({ mergeCommitSha: mr.sha }),
+        );
+      } else {
+        expect(worktrees.postMergeSwitch).not.toHaveBeenCalled();
+        expect(database.row?.state).toBe("POST_MERGE");
+      }
+    },
+  );
+
+  test("does not loosen fast-forward evidence when automatic rebase is disabled after waiting", async () => {
+    const { service, gitlab, worktrees } = setupPrimarySwitch({
+      mergeMethod: "ff",
+      automaticRebaseEnabled: true,
+    });
+    gitlab.mergeRequestState.mockResolvedValue(mr);
+    await service.submit({ ...switchInput, autoMerge: true });
+    expect(database.row?.state).toBe("WAITING_REQUIREMENTS");
+    gitlab.mergeReadiness.mockResolvedValue({
+      mr: { ...mr, state: "MERGED" },
+      project: { squash_option: "default_off", merge_method: "ff" },
+      canMerge: true,
+      autoMergeUserId: null,
+      removeSourceBranch: false,
+      forceRemoveSourceBranch: false,
+    });
+    gitlab.mergeRequestState.mockResolvedValue({ ...mr, state: "MERGED" });
+    gitlab.mergeProject.mockResolvedValue({
+      web_url: "https://gitlab.test/team/repo",
+      merge_method: "ff",
+      automatic_rebase_enabled: false,
+    });
+    await service.reconcile();
+    expect(database.row?.state).toBe("POST_MERGE");
+    expect(worktrees.postMergeSwitch).not.toHaveBeenCalled();
+    expect(gitlab.mergeMergeRequestDirect).not.toHaveBeenCalled();
+  });
+
+  test("waits for delayed result metadata, then reports a follow-up timeout without resubmitting", async () => {
+    const { service, gitlab, worktrees } = setupPrimarySwitch();
+    await service.submit(switchInput);
+    expect(database.row?.state).toBe("POST_MERGE");
+    expect(worktrees.postMergeSwitch).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(120_000);
+    await service.reconcile();
+    expect(database.row?.state).toBe("ACTION_REQUIRED");
+    expect(database.row?.lastError).toContain("resulting commit");
+    gitlab.mergeRequestState.mockResolvedValue({
+      ...mr,
+      state: "MERGED",
+      mergeCommitSha: "late-result",
+    });
+    await service.retryFollowUps("7", 3);
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledWith(
+      expect.objectContaining({ mergeCommitSha: "late-result" }),
+    );
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+  });
+
+  test("refuses a request retargeted while waiting even if its source is unchanged", async () => {
+    const { service, gitlab, worktrees } = setupPrimarySwitch();
+    const waiting = { ...mr, mergeWhenPipelineSucceeds: true };
+    gitlab.mergeMergeRequestDirect.mockResolvedValue(waiting);
+    gitlab.mergeRequestState.mockResolvedValue(waiting);
+    await service.submit(switchInput);
+    gitlab.mergeRequestState.mockResolvedValue({
+      ...mr,
+      state: "MERGED",
+      targetBranch: "develop",
+      mergeCommitSha: "different-target-result",
+    });
+    await service.reconcile();
+    expect(database.row?.state).toBe("ACTION_REQUIRED");
+    expect(database.row?.lastError).toContain("target");
+    expect(worktrees.postMergeSwitch).not.toHaveBeenCalled();
+  });
+
+  test("does not switch a checkout when managed auto-merge accepted a newer unsynced source", async () => {
+    const { service, gitlab, worktrees } = setupPrimarySwitch();
+    gitlab.mergeRequestState.mockResolvedValue(mr);
+    await service.submit({ ...switchInput, autoMerge: true });
+    const newer = { ...mr, sha: "newer-source" };
+    gitlab.mergeReadiness.mockResolvedValue({
+      mr: newer,
+      project: { squash_option: "default_off", merge_method: "merge" },
+      canMerge: true,
+      autoMergeUserId: null,
+      removeSourceBranch: false,
+      forceRemoveSourceBranch: false,
+    });
+    const merged = {
+      ...newer,
+      state: "MERGED",
+      mergeCommitSha: "merge-result",
+    };
+    gitlab.mergeMergeRequestDirect.mockResolvedValue(merged);
+    gitlab.mergeRequestState.mockResolvedValue(merged);
+    await service.reconcile();
+    expect(database.row?.state).toBe("ACTION_REQUIRED");
+    expect(database.row?.lastError).toContain("source or target");
+    expect(worktrees.postMergeSwitch).not.toHaveBeenCalled();
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+  });
+
+  test("retries a failed switch without another merge or repeating completed follow-ups", async () => {
+    const { service, gitlab, worktrees, agents } = setupPrimarySwitch();
+    gitlab.mergeRequestState.mockResolvedValue({
+      ...mr,
+      state: "MERGED",
+      mergeCommitSha: "merge-result",
+    });
+    await service.submit(switchInput);
+    agents.getJob.mockResolvedValue({
+      id: "switch-job",
+      status: "FAILED",
+      error: "Uncommitted changes prevent switching",
+    });
+    await service.reconcile();
+    expect(database.row?.state).toBe("ACTION_REQUIRED");
+    expect(database.row?.lastError).toContain("Uncommitted changes");
+    const original = JSON.parse(database.row!.postMergeSwitchJson!).requestId;
+    worktrees.postMergeSwitch.mockResolvedValue({ id: "retried-job" });
+    agents.getJob.mockImplementation(async (id) => ({
+      id,
+      status: id === "switch-job" ? "FAILED" : "SUCCEEDED",
+    }));
+    await service.retryFollowUps("7", 3);
+    expect(database.row?.state).toBe("COMPLETED");
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(database.row!.postMergeSwitchJson!).requestId).not.toBe(
+      original,
+    );
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+  });
+
+  test("recovers a completed job after main is projected without rediscovering the source branch", async () => {
+    const { service, gitlab, worktrees, agents, primary, context } =
+      setupPrimarySwitch();
+    gitlab.mergeRequestState.mockResolvedValue({
+      ...mr,
+      state: "MERGED",
+      mergeCommitSha: "merge-result",
+    });
+    await service.submit(switchInput);
+    agents.getJob.mockResolvedValue({ id: "switch-job", status: "SUCCEEDED" });
+    database.worktree.findUnique.mockResolvedValue({
+      ...primary,
+      branch: "main",
+    });
+    context.mockResolvedValue({
+      sourceOrigin: "gitlab.test/team/repo",
+      targetOrigin: "gitlab.test/team/repo",
+      projectPath: "team/repo",
+      worktree: null,
+      ticketKey: "AIDE-145",
+      ticketDoneStatusConfigured: true,
+    });
+    await service.reconcile();
+    expect(database.row?.state).toBe("COMPLETED");
+    gitlab.mergeReadiness.mockResolvedValue({
+      mr: { ...mr, state: "MERGED" },
+      project: { squash_option: "default_off", merge_method: "merge" },
+      canMerge: true,
+      autoMergeUserId: null,
+      removeSourceBranch: false,
+      forceRemoveSourceBranch: false,
+    });
+    vi.mocked(service.options).mockRestore();
+    expect(await service.options("7", 3)).toMatchObject({
+      worktreeId: "primary",
+      worktreeFolder: "/checkout",
+      operation: { postMergeSwitch: { state: "COMPLETED" } },
+    });
+    expect(worktrees.postMergeSwitch).toHaveBeenCalledOnce();
+    expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
   });
 });
 

@@ -10,7 +10,14 @@ import type { MergeBaseBranchUpdateOptions } from "@/services/worktrees/merge-ba
 export const BASE_BRANCH_UPDATE_FIELDS = `baseBranchUpdateOptions { destinationBaseBranch selectedWorktreeIds
   worktrees { id branch folder agentName baseBranch canUpdate } results { worktreeId folder status reason } }`;
 
+export const POST_MERGE_SWITCH_OPTION_FIELDS = `canSwitchToDefaultBranch defaultSwitchToDefaultBranch
+  switchToDefaultBranchName switchToDefaultBranchUnavailableReason`;
+
 export type MergeFollowUpOptions = {
+  canSwitchToDefaultBranch?: boolean;
+  defaultSwitchToDefaultBranch?: boolean;
+  switchToDefaultBranchName?: string | null;
+  switchToDefaultBranchUnavailableReason?: string | null;
   baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
   canDeleteWorktree: boolean;
   worktreeFolder: string | null;
@@ -19,7 +26,7 @@ export type MergeFollowUpOptions = {
 };
 
 export const MERGE_FOLLOW_UP_FIELDS = `defaultMethod defaultMoveTicketToDone defaultDeleteWorktree
-  worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured ${BASE_BRANCH_UPDATE_FIELDS}`;
+  worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured ${BASE_BRANCH_UPDATE_FIELDS} ${POST_MERGE_SWITCH_OPTION_FIELDS}`;
 
 export function MergeFollowUpFields({
   options,
@@ -28,6 +35,8 @@ export function MergeFollowUpFields({
   disabled,
   deleteWorktree,
   moveTicketToDone,
+  switchToDefaultBranch = false,
+  onSwitchToDefaultBranchChange,
   onDeleteWorktreeChange,
   onMoveTicketToDoneChange,
 }: {
@@ -37,6 +46,8 @@ export function MergeFollowUpFields({
   disabled: boolean;
   deleteWorktree: boolean;
   moveTicketToDone: boolean;
+  switchToDefaultBranch?: boolean;
+  onSwitchToDefaultBranchChange?: (value: boolean) => void;
   onDeleteWorktreeChange: (value: boolean) => void;
   onMoveTicketToDoneChange: (value: boolean) => void;
 }) {
@@ -44,6 +55,31 @@ export function MergeFollowUpFields({
   const id = useId();
   return (
     <>
+      {options.switchToDefaultBranchName && (
+        <div className="space-y-1">
+          <div className="flex items-start gap-2">
+            <Checkbox
+              id={`${id}-switch`}
+              checked={switchToDefaultBranch}
+              disabled={disabled || !options.canSwitchToDefaultBranch}
+              onCheckedChange={(value) =>
+                onSwitchToDefaultBranchChange?.(value === true)
+              }
+            />
+            <Label htmlFor={`${id}-switch`}>
+              {t("switchToDefaultBranchAfterMerge", {
+                branch: options.switchToDefaultBranchName,
+              })}
+            </Label>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {options.switchToDefaultBranchUnavailableReason ??
+              t("switchToDefaultBranchDescription", {
+                branch: options.switchToDefaultBranchName,
+              })}
+          </p>
+        </div>
+      )}
       {Boolean(options.baseBranchUpdateOptions?.worktrees.length) && (
         <fieldset className="min-w-0 space-y-3 rounded-md border p-3">
           <legend className="px-1 text-sm font-medium">
