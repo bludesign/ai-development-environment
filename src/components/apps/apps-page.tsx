@@ -101,7 +101,7 @@ export function AppsPage() {
   }, [editorOpen]);
 
   return (
-    <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
+    <section className="@container/apps mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -138,7 +138,7 @@ export function AppsPage() {
           </EmptyHeader>
         </Empty>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 @min-[49rem]/apps:grid-cols-2 @min-[74rem]/apps:grid-cols-3">
           {apps.map((app) => (
             <Card
               className="cursor-pointer transition-colors hover:bg-muted/30"

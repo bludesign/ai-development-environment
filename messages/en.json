@@ -1462,7 +1462,8 @@
     "sidebarEmpty": "No usage recorded in the last seven days.",
     "sidebarRetry": "Retry",
     "sidebarCollectedAt": "Collected {date}",
-    "sidebarToday": "Today"
+    "sidebarToday": "Today",
+    "sidebarLast7Days": "Last 7 days"
   },
   "agentDetail": {
     "loading": "Loading agent…",
@@ -3059,7 +3060,12 @@
       "WAITING_REQUIREMENTS": "Waiting for merge requirements",
       "MERGING": "Merging",
       "ACTION_REQUIRED": "Action required"
-    }
+    },
+    "continueInBackground": "Continue in background",
+    "mergeNeedsAttention": "Merge needs attention",
+    "reviewMergeError": "Review merge error",
+    "dismissMergeError": "Dismiss merge error",
+    "mergeRefreshFailed": "The merge action completed, but refreshing this view failed: {error}"
   },
   "githubComments": {
     "title": "GitHub Comments",
@@ -4004,7 +4010,8 @@
     },
     "commitsBehindBase": "{count} commits behind base",
     "defaultBranchUpdateEnabled": "Keep up to date",
-    "defaultBranchUpdatePaused": "Keep up to date paused"
+    "defaultBranchUpdatePaused": "Keep up to date paused",
+    "defaultBranch": "Default branch"
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",
@@ -4769,7 +4776,13 @@
     "selectWorktree": "Select a worktree",
     "worktree": "Worktree",
     "repository": "Repository",
-    "configurationsTab": "Configurations"
+    "configurationsTab": "Configurations",
+    "allBranches": "All branches",
+    "filterBranch": "Filter by branch",
+    "searchBranches": "Search branches…",
+    "noBranches": "No branches found.",
+    "warnings": "Warnings",
+    "runFailed": "Could not run the build on this destination."
   },
   "devices": {
     "title": "Devices",

@@ -53,6 +53,11 @@ beforeEach(() => {
   } as never);
   request.mockImplementation(async (query) => {
     const operation = String(query);
+    if (operation.includes("query BuildHistoryBranches")) {
+      return {
+        buildBranches: ["feature/builds", "release/2026", "main"],
+      } as never;
+    }
     if (operation.includes("query BuildHistoryRepositories")) {
       const repositories = [
         {
@@ -270,6 +275,19 @@ describe("BuildsPage", () => {
       expect(
         screen.queryByRole("button", { name: /Delete selected/ }),
       ).toBeNull();
+      fireEvent.click(
+        screen.getByRole("combobox", { name: "Filter by branch" }),
+      );
+      fireEvent.change(
+        await screen.findByRole("combobox", { name: "Search branches…" }),
+        { target: { value: "release" } },
+      );
+      fireEvent.click(
+        await screen.findByRole("option", { name: "release/2026" }),
+      );
+      await waitFor(() =>
+        expect(screen.getAllByText("Filtered App")).toHaveLength(50),
+      );
       const historyRequests = () =>
         request.mock.calls.filter(([query]) =>
           query.includes("query BuildsPage"),
@@ -277,6 +295,7 @@ describe("BuildsPage", () => {
       expect(historyRequests().at(-1)?.[1]).toMatchObject({
         repositoryId: "repo-2",
         appId: appId ?? null,
+        branch: "release/2026",
         after: null,
       });
       fireEvent.click(screen.getByRole("button", { name: "Load more" }));
@@ -285,6 +304,7 @@ describe("BuildsPage", () => {
       );
       expect(historyRequests().at(-1)?.[1]).toMatchObject({
         repositoryId: "repo-2",
+        branch: "release/2026",
         after: "cursor-filtered",
       });
       const beforeRefresh = historyRequests().length;
@@ -297,6 +317,7 @@ describe("BuildsPage", () => {
       await waitFor(() =>
         expect(historyRequests().at(-1)?.[1]).toMatchObject({
           repositoryId: "repo-2",
+          branch: "release/2026",
           after: "cursor-filtered",
         }),
       );
@@ -309,6 +330,7 @@ describe("BuildsPage", () => {
         expect(historyRequests().at(-1)?.[1]).toMatchObject({
           repositoryId: "repo-2",
           status: "SUCCEEDED",
+          branch: "release/2026",
         }),
       );
       fireEvent.click(repository);
@@ -318,6 +340,7 @@ describe("BuildsPage", () => {
       expect(await screen.findByText("Example App")).toBeTruthy();
       expect(historyRequests().at(-1)?.[1]).toMatchObject({
         repositoryId: null,
+        branch: null,
         status: "SUCCEEDED",
         after: null,
       });

@@ -20,7 +20,31 @@ import {
   withExecutionJournal,
   recoverExecution,
   forgetExecution,
+  executionCompletion,
+  ProcessInspectionTimeoutError,
+  type ExecutionCompletion,
 } from "./execution-recovery.js";
+
+const PROCESS_INSPECTION_WARNING =
+  "Process inspection timed out after 30 seconds. The completed build result and artifacts were preserved; process cleanup will be retried.";
+
+const resultStatus = (result: ProcessResult): ExecutionCompletion["status"] =>
+  result.cancelled
+    ? "CANCELLED"
+    : result.timedOut
+      ? "TIMED_OUT"
+      : result.exitCode === 0
+        ? "SUCCEEDED"
+        : "FAILED";
+
+function warnPreservedBuild(completion: ExecutionCompletion): void {
+  completion.result.warnings = [
+    ...new Set([
+      ...(completion.result.warnings ?? []),
+      PROCESS_INSPECTION_WARNING,
+    ]),
+  ];
+}
 
 function resourceSignature(value: unknown): string {
   return JSON.stringify(
@@ -43,6 +67,7 @@ export class JobExecutor {
     { controller: AbortController; task: Promise<void> }
   >();
   private stopping = false;
+  private readonly cleanupPending = new Set<string>();
   private readonly shutdown = new AbortController();
 
   constructor(
@@ -53,15 +78,16 @@ export class JobExecutor {
   execute(job: AgentJob): void {
     if (this.stopping || this.running.has(job.id)) return;
     const controller = new AbortController();
-    const task = this.run(job, controller).finally(() =>
-      this.running.delete(job.id),
-    );
+    const task = this.run(job, controller).finally(() => {
+      this.running.delete(job.id);
+      this.cleanupPending.delete(job.id);
+    });
     this.running.set(job.id, { controller, task });
   }
 
   cancel(jobId: string): boolean {
     const running = this.running.get(jobId);
-    running?.controller.abort();
+    if (!this.cleanupPending.has(jobId)) running?.controller.abort();
     return Boolean(running);
   }
 
@@ -93,19 +119,58 @@ export class JobExecutor {
         async () => {
           entered.resolve();
           let reported = false;
+          let completion: ExecutionCompletion | undefined;
+          let checkpointRead = false;
+          let completedStatus = status;
           while (!this.shutdown.signal.aborted) {
             try {
+              if (!checkpointRead) {
+                completion =
+                  job.kind === IOS_BUILD_JOB_KIND
+                    ? executionCompletion(identity)
+                    : undefined;
+                checkpointRead = true;
+                if (
+                  completion &&
+                  ["RUNNING", "CANCELLING"].includes(job.status)
+                )
+                  completedStatus = completion.status;
+              }
               await recoverExecution(identity, this.shutdown.signal);
               await this.client.completeJob(
                 job.id,
-                status,
-                undefined,
-                "Agent service restarted; interrupted processes were stopped and verified",
+                completedStatus,
+                completion?.result,
+                completion?.error ??
+                  (completion
+                    ? undefined
+                    : "Agent service restarted; interrupted processes were stopped and verified"),
                 job.executionToken,
               );
               forgetExecution(identity);
               return;
             } catch (error) {
+              if (
+                completion &&
+                error instanceof ProcessInspectionTimeoutError
+              ) {
+                warnPreservedBuild(completion);
+                try {
+                  await this.client.completeJob(
+                    job.id,
+                    completedStatus,
+                    completion.result,
+                    completion.error,
+                    job.executionToken,
+                    false,
+                  );
+                } catch (reportError) {
+                  console.error(
+                    `Could not preserve completed build ${job.id}:`,
+                    reportError,
+                  );
+                }
+              }
               if (!reported) {
                 console.error(
                   `Cleanup verification required for job ${job.id}; execution resources remain protected:`,
@@ -200,6 +265,12 @@ export class JobExecutor {
       const handler = handlers[claimed.kind];
       if (!handler)
         throw new Error(`No local handler is registered for ${claimed.kind}`);
+      let execution:
+        | {
+            settle: () => Promise<void>;
+            checkpointCompletion: (completion: ExecutionCompletion) => void;
+          }
+        | undefined;
       const runHandler = () => {
         controller.signal.throwIfAborted();
         return handler(
@@ -262,6 +333,66 @@ export class JobExecutor {
               ),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
+            ...(resourceAware && claimed.kind === IOS_BUILD_JOB_KIND
+              ? {
+                  finalizeBuildResult: async (
+                    completedResult: ProcessResult,
+                  ) => {
+                    if (!execution)
+                      throw new Error("Build execution journal is unavailable");
+                    result = completedResult;
+                    const completion: ExecutionCompletion = {
+                      status: resultStatus(completedResult),
+                      result: completedResult,
+                      ...(completedResult.exitCode !== 0 &&
+                      !completedResult.cancelled &&
+                      !completedResult.timedOut
+                        ? {
+                            error: `Process exited with code ${completedResult.exitCode}`,
+                          }
+                        : {}),
+                    };
+                    execution.checkpointCompletion(completion);
+                    this.cleanupPending.add(claimed.id);
+                    try {
+                      await execution.settle();
+                      return;
+                    } catch (error) {
+                      if (!(error instanceof ProcessInspectionTimeoutError))
+                        throw error;
+                    }
+                    warnPreservedBuild(completion);
+                    execution.checkpointCompletion(completion);
+                    let preserved = false;
+                    while (!this.shutdown.signal.aborted) {
+                      try {
+                        if (!preserved) {
+                          await this.client.completeJob(
+                            claimed.id,
+                            completion.status,
+                            completion.result,
+                            completion.error,
+                            claimed.executionToken,
+                            false,
+                          );
+                          preserved = true;
+                        }
+                        await execution.settle();
+                        return;
+                      } catch (error) {
+                        console.error(
+                          `Build ${claimed.id} result is preserved; cleanup verification will retry:`,
+                          error instanceof Error ? error.message : error,
+                        );
+                        await waitForAgentRetry(1_000, this.shutdown.signal);
+                      }
+                    }
+                    throw new Error(
+                      "Build cleanup interrupted by agent shutdown; its result remains protected",
+                    );
+                  },
+                }
+              : {}),
             reportBuildDeploymentLaunched: (deploymentId, launchedAt) =>
               this.client.reportBuildDeploymentLaunched(
                 claimed.id,
@@ -301,7 +432,10 @@ export class JobExecutor {
             jobId: claimed.id,
             executionToken: claimed.executionToken!,
           },
-          runHandler,
+          (journal) => {
+            execution = journal;
+            return runHandler();
+          },
         );
       else if (!codebaseId) result = await runHandler();
       else if (claimed.kind === IOS_BUILD_JOB_KIND) {
@@ -350,6 +484,7 @@ export class JobExecutor {
 
     // Keep the result and the running entry until the server accepts completion.
     // Releasing this entry during an outage lets reconciliation rerun the handler.
+    if (this.stopping && this.cleanupPending.has(claimed.id)) return;
     for (let attempt = 1; ; attempt++) {
       try {
         if (resourceAware && claimed.executionToken)

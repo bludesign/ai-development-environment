@@ -1619,6 +1619,7 @@ export class AgentControlService {
     result: unknown,
     error: string | null,
     executionToken?: string | null,
+    cleanupVerified = true,
   ) {
     if (!FINAL_JOB_STATUSES.has(status))
       throw new Error("A final job status is required");
@@ -1628,6 +1629,13 @@ export class AgentControlService {
       throw new Error("Job not found for this agent");
     if (job.executionToken && job.executionToken !== executionToken)
       throw new Error("Job execution token does not match its owner");
+    if (
+      !cleanupVerified &&
+      (job.kind !== IOS_BUILD_JOB_KIND || !job.executionToken)
+    )
+      throw new Error(
+        "Only a protected iOS build can defer cleanup acknowledgement",
+      );
     if (
       !job.executionToken &&
       job.codebaseId &&
@@ -1641,6 +1649,10 @@ export class AgentControlService {
     }
     if (FINAL_JOB_STATUSES.has(job.status)) {
       await this.projectCompletion(job);
+      if (!cleanupVerified) {
+        publishJob(job);
+        return job;
+      }
       await releaseOperation(
         "AGENT_JOB",
         jobId,
@@ -1676,6 +1688,10 @@ export class AgentControlService {
     if (completed.count !== 1) {
       if (FINAL_JOB_STATUSES.has(updated.status)) {
         await this.projectCompletion(updated);
+        if (!cleanupVerified) {
+          publishJob(updated);
+          return updated;
+        }
         await releaseOperation(
           "AGENT_JOB",
           jobId,
@@ -1694,6 +1710,10 @@ export class AgentControlService {
       throw new Error(`Job cannot be completed from status ${updated.status}`);
     }
     await this.projectCompletion(updated);
+    if (!cleanupVerified) {
+      publishJob(updated);
+      return updated;
+    }
     await releaseOperation(
       "AGENT_JOB",
       jobId,

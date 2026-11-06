@@ -9,6 +9,11 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  clearMergeOperation,
+  gitlabMergeOperationKey,
+  runMergeOperation,
+} from "@/components/github/merge-operation-state";
 import type { GitLabMergeOptions } from "@/services/gitlab";
 
 import { MergeRequestDialog } from "./merge-request-dialog";
@@ -66,9 +71,249 @@ afterEach(async () => {
   // Let it dispatch its event before Vitest tears down the jsdom globals.
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   request.mockReset();
+  clearMergeOperation(gitlabMergeOperationKey(target));
 });
 
 describe("GitLab merge options", () => {
+  test("keeps the confirmed result visible when refreshing the parent fails", async () => {
+    request.mockImplementation(async (query) =>
+      query.includes("query GitLabMergeRequestMergeOptions")
+        ? ({ gitlabMergeRequestMergeOptions: options } as never)
+        : ({
+            submitGitLabMergeRequestMerge: {
+              mergeRequest: { ...target, state: "MERGED" },
+              operation: null,
+              postMergeError: null,
+            },
+          } as never),
+    );
+    const onMerged = vi.fn().mockRejectedValue(new Error("View unavailable"));
+    const onOpenChange = vi.fn();
+    render(
+      <MergeRequestDialog
+        mergeRequest={target}
+        onMerged={onMerged}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+    expect(
+      await screen.findByText(/refreshing this view failed: View unavailable/),
+    ).toBeDefined();
+    expect(screen.getByText("Merge completed")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
+    expect(onMerged).toHaveBeenCalledTimes(1);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  test("removes old request readiness immediately when switching the sheet target", async () => {
+    request.mockResolvedValue({
+      gitlabMergeRequestMergeOptions: options,
+    } as never);
+    const view = show();
+    const oldSubmit = await screen.findByRole("button", { name: "Merge now" });
+    request.mockClear();
+    view.rerender(
+      <MergeRequestDialog
+        mergeRequest={{ ...target, iid: 18 }}
+        onOpenChange={vi.fn()}
+        open
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
+    fireEvent.click(oldSubmit);
+    expect(
+      request.mock.calls.some(([query]) => query.includes("mutation")),
+    ).toBe(false);
+  });
+
+  test("shows a saved follow-up warning and retries it when loading fresh options fails", async () => {
+    const saved = {
+      mergeRequest: { ...target, state: "MERGED" },
+      operation,
+      postMergeError: "Jira unavailable",
+      ticketTransitionError: null,
+    };
+    await runMergeOperation(
+      gitlabMergeOperationKey(target),
+      "merge",
+      async () => saved,
+      (value) => value.postMergeError,
+    );
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions"))
+        throw new Error("Readiness unavailable");
+      return {
+        retryGitLabMergeFollowUps: {
+          ...saved,
+          postMergeError: null,
+          operation: { ...operation, state: "COMPLETED", lastError: null },
+        },
+      } as never;
+    });
+    const onOpenChange = vi.fn();
+    render(
+      <MergeRequestDialog
+        mergeRequest={target}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    await screen.findByText("Readiness unavailable");
+    expect(screen.getByText("Jira unavailable")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Retry follow-ups" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RetryGitLabMergeFollowUps"),
+        { projectId: target.projectId, iid: target.iid },
+      ),
+    );
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  });
+
+  test("continues a merge after dismissal and restores its error on a new sheet", async () => {
+    let rejectMerge!: (error: Error) => void;
+    const pendingMerge = new Promise<never>((_resolve, reject) => {
+      rejectMerge = reject;
+    });
+    const onOpenChange = vi.fn();
+    request.mockImplementation(async (query) =>
+      query.includes("query GitLabMergeRequestMergeOptions")
+        ? ({ gitlabMergeRequestMergeOptions: options } as never)
+        : pendingMerge,
+    );
+    const original = render(
+      <MergeRequestDialog
+        mergeRequest={target}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+    const background = await screen.findByRole("button", {
+      name: "Continue in background",
+    });
+    expect(background.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(background);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    original.unmount();
+    await act(async () => rejectMerge(new Error("Merge permissions changed")));
+    show();
+    expect(await screen.findByText("Merge permissions changed")).toBeDefined();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation SubmitGitLabMergeRequestMerge"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("keeps a background merge confirmed when reopened options arrive after completion", async () => {
+    let finishMerge!: (value: unknown) => void;
+    const pendingMerge = new Promise((resolve) => {
+      finishMerge = resolve;
+    });
+    let finishOptions!: (value: unknown) => void;
+    const pendingOptions = new Promise((resolve) => {
+      finishOptions = resolve;
+    });
+    let optionsRequests = 0;
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitLabMergeRequestMergeOptions")) {
+        optionsRequests++;
+        return optionsRequests === 1
+          ? ({ gitlabMergeRequestMergeOptions: options } as never)
+          : ((await pendingOptions) as never);
+      }
+      return (await pendingMerge) as never;
+    });
+    const original = show();
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    original.unmount();
+    show();
+    await waitFor(() => expect(optionsRequests).toBe(2));
+
+    await act(async () =>
+      finishMerge({
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: { ...target, state: "MERGED" },
+          operation: null,
+          postMergeError: null,
+          ticketTransitionError: null,
+        },
+      }),
+    );
+    await act(async () =>
+      finishOptions({ gitlabMergeRequestMergeOptions: options }),
+    );
+
+    expect(screen.getByText("Merge completed")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Merge now" })).toBeNull();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation SubmitGitLabMergeRequestMerge"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("does not dismiss a different request when an earlier background merge completes", async () => {
+    let finishMerge!: (value: unknown) => void;
+    const pendingMerge = new Promise((resolve) => {
+      finishMerge = resolve;
+    });
+    const onOpenChange = vi.fn();
+    const onMerged = vi.fn();
+    const other = { ...target, iid: 18 };
+    request.mockImplementation(async (query, variables) =>
+      query.includes("query GitLabMergeRequestMergeOptions")
+        ? ({
+            gitlabMergeRequestMergeOptions: {
+              ...options,
+              iid: (variables as { iid: number }).iid,
+            },
+          } as never)
+        : ((await pendingMerge) as never),
+    );
+    const view = render(
+      <MergeRequestDialog
+        mergeRequest={target}
+        onMerged={onMerged}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Merge now" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    view.rerender(
+      <MergeRequestDialog
+        mergeRequest={other}
+        onMerged={onMerged}
+        onOpenChange={onOpenChange}
+        open
+      />,
+    );
+    await screen.findByRole("button", { name: "Merge now" });
+    await act(async () =>
+      finishMerge({
+        submitGitLabMergeRequestMerge: {
+          mergeRequest: { ...target, state: "MERGED" },
+          postMergeError: null,
+          ticketTransitionError: null,
+          operation: null,
+        },
+      }),
+    );
+    expect(onOpenChange).toHaveBeenCalledTimes(1);
+    expect(onMerged).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Merge now" })).toBeDefined();
+    clearMergeOperation(gitlabMergeOperationKey(other));
+  });
+
   test("shows a Jira activation warning while keeping successful auto merge enabled", async () => {
     const warning = "Auto merge is enabled, but Jira requires a Comment";
     const onOpenChange = vi.fn();

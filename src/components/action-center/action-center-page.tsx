@@ -1,5 +1,6 @@
 "use client";
 
+import { MergeOperationWarnings } from "@/components/github/merge-operation-warnings";
 import { ListTodo, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -40,6 +41,7 @@ export function ActionCenterPage() {
 
   return (
     <div className="space-y-6">
+      <MergeOperationWarnings />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">

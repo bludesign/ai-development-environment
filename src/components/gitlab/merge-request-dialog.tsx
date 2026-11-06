@@ -43,6 +43,15 @@ import {
   gitLabStatusColors,
 } from "./merge-request-status";
 
+import {
+  clearMergeOperation,
+  getMergeOperationSnapshot,
+  gitlabMergeOperationKey,
+  reportMergeOperationError,
+  runMergeOperation,
+  useMergeOperation,
+} from "@/components/github/merge-operation-state";
+
 const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
   canRemoveSourceBranch canMerge canAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
@@ -66,12 +75,25 @@ export function MergeRequestDialog({
   const tp = useTranslations("pullRequests");
   const id = useId();
   const generation = useRef(0);
-  const actionInFlight = useRef(false);
-  const [options, setOptions] = useState<GitLabMergeOptions | null>(null);
+  const [loadedOptions, setLoadedOptions] = useState<{
+    key: string;
+    value: GitLabMergeOptions;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const operationKey = gitlabMergeOperationKey(mergeRequest);
+  const options =
+    loadedOptions?.key === operationKey ? loadedOptions.value : null;
+  const mergeOperation = useMergeOperation<GitLabMergeResult>(operationKey);
+  const busy = mergeOperation.pending;
+  const result = mergeOperation.result;
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<GitLabMergeResult | null>(null);
+  const currentSheet = useRef({ key: operationKey, open });
+  useEffect(() => {
+    currentSheet.current = { key: operationKey, open };
+    return () => {
+      currentSheet.current = { key: "", open: false };
+    };
+  }, [operationKey, open]);
   const [squash, setSquash] = useState(false);
   const [removeSourceBranch, setRemoveSourceBranch] = useState(false);
   const [customMerge, setCustomMerge] = useState(false);
@@ -83,48 +105,52 @@ export function MergeRequestDialog({
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
 
-  const load = useCallback(async () => {
-    const current = ++generation.current;
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await controlPlaneRequest<{
-        gitlabMergeRequestMergeOptions: GitLabMergeOptions;
-      }>(
-        `query GitLabMergeRequestMergeOptions($projectId: ID!, $iid: Int!, $worktreeId: ID) {
+  const load = useCallback(
+    async (replaceOutcome = false) => {
+      const current = ++generation.current;
+      const operationAtLoad = getMergeOperationSnapshot(operationKey);
+      setLoading(true);
+      setError(null);
+      try {
+        const data = await controlPlaneRequest<{
+          gitlabMergeRequestMergeOptions: GitLabMergeOptions;
+        }>(
+          `query GitLabMergeRequestMergeOptions($projectId: ID!, $iid: Int!, $worktreeId: ID) {
           gitlabMergeRequestMergeOptions(projectId: $projectId, iid: $iid, worktreeId: $worktreeId) { ${OPTIONS_FIELDS} }
         }`,
-        {
-          projectId: mergeRequest.projectId,
-          iid: mergeRequest.iid,
-          worktreeId: worktreeId ?? null,
-        },
-      );
-      if (generation.current !== current) return;
-      const next = data.gitlabMergeRequestMergeOptions;
-      setOptions(next);
-      setAutoSync(next.defaultAutoSync ?? false);
-      setSelectedWorktreeIds(
-        next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
-      );
-      setResult(null);
-      setSquash(next.squash);
-      setRemoveSourceBranch(next.removeSourceBranch);
-      setCustomMerge(next.mergeCommitMessage !== null);
-      setCustomSquash(next.squashCommitMessage !== null);
-      setMergeMessage(next.mergeCommitMessage ?? "");
-      setSquashMessage(next.squashCommitMessage ?? "");
-      setDeleteWorktree(next.canDeleteWorktree && next.defaultDeleteWorktree);
-      setMoveTicketToDone(
-        Boolean(next.ticketKey && next.defaultMoveTicketToDone),
-      );
-    } catch (value) {
-      if (generation.current === current)
-        setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (generation.current === current) setLoading(false);
-    }
-  }, [mergeRequest.iid, mergeRequest.projectId, worktreeId]);
+          {
+            projectId: mergeRequest.projectId,
+            iid: mergeRequest.iid,
+            worktreeId: worktreeId ?? null,
+          },
+        );
+        if (generation.current !== current) return;
+        const next = data.gitlabMergeRequestMergeOptions;
+        setLoadedOptions({ key: operationKey, value: next });
+        clearMergeOperation(operationKey, !replaceOutcome, operationAtLoad);
+        setAutoSync(next.defaultAutoSync ?? false);
+        setSelectedWorktreeIds(
+          next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
+        );
+        setSquash(next.squash);
+        setRemoveSourceBranch(next.removeSourceBranch);
+        setCustomMerge(next.mergeCommitMessage !== null);
+        setCustomSquash(next.squashCommitMessage !== null);
+        setMergeMessage(next.mergeCommitMessage ?? "");
+        setSquashMessage(next.squashCommitMessage ?? "");
+        setDeleteWorktree(next.canDeleteWorktree && next.defaultDeleteWorktree);
+        setMoveTicketToDone(
+          Boolean(next.ticketKey && next.defaultMoveTicketToDone),
+        );
+      } catch (value) {
+        if (generation.current === current)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (generation.current === current) setLoading(false);
+      }
+    },
+    [mergeRequest.iid, mergeRequest.projectId, operationKey, worktreeId],
+  );
 
   const cancelLoad = useCallback(() => {
     generation.current++;
@@ -133,8 +159,7 @@ export function MergeRequestDialog({
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
-      setOptions(null);
-      setResult(null);
+      setLoadedOptions(null);
       void load();
     }, 0);
     return () => {
@@ -175,84 +200,115 @@ export function MergeRequestDialog({
     : "unknown";
 
   const perform = async (action: "merge" | "auto" | "cancel" | "retry") => {
-    if (!options || disabled || actionInFlight.current) return;
+    if (disabled || (!options && action !== "cancel" && action !== "retry"))
+      return;
     if (
       (action === "merge" || action === "auto") &&
       (confirmed || invalidMessages || invalidFollowUp)
     )
       return;
-    actionInFlight.current = true;
-    setBusy(true);
     setError(null);
-    try {
-      let next: GitLabMergeResult;
-      if (action === "cancel" || action === "retry") {
-        const field =
-          action === "cancel"
-            ? "cancelGitLabAutoMerge"
-            : "retryGitLabMergeFollowUps";
-        const data = await controlPlaneRequest<
-          Record<string, GitLabMergeResult>
-        >(
-          `mutation ${action === "cancel" ? "CancelGitLabAutoMerge" : "RetryGitLabMergeFollowUps"}($projectId: ID!, $iid: Int!) { ${field}(projectId: $projectId, iid: $iid) { ${RESULT_FIELDS} } }`,
-          { projectId: options.projectId, iid: options.iid },
-        );
-        next = data[field]!;
-      } else {
-        const data = await controlPlaneRequest<{
-          submitGitLabMergeRequestMerge: GitLabMergeResult;
-        }>(
-          `mutation SubmitGitLabMergeRequestMerge($input: SubmitGitLabMergeRequestMergeInput!) { submitGitLabMergeRequestMerge(input: $input) { ${RESULT_FIELDS} } }`,
-          {
-            input: {
-              projectId: options.projectId,
-              iid: options.iid,
-              sha: options.sha,
-              autoMerge: action === "auto",
-              ...(action === "auto" && autoSync ? { autoSync: true } : {}),
-              squash,
-              removeSourceBranch: options.canRemoveSourceBranch
-                ? removeSourceBranch
-                : options.removeSourceBranch,
-              mergeCommitMessage:
-                mergeMessageApplicable && customMerge
-                  ? mergeMessage.trim()
-                  : null,
-              squashCommitMessage:
-                squash && customSquash ? squashMessage.trim() : null,
-              worktreeId: worktreeId ?? options.worktreeId,
-              ...(selectedWorktreeIds.length &&
-              options?.baseBranchUpdateOptions?.destinationBaseBranch
-                ? {
-                    baseBranchUpdate: {
-                      worktreeIds: selectedWorktreeIds,
-                      destinationBaseBranch:
-                        options.baseBranchUpdateOptions.destinationBaseBranch,
-                    },
-                  }
-                : {}),
-              deleteWorktree,
-              moveTicketToDone,
+    const outcome = await runMergeOperation(
+      operationKey,
+      action,
+      async () => {
+        let next: GitLabMergeResult;
+        if (action === "cancel" || action === "retry") {
+          const field =
+            action === "cancel"
+              ? "cancelGitLabAutoMerge"
+              : "retryGitLabMergeFollowUps";
+          const data = await controlPlaneRequest<
+            Record<string, GitLabMergeResult>
+          >(
+            `mutation ${action === "cancel" ? "CancelGitLabAutoMerge" : "RetryGitLabMergeFollowUps"}($projectId: ID!, $iid: Int!) { ${field}(projectId: $projectId, iid: $iid) { ${RESULT_FIELDS} } }`,
+            { projectId: mergeRequest.projectId, iid: mergeRequest.iid },
+          );
+          next = data[field]!;
+        } else {
+          const reviewedOptions = options!;
+          const data = await controlPlaneRequest<{
+            submitGitLabMergeRequestMerge: GitLabMergeResult;
+          }>(
+            `mutation SubmitGitLabMergeRequestMerge($input: SubmitGitLabMergeRequestMergeInput!) { submitGitLabMergeRequestMerge(input: $input) { ${RESULT_FIELDS} } }`,
+            {
+              input: {
+                projectId: reviewedOptions.projectId,
+                iid: reviewedOptions.iid,
+                sha: reviewedOptions.sha,
+                autoMerge: action === "auto",
+                ...(action === "auto" && autoSync ? { autoSync: true } : {}),
+                squash,
+                removeSourceBranch: reviewedOptions.canRemoveSourceBranch
+                  ? removeSourceBranch
+                  : reviewedOptions.removeSourceBranch,
+                mergeCommitMessage:
+                  mergeMessageApplicable && customMerge
+                    ? mergeMessage.trim()
+                    : null,
+                squashCommitMessage:
+                  squash && customSquash ? squashMessage.trim() : null,
+                worktreeId: worktreeId ?? reviewedOptions.worktreeId,
+                ...(selectedWorktreeIds.length &&
+                reviewedOptions?.baseBranchUpdateOptions?.destinationBaseBranch
+                  ? {
+                      baseBranchUpdate: {
+                        worktreeIds: selectedWorktreeIds,
+                        destinationBaseBranch:
+                          reviewedOptions.baseBranchUpdateOptions
+                            .destinationBaseBranch,
+                      },
+                    }
+                  : {}),
+                deleteWorktree,
+                moveTicketToDone,
+              },
             },
-          },
-        );
-        next = data.submitGitLabMergeRequestMerge;
-      }
-      setResult(next);
+          );
+          next = data.submitGitLabMergeRequestMerge;
+        }
+        return next;
+      },
+      (next) =>
+        next.postMergeError ??
+        next.ticketTransitionError ??
+        (next.operation?.state === "ACTION_REQUIRED"
+          ? next.operation.lastError
+          : null),
+      `GitLab !${mergeRequest.iid} · ${mergeRequest.title}`,
+    );
+    if (!outcome) return;
+    const next = outcome.result;
+    try {
       await onMerged?.(next.mergeRequest);
-      if (
-        !next.postMergeError &&
-        !next.ticketTransitionError &&
-        next.operation?.state !== "ACTION_REQUIRED"
-      )
-        onOpenChange(false);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      actionInFlight.current = false;
-      setBusy(false);
+      reportMergeOperationError(
+        operationKey,
+        next,
+        tp("mergeRefreshFailed", {
+          error: value instanceof Error ? value.message : String(value),
+        }),
+      );
+      return;
     }
+    if (
+      !next.postMergeError &&
+      !next.ticketTransitionError &&
+      next.operation?.state !== "ACTION_REQUIRED" &&
+      currentSheet.current.key === operationKey &&
+      currentSheet.current.open
+    )
+      onOpenChange(false);
   };
+  const savedResultError =
+    result?.postMergeError ??
+    result?.ticketTransitionError ??
+    operation?.lastError;
+  const displayedError =
+    error ??
+    (mergeOperation.error !== savedResultError ? mergeOperation.error : null);
+  const backgroundAvailable =
+    busy && ["merge", "auto"].includes(mergeOperation.action ?? "");
 
   return (
     <Dialog
@@ -268,14 +324,28 @@ export function MergeRequestDialog({
             !{mergeRequest.iid} · {options?.title ?? mergeRequest.title}
           </DialogDescription>
         </DialogHeader>
-        {error && (
+        {displayedError && (
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>{displayedError}</AlertDescription>
+          </Alert>
+        )}
+        {(result?.postMergeError ||
+          result?.ticketTransitionError ||
+          operation?.lastError) && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              {confirmed && <p>{t("mergeFollowUpFailed")}</p>}
+              <p>
+                {result?.postMergeError ??
+                  result?.ticketTransitionError ??
+                  operation?.lastError}
+              </p>
+            </AlertDescription>
           </Alert>
         )}
         {loading && !options ? (
           <div className="flex justify-center py-6">
-            <Spinner />
+            <Spinner aria-hidden="true" />
           </div>
         ) : (
           options && (
@@ -302,20 +372,6 @@ export function MergeRequestDialog({
                 {options.sourceBranch} → {options.targetBranch} ·{" "}
                 {options.sha.slice(0, 8)}
               </p>
-              {(result?.postMergeError ||
-                result?.ticketTransitionError ||
-                operation?.lastError) && (
-                <Alert variant="destructive">
-                  <AlertDescription>
-                    {confirmed && <p>{t("mergeFollowUpFailed")}</p>}
-                    <p>
-                      {result?.postMergeError ??
-                        result?.ticketTransitionError ??
-                        operation?.lastError}
-                    </p>
-                  </AlertDescription>
-                </Alert>
-              )}
               {confirmed ? (
                 <p role="status" className="text-sm">
                   {operation?.state === "POST_MERGE"
@@ -533,21 +589,29 @@ export function MergeRequestDialog({
             disabled={disabled}
             variant="outline"
             size="icon"
-            onClick={() => void load()}
+            onClick={() => void load(true)}
           >
             <RefreshCw />
           </Button>
-          {confirmed && operation?.state === "ACTION_REQUIRED" ? (
+          {backgroundAvailable ? (
+            <Button onClick={() => onOpenChange(false)}>
+              <Spinner aria-hidden="true" />
+              {tp("continueInBackground")}
+            </Button>
+          ) : confirmed && operation?.state === "ACTION_REQUIRED" ? (
             <Button disabled={disabled} onClick={() => void perform("retry")}>
-              {busy && <Spinner />}
+              {busy && <Spinner aria-hidden="true" />}
               {t("retryFollowUps")}
             </Button>
           ) : autoMergeEnabled ? (
             <Button
-              disabled={disabled || !options?.canCancelAutoMerge}
+              disabled={
+                disabled ||
+                (options ? !options.canCancelAutoMerge : !autoMergeEnabled)
+              }
               onClick={() => void perform("cancel")}
             >
-              {busy && <Spinner />}
+              {busy && <Spinner aria-hidden="true" />}
               {t("cancelAutoMerge")}
             </Button>
           ) : (
@@ -580,7 +644,7 @@ export function MergeRequestDialog({
                   }
                   onClick={() => void perform("merge")}
                 >
-                  {busy ? <Spinner /> : <GitMerge />}
+                  {busy ? <Spinner aria-hidden="true" /> : <GitMerge />}
                   {t("mergeNow")}
                 </Button>
               </>

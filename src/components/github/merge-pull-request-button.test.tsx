@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -8,6 +9,10 @@ import {
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import {
+  clearMergeOperation,
+  githubMergeOperationKey,
+} from "./merge-operation-state";
 
 import { MergePullRequestButton } from "./merge-pull-request-button";
 
@@ -33,9 +38,193 @@ afterEach(async () => {
   cleanup();
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   request.mockReset();
+  clearMergeOperation(githubMergeOperationKey(pullRequest));
 });
 
 describe("MergePullRequestButton", () => {
+  test("retains a confirmed merge when refreshing its originating view fails", async () => {
+    request.mockImplementation(async (query) =>
+      query.includes("query GitHubPullRequestMergeOptions")
+        ? ({
+            githubPullRequestMergeOptions: {
+              availableMethods: ["SQUASH"],
+              commitEmails: [],
+              defaultCommitHeadline: "Refresh failure",
+              defaultCommitBody: "",
+              canMerge: true,
+            },
+          } as never)
+        : ({
+            mergeGitHubPullRequest: { state: "MERGED", postMergeError: null },
+          } as never),
+    );
+    const onMerged = vi.fn().mockRejectedValue(new Error("View unavailable"));
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        onMerged={onMerged}
+        open
+      />,
+    );
+    await screen.findByDisplayValue("Refresh failure");
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }));
+    expect(
+      await screen.findByText(/refreshing this view failed: View unavailable/),
+    ).toBeDefined();
+    const submit = screen.getByRole("button", { name: "Merge pull request" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(submit);
+    expect(onMerged).toHaveBeenCalledTimes(1);
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation MergeGitHubPullRequest"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("disables submission immediately when switching to a request whose options have not loaded", async () => {
+    request.mockResolvedValue({
+      githubPullRequestMergeOptions: {
+        availableMethods: ["SQUASH"],
+        commitEmails: [],
+        defaultCommitHeadline: "Old request",
+        defaultCommitBody: "",
+        canMerge: true,
+      },
+    } as never);
+    const view = render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        open
+      />,
+    );
+    await screen.findByDisplayValue("Old request");
+    request.mockClear();
+    view.rerender(
+      <MergePullRequestButton
+        pullRequest={{ ...pullRequest, number: 18 }}
+        requestSource="PULL_REQUEST_DETAILS"
+        open
+      />,
+    );
+    const submit = screen.getByRole("button", { name: "Merge pull request" });
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(submit);
+    expect(
+      request.mock.calls.some(([query]) => query.includes("mutation")),
+    ).toBe(false);
+    expect(screen.queryByDisplayValue("Old request")).toBeNull();
+  });
+
+  test("dismisses a pending merge and restores its error after navigating back", async () => {
+    let rejectMerge!: (reason: Error) => void;
+    const pendingMerge = new Promise<never>((_resolve, reject) => {
+      rejectMerge = reject;
+    });
+    request.mockImplementation(async (query) => {
+      if (query.includes("query GitHubPullRequestMergeOptions"))
+        return {
+          githubPullRequestMergeOptions: {
+            availableMethods: ["SQUASH"],
+            commitEmails: [],
+            defaultCommitHeadline: "APP-42 Title",
+            defaultCommitBody: "",
+            canMerge: true,
+          },
+        } as never;
+      return pendingMerge;
+    });
+    const original = render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    await screen.findByDisplayValue("APP-42 Title");
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }));
+    const background = await screen.findByRole("button", {
+      name: "Continue in background",
+    });
+    expect(background.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(background);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    original.unmount();
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    await act(async () =>
+      rejectMerge(new Error("The reviewed commit changed")),
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const attention = await screen.findByRole("button", {
+      name: "Merge needs attention",
+    });
+    expect(attention.getAttribute("title")).toBe("The reviewed commit changed");
+    fireEvent.click(attention);
+    expect(
+      await screen.findByText("The reviewed commit changed"),
+    ).toBeDefined();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("mutation MergeGitHubPullRequest"),
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("completes a dismissed merge once without reopening its sheet", async () => {
+    let finishMerge!: (value: unknown) => void;
+    const pendingMerge = new Promise((resolve) => {
+      finishMerge = resolve;
+    });
+    const onMerged = vi.fn();
+    request.mockImplementation(async (query) =>
+      query.includes("query GitHubPullRequestMergeOptions")
+        ? ({
+            githubPullRequestMergeOptions: {
+              availableMethods: ["SQUASH"],
+              commitEmails: [],
+              defaultCommitHeadline: "APP-42 Title",
+              defaultCommitBody: "",
+              canMerge: true,
+            },
+          } as never)
+        : ((await pendingMerge) as never),
+    );
+    render(
+      <MergePullRequestButton
+        pullRequest={pullRequest}
+        requestSource="PULL_REQUEST_DETAILS"
+        onMerged={onMerged}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Merge" }));
+    await screen.findByDisplayValue("APP-42 Title");
+    fireEvent.click(screen.getByRole("button", { name: "Merge pull request" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Continue in background" }),
+    );
+    await act(async () =>
+      finishMerge({
+        mergeGitHubPullRequest: { state: "MERGED", postMergeError: null },
+      }),
+    );
+    expect(onMerged).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Merge needs attention" }),
+    ).toBeNull();
+  });
+
   test("configures managed Auto Merge from a linked merge sheet", async () => {
     request.mockImplementation(async (query) => {
       if (query.includes("query GitHubPullRequestMergeOptions"))

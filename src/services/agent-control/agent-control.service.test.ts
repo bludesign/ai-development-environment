@@ -365,6 +365,75 @@ describe("AgentControlService branch deletion progress", () => {
 describe("AgentControlService.completeJob", () => {
   beforeEach(() => vi.clearAllMocks());
 
+  test("projects a preserved build result before cleanup acknowledgement without releasing its execution resources", async () => {
+    const job = {
+      ...persistedJob("RUNNING"),
+      kind: "ios.build.run",
+      executionToken: "owner",
+      error: null,
+    };
+    const holder = { id: "holder", state: "HELD", executionToken: "owner" };
+    const updateHolder = vi.fn(async ({ data }) => Object.assign(holder, data));
+    const updateJob = vi.fn(async ({ data }) => Object.assign(job, data));
+    getPrismaClient.mockResolvedValue({
+      agentJob: {
+        findUnique: vi.fn(async () => job),
+        updateMany: vi.fn(async ({ data }) => {
+          Object.assign(job, data);
+          return { count: 1 };
+        }),
+        update: updateJob,
+      },
+      operationHolder: {
+        findUnique: vi.fn(async () => holder),
+        update: updateHolder,
+      },
+    });
+    const service = new AgentControlService();
+    const project = vi.fn(async () => undefined);
+    service.registerCompletionHandler("ios.build.run", project);
+    const result = {
+      exitCode: 0,
+      artifacts: [{ kind: "RUNNABLE_APP", relativePath: "products/App.app" }],
+      warnings: ["Cleanup pending"],
+    };
+    await service.completeJob(
+      "agent-1",
+      "job-1",
+      "SUCCEEDED",
+      result,
+      null,
+      "owner",
+      false,
+    );
+    expect(job.status).toBe("SUCCEEDED");
+    expect(JSON.parse(job.resultJson!)).toEqual(result);
+    expect(project).toHaveBeenCalledOnce();
+    expect(updateHolder).not.toHaveBeenCalled();
+    expect(job.executionToken).toBe("owner");
+    await service.completeJob(
+      "agent-1",
+      "job-1",
+      "SUCCEEDED",
+      result,
+      null,
+      "owner",
+      false,
+    );
+    expect(updateHolder).not.toHaveBeenCalled();
+    await service.completeJob(
+      "agent-1",
+      "job-1",
+      "SUCCEEDED",
+      undefined,
+      null,
+      "owner",
+    );
+    expect(holder.state).toBe("RELEASED");
+    expect(job.executionToken).toBeNull();
+    expect(JSON.parse(job.resultJson!)).toEqual(result);
+  });
+
   test("rejects completion from a different execution owner before releasing its resources", async () => {
     const holderUpdate = vi.fn();
     getPrismaClient.mockResolvedValue({

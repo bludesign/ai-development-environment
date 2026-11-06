@@ -77,6 +77,10 @@ import {
 } from "./build-directory";
 import { cachedArtifact } from "./artifact-cache";
 import {
+  historicalBuildBranches,
+  historicalBranchBuildIds,
+} from "./build-history-branches";
+import {
   buildArtifactFileChecksum,
   failBuildArtifactTransferForJob,
 } from "./artifact-relay";
@@ -2697,10 +2701,26 @@ export class BuildsService {
       appId?: string | null;
       repositoryId?: string | null;
       configurationId?: string | null;
+      branch?: string | null;
     } = {},
   ) {
     const prisma = await getPrismaClient();
     const take = Math.max(1, Math.min(input.first ?? 50, 200));
+    if (input.branch) {
+      const ids = await historicalBranchBuildIds(prisma, {
+        ...input,
+        branch: input.branch,
+        first: take,
+      });
+      const items = ids.length
+        ? await prisma.build.findMany({
+            where: { id: { in: ids.slice(0, take) } },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            include: buildInclude,
+          })
+        : [];
+      return { items, nextCursor: ids.length > take ? ids[take - 1]! : null };
+    }
     const rows = await prisma.build.findMany({
       where: {
         ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
@@ -2732,6 +2752,16 @@ export class BuildsService {
   async getBuild(id: string) {
     const prisma = await getPrismaClient();
     return prisma.build.findUnique({ where: { id }, include: buildInclude });
+  }
+
+  async buildBranches(
+    input: {
+      appId?: string | null;
+      repositoryId?: string | null;
+      configurationId?: string | null;
+    } = {},
+  ) {
+    return historicalBuildBranches(await getPrismaClient(), input);
   }
 
   async deleteBuilds(ids: string[]): Promise<number> {
@@ -3662,9 +3692,15 @@ export class BuildsService {
         : new Date();
     const completedAt = finalStateHash ? observedAt : new Date();
     let snapshotJson = build.snapshotJson;
+    if (Array.isArray(result.warnings)) {
+      snapshotJson = JSON.stringify({
+        ...objectValue(parseJson(snapshotJson, {}), "build snapshot"),
+        warnings: stringArray(result.warnings),
+      });
+    }
     if (sourceStateHash) {
       const snapshot = objectValue(
-        parseJson(build.snapshotJson, {}),
+        parseJson(snapshotJson, {}),
         "build snapshot",
       );
       const worktreeSnapshot = objectValue(

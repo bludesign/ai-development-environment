@@ -2,7 +2,7 @@
 
 import { GitMerge, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Link } from "@/i18n/navigation";
 import {
@@ -40,6 +40,14 @@ import type {
   GitHubRequestSource,
 } from "@/services/github/types";
 
+import { MergeOperationError } from "./merge-operation-error";
+import {
+  githubMergeOperationKey,
+  reportMergeOperationError,
+  runMergeOperation,
+  useMergeOperation,
+} from "./merge-operation-state";
+
 const DEFAULT_EMAIL = "__github_account_default__";
 
 export function MergePullRequestButton({
@@ -71,9 +79,10 @@ export function MergePullRequestButton({
 }) {
   const t = useTranslations("pullRequests");
   const [internalOpen, setInternalOpen] = useState(false);
-  const [options, setOptions] = useState<GitHubPullRequestMergeOptions | null>(
-    null,
-  );
+  const [loadedOptions, setLoadedOptions] = useState<{
+    key: string;
+    value: GitHubPullRequestMergeOptions;
+  } | null>(null);
   const [method, setMethod] = useState<GitHubMergeMethod | "">("");
   const [commitHeadline, setCommitHeadline] = useState("");
   const [commitBody, setCommitBody] = useState("");
@@ -81,10 +90,17 @@ export function MergePullRequestButton({
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
   const [deleteWorktree, setDeleteWorktree] = useState(false);
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
-  const [mergedResult, setMergedResult] =
-    useState<GitHubPullRequestMergeResult | null>(null);
+  const operationKey = githubMergeOperationKey(pullRequest);
+  const options =
+    loadedOptions?.key === operationKey ? loadedOptions.value : null;
+  const mergeOperation = useMergeOperation<GitHubPullRequestMergeResult | null>(
+    operationKey,
+  );
+  const mergedResult = mergeOperation.result?.postMergeError
+    ? mergeOperation.result
+    : null;
+  const merging = mergeOperation.pending;
   const [loading, setLoading] = useState(false);
-  const [merging, setMerging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoSync, setAutoSync] = useState(false);
   const [refresh, setRefresh] = useState(0);
@@ -93,14 +109,17 @@ export function MergePullRequestButton({
     2,
   );
   const open = controlledOpen ?? internalOpen;
+  const currentSheet = useRef({ key: operationKey, open });
+  useEffect(() => {
+    currentSheet.current = { key: operationKey, open };
+    return () => {
+      currentSheet.current = { key: "", open: false };
+    };
+  }, [operationKey, open]);
   const setOpen = (next: boolean) => {
     if (!next) {
-      if (mergedResult) {
-        setMergedResult(null);
-        void onMerged?.(mergedResult);
-      }
       setLoading(false);
-      setOptions(null);
+      setLoadedOptions(null);
       setError(null);
     }
     if (controlledOpen === undefined) setInternalOpen(next);
@@ -112,7 +131,7 @@ export function MergePullRequestButton({
     let active = true;
     const timeout = window.setTimeout(() => {
       setLoading(true);
-      setOptions(null);
+      setLoadedOptions(null);
       setError(null);
       void controlPlaneRequest<{
         githubPullRequestMergeOptions: GitHubPullRequestMergeOptions;
@@ -154,7 +173,7 @@ export function MergePullRequestButton({
         .then((data) => {
           if (!active) return;
           const next = data.githubPullRequestMergeOptions;
-          setOptions(next);
+          setLoadedOptions({ key: operationKey, value: next });
           setAutoSync(next.defaultAutoSync ?? false);
           setSelectedWorktreeIds(
             next.baseBranchUpdateOptions?.selectedWorktreeIds ?? [],
@@ -185,6 +204,7 @@ export function MergePullRequestButton({
   }, [
     name,
     open,
+    operationKey,
     owner,
     pullRequest.number,
     requestSource,
@@ -206,51 +226,56 @@ export function MergePullRequestButton({
       !method ||
       !(autoSync ? options?.canAutoMergeWithSync : options?.canMerge) ||
       !commitHeadline.trim() ||
-      mergedResult ||
+      mergeOperation.result?.state === "MERGED" ||
+      merging ||
       (moveTicketToDone && !options.ticketDoneStatusConfigured)
     )
       return;
-    setMerging(true);
     setError(null);
-    try {
-      if (autoSync && options?.worktreeId) {
-        await controlPlaneRequest(
-          `mutation ConfigureWorktreeAutoMerge($input: ConfigureWorktreeAutoMergeInput!) {
+    const outcome =
+      await runMergeOperation<GitHubPullRequestMergeResult | null>(
+        operationKey,
+        autoSync ? "auto" : "merge",
+        async () => {
+          if (autoSync && options?.worktreeId) {
+            await controlPlaneRequest(
+              `mutation ConfigureWorktreeAutoMerge($input: ConfigureWorktreeAutoMergeInput!) {
           configureWorktreeAutoMerge(input: $input) { worktreeId state autoSync }
         }`,
-          {
-            input: {
-              worktreeId: options.worktreeId,
-              repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
-              pullRequestNumber: pullRequest.number,
-              autoSync: true,
-              expectedHeadSha: options.headRefOid,
-              method,
-              commitHeadline,
-              commitBody,
-              authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
-              deleteWorktree,
-              moveTicketToDone,
-              ...(selectedWorktreeIds.length &&
-              options.baseBranchUpdateOptions?.destinationBaseBranch
-                ? {
-                    baseBranchUpdate: {
-                      worktreeIds: selectedWorktreeIds,
-                      destinationBaseBranch:
-                        options.baseBranchUpdateOptions.destinationBaseBranch,
-                    },
-                  }
-                : {}),
-            },
-          },
-        );
-        setOpen(false);
-        return;
-      }
-      const data = await controlPlaneRequest<{
-        mergeGitHubPullRequest: GitHubPullRequestMergeResult;
-      }>(
-        `mutation MergeGitHubPullRequest(
+              {
+                input: {
+                  worktreeId: options.worktreeId,
+                  repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+                  pullRequestNumber: pullRequest.number,
+                  autoSync: true,
+                  expectedHeadSha: options.headRefOid,
+                  method,
+                  commitHeadline,
+                  commitBody,
+                  authorEmail:
+                    authorEmail === DEFAULT_EMAIL ? null : authorEmail,
+                  deleteWorktree,
+                  moveTicketToDone,
+                  ...(selectedWorktreeIds.length &&
+                  options.baseBranchUpdateOptions?.destinationBaseBranch
+                    ? {
+                        baseBranchUpdate: {
+                          worktreeIds: selectedWorktreeIds,
+                          destinationBaseBranch:
+                            options.baseBranchUpdateOptions
+                              .destinationBaseBranch,
+                        },
+                      }
+                    : {}),
+                },
+              },
+            );
+            return null;
+          }
+          const data = await controlPlaneRequest<{
+            mergeGitHubPullRequest: GitHubPullRequestMergeResult;
+          }>(
+            `mutation MergeGitHubPullRequest(
           $input: MergeGitHubPullRequestInput!
           $source: GitHubRequestSource!
         ) {
@@ -258,62 +283,83 @@ export function MergePullRequestButton({
             id state url mergedAt postMergeError ticketKey
           }
         }`,
-        {
-          input: {
-            owner,
-            name,
-            number: pullRequest.number,
-            method,
-            commitHeadline,
-            commitBody,
-            authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
-            worktreeId: worktreeId ?? options.worktreeId,
-            ...(selectedWorktreeIds.length &&
-            options?.baseBranchUpdateOptions?.destinationBaseBranch
-              ? {
-                  baseBranchUpdate: {
-                    worktreeIds: selectedWorktreeIds,
-                    destinationBaseBranch:
-                      options.baseBranchUpdateOptions.destinationBaseBranch,
-                  },
-                }
-              : {}),
-            deleteWorktree,
-            moveTicketToDone,
-          },
-          source: requestSource,
+            {
+              input: {
+                owner,
+                name,
+                number: pullRequest.number,
+                method,
+                commitHeadline,
+                commitBody,
+                authorEmail: authorEmail === DEFAULT_EMAIL ? null : authorEmail,
+                worktreeId: worktreeId ?? options.worktreeId,
+                ...(selectedWorktreeIds.length &&
+                options?.baseBranchUpdateOptions?.destinationBaseBranch
+                  ? {
+                      baseBranchUpdate: {
+                        worktreeIds: selectedWorktreeIds,
+                        destinationBaseBranch:
+                          options.baseBranchUpdateOptions.destinationBaseBranch,
+                      },
+                    }
+                  : {}),
+                deleteWorktree,
+                moveTicketToDone,
+              },
+              source: requestSource,
+            },
+          );
+          return data.mergeGitHubPullRequest;
         },
+        (result) => result?.postMergeError ?? null,
+        `${pullRequest.repositoryNameWithOwner} #${pullRequest.number}`,
       );
-      if (data.mergeGitHubPullRequest.postMergeError) {
-        setMergedResult(data.mergeGitHubPullRequest);
-      } else {
-        setOpen(false);
-        await onMerged?.(data.mergeGitHubPullRequest);
+    if (!outcome) return;
+    if (outcome.result) {
+      try {
+        await onMerged?.(outcome.result);
+      } catch (value) {
+        reportMergeOperationError(
+          operationKey,
+          outcome.result,
+          t("mergeRefreshFailed", {
+            error: value instanceof Error ? value.message : String(value),
+          }),
+        );
+        return;
       }
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setMerging(false);
+    }
+    if (
+      !outcome.result?.postMergeError &&
+      currentSheet.current.key === operationKey &&
+      currentSheet.current.open
+    ) {
+      setOpen(false);
     }
   };
 
   const cancelManaged = async () => {
     if (!options?.worktreeId || merging) return;
-    setMerging(true);
     setError(null);
-    try {
-      await controlPlaneRequest(
-        `mutation CancelWorktreeAutoMerge($worktreeId: ID!) { cancelWorktreeAutoMerge(worktreeId: $worktreeId) }`,
-        { worktreeId: options.worktreeId },
-      );
+    const outcome = await runMergeOperation(
+      operationKey,
+      "cancel",
+      async () => {
+        await controlPlaneRequest(
+          `mutation CancelWorktreeAutoMerge($worktreeId: ID!) { cancelWorktreeAutoMerge(worktreeId: $worktreeId) }`,
+          { worktreeId: options.worktreeId },
+        );
+        return null;
+      },
+      () => null,
+      `${pullRequest.repositoryNameWithOwner} #${pullRequest.number}`,
+    );
+    if (outcome && currentSheet.current.key === operationKey)
       setRefresh((value) => value + 1);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setMerging(false);
-    }
   };
 
+  const displayedError = error ?? mergeOperation.error;
+  const backgroundAvailable = merging && mergeOperation.action !== "cancel";
   const blockedReason =
     operation?.lastError ??
     (autoSync ? options?.autoSyncBlockedReason : options?.blockedReason) ??
@@ -321,19 +367,27 @@ export function MergePullRequestButton({
   return (
     <>
       {showTrigger && (
-        <Button
-          className={className}
-          onClick={(event) => {
-            event.stopPropagation();
-            setOpen(true);
-          }}
-          size={size}
-          type="button"
-          variant={variant}
-        >
-          <GitMerge />
-          {t("merge")}
-        </Button>
+        <>
+          <Button
+            className={className}
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen(true);
+            }}
+            size={size}
+            type="button"
+            variant={variant}
+          >
+            <GitMerge />
+            {t("merge")}
+          </Button>
+        </>
+      )}
+      {!open && (
+        <MergeOperationError
+          operationKey={operationKey}
+          onOpen={() => setOpen(true)}
+        />
       )}
       <Dialog
         onOpenChange={(next) => {
@@ -369,13 +423,15 @@ export function MergePullRequestButton({
             </Alert>
           ) : loading || (!options && !error) ? (
             <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-              <Spinner /> {t("loadingMergeOptions")}
+              <Spinner aria-hidden="true" /> {t("loadingMergeOptions")}
             </div>
           ) : (
             <div className="space-y-4">
-              {(error || blockedReason) && (
+              {(displayedError || blockedReason) && (
                 <Alert variant="destructive">
-                  <AlertDescription>{error || blockedReason}</AlertDescription>
+                  <AlertDescription>
+                    {displayedError || blockedReason}
+                  </AlertDescription>
                 </Alert>
               )}
               {operation && <MergeSyncStatus state={operation.state} />}
@@ -510,33 +566,39 @@ export function MergePullRequestButton({
             </Button>
             <Button
               disabled={
-                loading ||
-                merging ||
-                (!activeManaged &&
-                  (Boolean(mergedResult) ||
-                    (moveTicketToDone &&
-                      !options?.ticketDoneStatusConfigured) ||
-                    !(autoSync
-                      ? options?.canAutoMergeWithSync
-                      : options?.canMerge) ||
-                    !method ||
-                    !commitHeadline.trim()))
+                !backgroundAvailable &&
+                (loading ||
+                  merging ||
+                  (!activeManaged &&
+                    (mergeOperation.result?.state === "MERGED" ||
+                      (moveTicketToDone &&
+                        !options?.ticketDoneStatusConfigured) ||
+                      !(autoSync
+                        ? options?.canAutoMergeWithSync
+                        : options?.canMerge) ||
+                      !method ||
+                      !commitHeadline.trim())))
               }
-              onClick={() => void (activeManaged ? cancelManaged() : merge())}
+              onClick={() => {
+                if (backgroundAvailable) setOpen(false);
+                else void (activeManaged ? cancelManaged() : merge());
+              }}
               type="button"
             >
-              {merging ? <Spinner /> : <GitMerge />}
-              {activeManaged
-                ? t("cancelAutoMerge")
-                : autoSync
-                  ? t(
-                      operation?.state === "ACTION_REQUIRED"
-                        ? "resumeAutoMerge"
-                        : "enableAutoMerge",
-                    )
-                  : merging
-                    ? t("merging")
-                    : t("mergePullRequest")}
+              {merging ? <Spinner aria-hidden="true" /> : <GitMerge />}
+              {backgroundAvailable
+                ? t("continueInBackground")
+                : activeManaged
+                  ? t("cancelAutoMerge")
+                  : autoSync
+                    ? t(
+                        operation?.state === "ACTION_REQUIRED"
+                          ? "resumeAutoMerge"
+                          : "enableAutoMerge",
+                      )
+                    : merging
+                      ? t("merging")
+                      : t("mergePullRequest")}
             </Button>
           </DialogFooter>
         </DialogContent>

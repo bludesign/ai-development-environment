@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleDollarSign, ExternalLink } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Bar, BarChart, XAxis } from "recharts";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
+import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 
 type History = {
   days: { period: string; totalCost: number }[];
@@ -44,15 +45,16 @@ export function SidebarUsagePopover({
   const [history, setHistory] = useState<History | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
+  const updates = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
+    null,
+  );
   const currency = new Intl.NumberFormat(locale, {
     style: "currency",
     currency: "USD",
   });
   useEffect(() => {
     if (!open) return;
-    const controller = new AbortController();
-    const load = async () => {
+    const owner = createRefreshCoalescer(async (signal) => {
       setLoading(true);
       setError(null);
       try {
@@ -61,32 +63,43 @@ export function SidebarUsagePopover({
         }>(
           `query SidebarUsageHistory { sidebarUsageHistory { days { period totalCost } hasUsage collectedAt } }`,
           undefined,
-          { signal: controller.signal },
+          { signal },
         );
-        if (!controller.signal.aborted) setHistory(data.sidebarUsageHistory);
+        if (!signal.aborted) setHistory(data.sidebarUsageHistory);
       } catch (value) {
-        if (!controller.signal.aborted)
+        if (!signal.aborted)
           setError(value instanceof Error ? value.message : String(value));
       } finally {
-        if (!controller.signal.aborted) setLoading(false);
+        if (!signal.aborted) setLoading(false);
       }
-    };
-    void load();
+    });
+    updates.current = owner;
+    const initial = window.setTimeout(() => void owner.refresh(), 0);
+    const timer = window.setInterval(() => void owner.refreshIfIdle(), 60_000);
     const sub = controlPlaneSubscriptions().subscribe<{
       sidebarStatusChanged: boolean;
     }>(
       { query: "subscription SidebarUsageChanged { sidebarStatusChanged }" },
       {
-        next: () => setRevision((value) => value + 1),
+        next: () => void owner.refresh(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return () => {
-      controller.abort();
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+      owner.dispose();
+      if (updates.current === owner) updates.current = null;
       sub();
     };
-  }, [open, revision]);
+  }, [open]);
+  const formatPeriod = (period: string) =>
+    formatDateValue(`${period}T00:00:00Z`, "short", {
+      locale,
+      utc: true,
+      showTime: false,
+    });
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -117,6 +130,16 @@ export function SidebarUsagePopover({
             {totalCost == null ? "—" : currency.format(totalCost)}
           </strong>
         </p>
+        <p className="text-sm">
+          {t("sidebarLast7Days")}:{" "}
+          <strong>
+            {history
+              ? currency.format(
+                  history.days.reduce((sum, day) => sum + day.totalCost, 0),
+                )
+              : "—"}
+          </strong>
+        </p>
         {loading && !history && (
           <p role="status" className="flex items-center gap-2 text-sm">
             <Spinner />
@@ -129,7 +152,7 @@ export function SidebarUsagePopover({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => setRevision((value) => value + 1)}
+              onClick={() => void updates.current?.refresh()}
             >
               {t("sidebarRetry")}
             </Button>
@@ -141,7 +164,7 @@ export function SidebarUsagePopover({
               className="h-36 w-full"
               config={{
                 totalCost: {
-                  label: disk("usageToday"),
+                  label: t("cost"),
                   color: "var(--chart-1)",
                 },
               }}
@@ -151,17 +174,15 @@ export function SidebarUsagePopover({
                   dataKey="period"
                   tickLine={false}
                   axisLine={false}
-                  tickFormatter={(value) =>
-                    new Intl.DateTimeFormat(locale, {
-                      month: "short",
-                      day: "numeric",
-                    }).format(new Date(`${value}T12:00:00`))
-                  }
+                  tickFormatter={(value) => formatPeriod(String(value))}
+                  minTickGap={16}
                   fontSize={10}
                 />
                 <ChartTooltip
                   content={
                     <ChartTooltipContent
+                      indicator="dot"
+                      labelFormatter={(value) => formatPeriod(String(value))}
                       formatter={(value) => currency.format(Number(value))}
                     />
                   }

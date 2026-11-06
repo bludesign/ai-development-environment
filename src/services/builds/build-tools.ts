@@ -12,6 +12,7 @@ export const GetBuildsInputSchema = z.object({
   codebaseId: z.string().optional(),
   repositoryId: z.string().optional(),
   configurationId: z.string().optional(),
+  branch: z.string().optional(),
   worktreeId: z.string().optional(),
   first: z.number().int().min(1).max(200).default(50),
   after: z.string().optional(),

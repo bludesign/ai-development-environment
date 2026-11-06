@@ -1462,7 +1462,8 @@
     "sidebarEmpty": "In den letzten sieben Tagen wurde keine Nutzung erfasst.",
     "sidebarRetry": "Erneut versuchen",
     "sidebarCollectedAt": "Erfasst am {date}",
-    "sidebarToday": "Heute"
+    "sidebarToday": "Heute",
+    "sidebarLast7Days": "Letzte 7 Tage"
   },
   "agentDetail": {
     "loading": "Agent wird geladen…",
@@ -3059,7 +3060,12 @@
       "WAITING_REQUIREMENTS": "Warten auf Merge-Anforderungen",
       "MERGING": "Zusammenführen",
       "ACTION_REQUIRED": "Aktion erforderlich"
-    }
+    },
+    "continueInBackground": "Im Hintergrund fortfahren",
+    "mergeNeedsAttention": "Merge erfordert Aufmerksamkeit",
+    "reviewMergeError": "Merge-Fehler prüfen",
+    "dismissMergeError": "Merge-Fehler ausblenden",
+    "mergeRefreshFailed": "Die Merge-Aktion wurde abgeschlossen, aber die Ansicht konnte nicht aktualisiert werden: {error}"
   },
   "githubComments": {
     "title": "GitHub-Kommentare",
@@ -4004,7 +4010,8 @@
     },
     "commitsBehindBase": "{count} Commits hinter der Basis",
     "defaultBranchUpdateEnabled": "Aktuell halten",
-    "defaultBranchUpdatePaused": "Aktualisierung pausiert"
+    "defaultBranchUpdatePaused": "Aktualisierung pausiert",
+    "defaultBranch": "Standardbranch"
   },
   "worktreeDetail": {
     "loading": "Worktree-Details werden geladen…",
@@ -4769,7 +4776,13 @@
     "selectWorktree": "Worktree auswählen",
     "worktree": "Arbeitsverzeichnis",
     "repository": "Repository",
-    "configurationsTab": "Konfigurationen"
+    "configurationsTab": "Konfigurationen",
+    "allBranches": "Alle Branches",
+    "filterBranch": "Nach Branch filtern",
+    "searchBranches": "Branches suchen…",
+    "noBranches": "Keine Branches gefunden.",
+    "warnings": "Warnungen",
+    "runFailed": "Der Build konnte auf diesem Ziel nicht ausgeführt werden."
   },
   "devices": {
     "title": "Geräte",

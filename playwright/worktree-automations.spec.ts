@@ -291,3 +291,86 @@ test("active worktree automations stay green for native and managed merges on bo
     }
   }
 });
+
+test("an idle conflict action leaves no extra space on a default branch card", async ({
+  page,
+}) => {
+  await page.setExtraHTTPHeaders({
+    Authorization: `Bearer ${screenshotSessionToken}`,
+  });
+  await setScreenshotTime(page);
+  await page.route("**/api/graphql", async (route) => {
+    const { query, variables } = route.request().postDataJSON();
+    if (query?.includes("query WorktreeEnrichment"))
+      return route.fulfill({
+        json: {
+          data: {
+            worktreeEnrichment: { updates: [], durationMs: 10, warnings: [] },
+          },
+        },
+      });
+    if (query?.includes("WorkflowTargetSummaries"))
+      return route.fulfill({
+        json: {
+          data: {
+            workflowTargetSummaries: variables.targets.map(
+              (target: object) => ({ ...target, activeRuns: [] }),
+            ),
+          },
+        },
+      });
+    if (query?.includes("query WorktreeOverview")) {
+      const response = await route.fetch();
+      const body = await response.json();
+      const overview = body.data.worktreeOverview as WorktreeOverview;
+      const template = overview.agents[0]!;
+      const group = automationGroup(template.codebases[0]!, "GITHUB");
+      const worktree = group.worktrees[0]!;
+      Object.assign(worktree, {
+        branch: "main",
+        isDefaultBranch: true,
+        pullRequest: null,
+        sourceControlRequest: null,
+        autoSync: null,
+        highlightColor: null,
+      });
+      group.worktrees = [worktree];
+      group.mergeConflictQuickActions = [
+        {
+          id: "resolve-conflicts",
+          name: "Resolve conflicts",
+          description: "Resolve rebase conflicts",
+          quickActionIconKey: "git-merge",
+          quickActionButtonVariant: "secondary",
+        },
+      ];
+      overview.agents = [{ ...template, codebases: [group] }];
+      overview.hiddenCount = 0;
+      overview.activeMoves = [];
+      overview.activeSyncBatches = [];
+      return route.fulfill({ json: body });
+    }
+    await route.continue();
+  });
+  await page.goto("/en/dashboard/worktrees");
+  const card = page
+    .getByRole("button", { name: "main", exact: true })
+    .locator('xpath=ancestor::*[@data-slot="card"][1]');
+  await expect(card.getByText("Default branch", { exact: true })).toBeVisible();
+  await expect(card).toHaveClass(/bg-slate-500\/10/);
+  await expect(
+    card.getByRole("button", { name: "Resolve conflicts", exact: true }),
+  ).toHaveCount(0);
+  const content = card.locator('[data-slot="card-content"]');
+  const dimensions = await content.evaluate((element) => {
+    const hidden = element.querySelector(':scope > [data-slot="item"]');
+    if (!hidden || getComputedStyle(hidden).display !== "none")
+      throw new Error("Expected an empty hidden conflict item");
+    const before = element.getBoundingClientRect().height;
+    // Removing a hidden child must not change visible geometry. This catches
+    // sibling-margin spacing retained on the preceding metadata element.
+    hidden.remove();
+    return { before, after: element.getBoundingClientRect().height };
+  });
+  expect(Math.abs(dimensions.before - dimensions.after)).toBeLessThan(1);
+});

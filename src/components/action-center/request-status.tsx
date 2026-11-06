@@ -3,6 +3,8 @@
 import { useState, type ReactNode } from "react";
 import { GitMerge } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { MergeOperationError } from "@/components/github/merge-operation-error";
+import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -116,6 +118,15 @@ export function RequestMergeAction({
           <GitMerge />
           {t("merge")}
         </Button>
+      )}
+      {request.provider === "GITLAB" && !open && (
+        <MergeOperationError
+          operationKey={gitlabMergeOperationKey({
+            projectId: request.repositoryId,
+            iid: request.number,
+          })}
+          onOpen={() => setOpen(true)}
+        />
       )}
       {request.provider === "GITLAB" && (
         <MergeRequestDialog

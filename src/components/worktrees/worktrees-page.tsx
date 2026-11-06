@@ -1904,12 +1904,13 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
     if (!next || detail) return;
     void refreshInspection();
   };
+  const isDefault = worktreeIsDefaultBranch(worktree, props.group);
+  const highlightColor = worktree.highlightColor ?? (isDefault ? "gray" : null);
   return (
     <Card
       className={cn(
         "cursor-pointer transition-colors hover:bg-muted/30",
-        worktree.highlightColor &&
-          worktreeHighlightSurfaceClasses[worktree.highlightColor],
+        highlightColor && worktreeHighlightSurfaceClasses[highlightColor],
       )}
       onClick={(event) => {
         if (shouldNavigateWorktreeSurface(event)) {
@@ -1937,6 +1938,7 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
           )}
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
+          {isDefault && <Badge variant="outline">{t("defaultBranch")}</Badge>}
           <OriginStatusBadges worktree={worktree} />
           {worktreeIsDirty(worktree) && (
             <Badge variant="destructive">{t("dirty")}</Badge>
@@ -1944,10 +1946,10 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
           <WorktreeMenus {...liveProps} />
         </CardAction>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-col gap-4">
         <WorktreeMetadata
           {...liveProps}
-          showPullRequest={false}
+          showPullRequest={!isDefault}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
         />
@@ -4297,9 +4299,10 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
     setExpanded(next);
     if (next && !detail) void refreshInspection();
   };
+  const isDefault = worktreeIsDefaultBranch(worktree, props.group);
+  const highlightColor = worktree.highlightColor ?? (isDefault ? "gray" : null);
   const highlight =
-    worktree.highlightColor &&
-    worktreeHighlightSurfaceClasses[worktree.highlightColor];
+    highlightColor && worktreeHighlightSurfaceClasses[highlightColor];
   return (
     <Fragment>
       <TableRow
@@ -4351,6 +4354,7 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
         </TableCell>
         <TableCell>
           <div className="flex flex-wrap items-center gap-1">
+            {isDefault && <Badge variant="outline">{t("defaultBranch")}</Badge>}
             <OriginStatusBadges worktree={worktree} />
             {worktreeIsDirty(worktree) && (
               <Badge variant="destructive">{t("dirty")}</Badge>

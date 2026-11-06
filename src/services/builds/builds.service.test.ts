@@ -709,6 +709,7 @@ describe("BuildsService", () => {
         codeStateObservedAt: "2026-07-18T20:00:00.000Z",
         artifacts: [],
         scriptExecutions: [finalScriptResult],
+        warnings: ["Process inspection timed out; result preserved"],
       }),
       error: null,
     });
@@ -721,6 +722,12 @@ describe("BuildsService", () => {
         }),
       }),
     );
+    expect(
+      JSON.parse(buildUpdate.mock.calls[0][0].data.snapshotJson),
+    ).toMatchObject({
+      warnings: ["Process inspection timed out; result preserved"],
+      worktree: { codeStateHash: "state-before-hooks" },
+    });
     expect(transaction.buildScriptExecution.updateMany).toHaveBeenCalledWith({
       where: { buildId: "build-1", phase: "PRE_BUILD", position: 0 },
       data: {

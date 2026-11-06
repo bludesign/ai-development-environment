@@ -4,6 +4,8 @@ import { ExternalLink, GitMerge, MoreHorizontal } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 
+import { MergeOperationError } from "@/components/github/merge-operation-error";
+import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,6 +102,17 @@ export function MergeRequestMenu({
           ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      {mergeRequest.projectId && !mergeOpen && (
+        <MergeOperationError
+          operationKey={gitlabMergeOperationKey({
+            projectId: mergeRequest.projectId,
+            iid: mergeRequest.iid,
+          })}
+          onOpen={() =>
+            onMergeOptions ? onMergeOptions() : setMergeOpen(true)
+          }
+        />
+      )}
       {mergeRequest.projectId && !onMergeOptions ? (
         <MergeRequestDialog
           mergeRequest={{

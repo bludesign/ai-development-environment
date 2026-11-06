@@ -955,10 +955,11 @@ export class AgentGraphQLClient {
     result?: unknown,
     error?: string,
     executionToken?: string | null,
+    cleanupVerified = true,
   ) {
     return this.request<{ completeAgentJob: { id: string; status: string } }>(
-      `mutation CompleteJob($jobId: ID!, $status: AgentJobStatus!, $result: JSON, $error: String, $executionToken: String) {
-        completeAgentJob(jobId: $jobId, status: $status, result: $result, error: $error, executionToken: $executionToken) { id status }
+      `mutation CompleteJob($jobId: ID!, $status: AgentJobStatus!, $result: JSON, $error: String, $executionToken: String, $cleanupVerified: Boolean!) {
+        completeAgentJob(jobId: $jobId, status: $status, result: $result, error: $error, executionToken: $executionToken, cleanupVerified: $cleanupVerified) { id status }
       }`,
       {
         jobId,
@@ -966,6 +967,7 @@ export class AgentGraphQLClient {
         result,
         error,
         ...(executionToken ? { executionToken } : {}),
+        cleanupVerified,
       },
     );
   }

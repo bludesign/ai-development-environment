@@ -56,6 +56,12 @@ test.beforeEach(async ({ page }) => {
   await setScreenshotTime(page);
 });
 
+test.afterEach(async ({ page }) => {
+  // Background comment refreshes can still be using route.fetch after the
+  // assertions finish. Remove handlers before Playwright tears down the page.
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
 test("gitlab merge sheet shows project policy and deferred follow-ups", async ({
   page,
 }, info) => {

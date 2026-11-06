@@ -12,6 +12,7 @@ export type ProcessResult = {
   signal: NodeJS.Signals | null;
   timedOut: boolean;
   cancelled: boolean;
+  warnings?: string[];
 };
 
 type RunProcessOptions = {

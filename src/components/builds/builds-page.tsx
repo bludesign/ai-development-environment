@@ -2,7 +2,7 @@
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
-import { Hammer, Plus, ScrollText, Trash2 } from "lucide-react";
+import { Hammer, Plus, ScrollText, Trash2, TriangleAlert } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Fragment,
@@ -148,6 +148,9 @@ export function BuildsPage({
   const [scripts, setScripts] = useState<BuildScript[]>([]);
   const [status, setStatus] = useState<(typeof STATUSES)[number]>("ALL");
   const [repositoryId, setRepositoryId] = useState("");
+  const [branch, setBranch] = useState("");
+  const [branches, setBranches] = useState<string[]>([]);
+  const [loadingBranches, setLoadingBranches] = useState(true);
   const [repositories, setRepositories] = useState<
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);
@@ -172,6 +175,9 @@ export function BuildsPage({
   const scriptsOwner = useRef<ReturnType<typeof createRefreshCoalescer> | null>(
     null,
   );
+  const branchesOwner = useRef<ReturnType<
+    typeof createRefreshCoalescer
+  > | null>(null);
   const loadRepositories = useCallback(
     async (signal: AbortSignal) => {
       if (configurationId) return;
@@ -209,6 +215,37 @@ export function BuildsPage({
     };
   }, [loadRepositories]);
   useEffect(() => {
+    const owner = createRefreshCoalescer(async (signal) => {
+      setLoadingBranches(true);
+      try {
+        const data = await controlPlaneRequest<{ buildBranches: string[] }>(
+          `query BuildHistoryBranches($appId: ID, $repositoryId: ID, $configurationId: ID) {
+            buildBranches(appId: $appId, repositoryId: $repositoryId, configurationId: $configurationId)
+          }`,
+          {
+            appId: appId ?? null,
+            repositoryId: repositoryId || null,
+            configurationId: configurationId ?? null,
+          },
+          { signal },
+        );
+        if (!signal.aborted) setBranches(data.buildBranches);
+      } catch (value) {
+        if (!signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!signal.aborted) setLoadingBranches(false);
+      }
+    });
+    branchesOwner.current = owner;
+    const timer = window.setTimeout(() => void owner.refresh(), 0);
+    return () => {
+      window.clearTimeout(timer);
+      owner.dispose();
+      if (branchesOwner.current === owner) branchesOwner.current = null;
+    };
+  }, [appId, configurationId, repositoryId]);
+  useEffect(() => {
     loadedCount.current = builds.length;
   }, [builds.length]);
   const readPage = useCallback(
@@ -216,8 +253,8 @@ export function BuildsPage({
       const data = await controlPlaneRequest<{
         builds: { items: BuildRecord[]; nextCursor: string | null };
       }>(
-        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID, $repositoryId: ID) {
-        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId, repositoryId: $repositoryId) { items { ${BUILD_LIST_FIELDS} } nextCursor }
+        `query BuildsPage($after: ID, $first: Int!, $status: BuildStatus, $appId: ID, $configurationId: ID, $repositoryId: ID, $branch: String) {
+        builds(first: $first, after: $after, status: $status, appId: $appId, configurationId: $configurationId, repositoryId: $repositoryId, branch: $branch) { items { ${BUILD_LIST_FIELDS} } nextCursor }
       }`,
         {
           after,
@@ -226,12 +263,13 @@ export function BuildsPage({
           appId: appId ?? null,
           configurationId: configurationId ?? null,
           repositoryId: repositoryId || null,
+          branch: branch || null,
         },
         { signal },
       );
       return data.builds;
     },
-    [appId, status, configurationId, repositoryId],
+    [appId, status, configurationId, repositoryId, branch],
   );
   const load = useCallback(
     async (after?: string | null) => {
@@ -299,12 +337,18 @@ export function BuildsPage({
         variables: { appId: appId ?? null },
       },
       {
-        next: () => void owner.refresh(),
+        next: () => {
+          void owner.refresh();
+          void branchesOwner.current?.refresh();
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    const recover = onControlPlaneRecovery(() => void owner.refresh());
+    const recover = onControlPlaneRecovery(() => {
+      void owner.refresh();
+      void branchesOwner.current?.refresh();
+    });
     return () => {
       window.clearTimeout(timer);
       dispose();
@@ -411,6 +455,19 @@ export function BuildsPage({
     }
   };
 
+  const resetHistory = () => {
+    generation.current++;
+    pageRequest.current?.abort();
+    pageRequest.current = null;
+    setSelected(new Set());
+    setDeleteOpen(false);
+    setBuilds([]);
+    setNextCursor(null);
+    setLoading(true);
+    setLoadingMore(false);
+    loadedCount.current = 0;
+  };
+
   const history = (
     <div className="space-y-4">
       <div className="flex flex-wrap justify-end gap-2">
@@ -430,12 +487,10 @@ export function BuildsPage({
             onValueChange={(value) => {
               if (value === repositoryId) return;
               setRepositoryId(value);
-              setSelected(new Set());
-              setDeleteOpen(false);
-              setBuilds([]);
-              setNextCursor(null);
-              setLoading(true);
-              loadedCount.current = 0;
+              setBranch("");
+              setBranches([]);
+              setLoadingBranches(true);
+              resetHistory();
             }}
             options={[
               { value: "", label: t("allRepositories") },
@@ -452,10 +507,29 @@ export function BuildsPage({
             className="w-48"
           />
         )}
+        <SearchableSelect
+          value={branch}
+          onValueChange={(value) => {
+            if (value === branch) return;
+            setBranch(value);
+            resetHistory();
+          }}
+          options={[
+            { value: "", label: t("allBranches") },
+            ...branches.map((value) => ({ value, label: value })),
+          ]}
+          ariaLabel={t("filterBranch")}
+          placeholder={t("allBranches")}
+          searchPlaceholder={t("searchBranches")}
+          emptyMessage={t("noBranches")}
+          loading={loadingBranches}
+          className="w-48"
+        />
         <Select
           onValueChange={(value) => {
-            setSelected(new Set());
+            if (value === status) return;
             setStatus(value as typeof status);
+            resetHistory();
           }}
           value={status}
         >
@@ -628,6 +702,16 @@ export function BuildsPage({
                                 >
                                   {t(`statuses.${build.status}`)}
                                 </Badge>
+                                {!!build.warnings?.length && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-amber-500/40 text-amber-700 dark:text-amber-300"
+                                    title={build.warnings.join("\n")}
+                                  >
+                                    <TriangleAlert />
+                                    {t("warnings")}
+                                  </Badge>
+                                )}
                                 {build.outOfDate && (
                                   <OutOfDateBadge
                                     buildId={build.id}

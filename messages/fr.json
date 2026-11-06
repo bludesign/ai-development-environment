@@ -1462,7 +1462,8 @@
     "sidebarEmpty": "Aucune utilisation enregistrée au cours des sept derniers jours.",
     "sidebarRetry": "Réessayer",
     "sidebarCollectedAt": "Collecté le {date}",
-    "sidebarToday": "Aujourd’hui"
+    "sidebarToday": "Aujourd’hui",
+    "sidebarLast7Days": "7 derniers jours"
   },
   "agentDetail": {
     "loading": "Chargement de l’agent…",
@@ -3059,7 +3060,12 @@
       "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
       "MERGING": "Fusion en cours",
       "ACTION_REQUIRED": "Action requise"
-    }
+    },
+    "continueInBackground": "Continuer en arrière-plan",
+    "mergeNeedsAttention": "La fusion nécessite une intervention",
+    "reviewMergeError": "Examiner l’erreur de fusion",
+    "dismissMergeError": "Masquer l’erreur de fusion",
+    "mergeRefreshFailed": "L’action de fusion est terminée, mais l’actualisation de cette vue a échoué : {error}"
   },
   "githubComments": {
     "title": "Commentaires GitHub",
@@ -4004,7 +4010,8 @@
     },
     "commitsBehindBase": "{count} commits derrière la base",
     "defaultBranchUpdateEnabled": "Maintien à jour",
-    "defaultBranchUpdatePaused": "Maintien à jour suspendu"
+    "defaultBranchUpdatePaused": "Maintien à jour suspendu",
+    "defaultBranch": "Branche par défaut"
   },
   "worktreeDetail": {
     "loading": "Chargement des détails du worktree…",
@@ -4769,7 +4776,13 @@
     "selectWorktree": "Sélectionner un arbre de travail",
     "worktree": "Arbre de travail",
     "repository": "Dépôt",
-    "configurationsTab": "Configurations"
+    "configurationsTab": "Configurations",
+    "allBranches": "Toutes les branches",
+    "filterBranch": "Filtrer par branche",
+    "searchBranches": "Rechercher des branches…",
+    "noBranches": "Aucune branche trouvée.",
+    "warnings": "Avertissements",
+    "runFailed": "Impossible d’exécuter le build sur cette destination."
   },
   "devices": {
     "title": "Appareils",

@@ -1,5 +1,6 @@
 "use client";
 
+import { MergeOperationWarnings } from "@/components/github/merge-operation-warnings";
 import {
   useBreadcrumbLabel,
   useBreadcrumbFallback,
@@ -28,6 +29,8 @@ import { ReviewerDirectoryCacheCard } from "./reviewer-directory-cache-card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { JiraTicketDrawer } from "@/components/jira/ticket-drawer";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { MergeOperationError } from "@/components/github/merge-operation-error";
+import { gitlabMergeOperationKey } from "@/components/github/merge-operation-state";
 import { MergeRequestDialog } from "./merge-request-dialog";
 import { GitLabProjectManagerDialog } from "./project-manager-dialog";
 import { GITLAB_MERGE_REQUEST_FIELDS } from "./merge-request-fields";
@@ -520,6 +523,7 @@ export function GitLabMergeRequestsPage({
     error && (/\(408\)/.test(error) || /timed? out/i.test(error));
   return (
     <section className="space-y-6">
+      <MergeOperationWarnings provider="gitlab" />
       <div className="flex flex-wrap items-start justify-between gap-3">
         <PageHeader
           description={t("mergeRequestsDescription")}
@@ -889,10 +893,18 @@ export function GitLabMergeRequestDetailPage({
             </Button>
           )}
           {(mr.state === "OPENED" || mr.mergeOperation) && (
-            <Button onClick={() => setMergeOpen(true)} variant="outline">
-              <GitMerge />
-              {t(mr.state === "MERGED" ? "mergeFollowUps" : "mergeOptions")}
-            </Button>
+            <>
+              <Button onClick={() => setMergeOpen(true)} variant="outline">
+                <GitMerge />
+                {t(mr.state === "MERGED" ? "mergeFollowUps" : "mergeOptions")}
+              </Button>
+              {!mergeOpen && (
+                <MergeOperationError
+                  operationKey={gitlabMergeOperationKey(mr)}
+                  onOpen={() => setMergeOpen(true)}
+                />
+              )}
+            </>
           )}
           <Button disabled={busy} onClick={() => void load()} variant="outline">
             <RefreshCw className={busy ? "animate-spin" : undefined} />

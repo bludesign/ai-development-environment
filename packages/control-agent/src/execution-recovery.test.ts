@@ -10,6 +10,7 @@ import {
   recoverExecution,
   spawnExecutionProcess,
   withExecutionJournal,
+  executionCompletion,
 } from "./execution-recovery.js";
 
 let directory: string;
@@ -31,6 +32,23 @@ const moduleUrl = new URL("./execution-recovery.ts", import.meta.url).href;
 describe.skipIf(process.platform === "win32")(
   "execution process recovery",
   () => {
+    test("persists completed build artifacts before cleanup for restart recovery", async () => {
+      const result = {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        cancelled: false,
+        artifacts: [{ relativePath: "App.app", kind: "RUNNABLE_APP" }],
+      };
+      await withExecutionJournal(identity, async (execution) => {
+        execution.checkpointCompletion({ status: "SUCCEEDED", result });
+        expect(executionCompletion(identity)).toEqual({
+          status: "SUCCEEDED",
+          result,
+        });
+      });
+      expect(executionCompletion(identity)?.result).toEqual(result);
+    });
     test("does not open a pending process gate once final cleanup starts", async () => {
       const output = join(directory, "must-not-exist");
       await withExecutionJournal(identity, async (execution) => {

@@ -1,5 +1,5 @@
 export const BUILD_LIST_FIELDS = `
-  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error outOfDate
+  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error warnings outOfDate
   createdAt startedAt finishedAt durationMs updatedAt
   worktree { id highlightColor }
   configuration { id name }

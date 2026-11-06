@@ -323,14 +323,13 @@ export function PullRequestDetailPage({
               </Link>
             </Button>
           )}
-          {pullRequest.state === "OPEN" && (
-            <MergePullRequestButton
-              onMerged={load}
-              pullRequest={pullRequest}
-              requestSource="PULL_REQUEST_DETAILS"
-              size="default"
-            />
-          )}
+          <MergePullRequestButton
+            onMerged={load}
+            pullRequest={pullRequest}
+            requestSource="PULL_REQUEST_DETAILS"
+            showTrigger={pullRequest.state === "OPEN"}
+            size="default"
+          />
           <Button
             disabled={loading}
             onClick={() => void load()}

@@ -25,6 +25,95 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("searchable build branches combine with status and reset when the repository changes", async ({
+  page,
+}) => {
+  const historyResponse = (expected: Record<string, string | null>) =>
+    page.waitForResponse((response) => {
+      if (
+        !response.url().endsWith("/api/graphql") ||
+        response.request().method() !== "POST"
+      )
+        return false;
+      const { query, variables = {} } = response.request().postDataJSON();
+      return (
+        query.includes("query BuildsPage") &&
+        Object.entries(expected).every(
+          ([key, value]) => variables[key] === value,
+        )
+      );
+    });
+  await page.goto("/en/dashboard/builds");
+  const rows = page.getByRole("table").getByRole("link", {
+    name: "View build",
+    exact: true,
+  });
+  await expect(rows).not.toHaveCount(0);
+  const branch = page.getByRole("combobox", {
+    name: "Filter by branch",
+    exact: true,
+  });
+  await branch.click();
+  await page.getByPlaceholder("Search branches…", { exact: true }).fill("mai");
+  await expect(
+    page.getByRole("option", { name: "All branches", exact: true }),
+  ).toHaveCount(0);
+  const filtered = historyResponse({
+    branch: "main",
+    repositoryId: null,
+    status: null,
+  });
+  await page.getByRole("option", { name: "main", exact: true }).click();
+  const filteredData = await (await filtered).json();
+  expect(filteredData.errors).toBeUndefined();
+  const items = filteredData.data.builds.items;
+  expect(items.length).toBeGreaterThan(0);
+  expect(
+    items.every(
+      (item: { snapshot: { worktree: { branch: string } } }) =>
+        item.snapshot.worktree.branch === "main",
+    ),
+  ).toBe(true);
+  await expect(branch).toHaveText("main");
+  await expect(rows).toHaveCount(items.length);
+  for (const row of await rows.all())
+    await expect(row.getByText("main", { exact: true })).toBeVisible();
+
+  const status = page.getByRole("combobox", {
+    name: "Filter builds by status",
+    exact: true,
+  });
+  await status.click();
+  const canceled = historyResponse({ branch: "main", status: "CANCELLED" });
+  await page.getByRole("option", { name: "Canceled", exact: true }).click();
+  const canceledData = await (await canceled).json();
+  expect(canceledData.errors).toBeUndefined();
+  expect(canceledData.data.builds.items.length).toBeGreaterThan(0);
+  await expect(rows).toHaveCount(canceledData.data.builds.items.length);
+  await expect(branch).toHaveText("main");
+  for (const row of await rows.all())
+    await expect(row).toContainText("Canceled");
+
+  await page
+    .getByRole("combobox", { name: "Filter builds by repository", exact: true })
+    .click();
+  await page
+    .getByPlaceholder("Search repositories", { exact: true })
+    .fill("web-app");
+  const changedRepository = historyResponse({
+    branch: null,
+    repositoryId: ids.repositories.web,
+    status: "CANCELLED",
+  });
+  await page.getByRole("option", { name: "web-app", exact: true }).click();
+  const changedData = await (await changedRepository).json();
+  expect(changedData.errors).toBeUndefined();
+  expect(changedData.data.builds.items).toEqual([]);
+  await expect(branch).toHaveText("All branches");
+  await expect(status).toHaveText("Canceled");
+  await expect(page.getByText("No builds yet", { exact: true })).toBeVisible();
+});
+
 test("terminal tails, prepends 6005 chunks, reconciles late output, and preserves UTF-8 and viewport", async ({
   page,
 }, testInfo) => {

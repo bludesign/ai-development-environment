@@ -1066,6 +1066,42 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test.each(["cards", "table"])(
+        "marks default branches and uses gray only without an explicit color in %s",
+        async (layout) => {
+          const response = (await request("query Fixture")) as unknown as {
+            worktreeOverview: WorktreeOverview;
+          };
+          const worktree =
+            response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+          Object.assign(worktree, {
+            isDefaultBranch: true,
+            highlightColor: null,
+          });
+          request.mockResolvedValue(response);
+          window.localStorage.setItem("worktrees-layout", layout);
+          render(<WorktreesPage />);
+          const badge = await screen.findByText("Default branch");
+          const surface = () =>
+            badge.closest(layout === "cards" ? '[data-slot="card"]' : "tr")!;
+          expect(surface().className).toContain("bg-slate-500/10");
+          worktree.highlightColor = "blue";
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() =>
+            expect(surface().className).toContain("bg-blue-500/10"),
+          );
+          expect(surface().className).not.toContain("bg-slate-500/10");
+          Object.assign(worktree, {
+            isDefaultBranch: false,
+            highlightColor: null,
+          });
+          fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+          await waitFor(() =>
+            expect(screen.queryByText("Default branch")).toBeNull(),
+          );
+        },
+      );
+
       test.each(
         ["cards", "table"].flatMap((layout) =>
           [1, 2].map((count) => ({ layout, count })),
@@ -1437,6 +1473,8 @@ export function registerWorktreesPageTests(
         const freshness = await screen.findByText("4 commits behind base");
         expect(freshness.className).not.toContain("amber");
         expect(screen.getByText("Keep up to date paused")).toBeDefined();
+        expect(screen.queryByText("Pull request")).toBeNull();
+        expect(screen.queryByRole("button", { name: "PR #17" })).toBeNull();
         for (const name of [
           "Sync",
           "Rebase",
@@ -1464,6 +1502,18 @@ export function registerWorktreesPageTests(
         expect(screen.getByRole("button", { name: "Rebase" })).toBeDefined();
         expect(screen.getByRole("button", { name: "Push" })).toBeDefined();
         expect(screen.queryByText("Keep up to date paused")).toBeNull();
+        expect(screen.getByText("Pull request")).toBeDefined();
+        expect(screen.getByRole("button", { name: "PR #17" })).toBeDefined();
+        expect(screen.getByRole("link", { name: "Comments: 0" })).toBeDefined();
+
+        Object.assign(worktree, {
+          branch: "release/1",
+          isDefaultBranch: true,
+        });
+        fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+        await screen.findByRole("button", { name: "release/1" });
+        expect(screen.queryByText("Pull request")).toBeNull();
+        expect(screen.queryByRole("button", { name: "PR #17" })).toBeNull();
       });
 
       test("renders the primary worktree card with Jira and tag metadata", async () => {
@@ -1483,8 +1533,11 @@ export function registerWorktreesPageTests(
         expect(screen.getByText("Yes").className).toContain(
           "dark:text-emerald-300",
         );
-        expect(screen.queryByText("Commits: 1")).toBeNull();
-        expect(screen.queryByText("Pull request")).toBeNull();
+        expect(
+          screen.getByRole("button", { name: "Commits: 1" }),
+        ).toBeDefined();
+        expect(screen.getByText("Pull request")).toBeDefined();
+        expect(screen.getByRole("button", { name: "PR #17" })).toBeDefined();
         expect(screen.getByText("In sync")).toBeDefined();
         expect(screen.getByText("Latest build")).toBeDefined();
         const latestBuildRow = screen.getByText("Latest build").parentElement!;
