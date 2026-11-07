@@ -268,6 +268,11 @@ test.describe("app screenshots", () => {
         }
       }
       if (route.usagePopover) {
+        if (testInfo.project.name.startsWith("mobile")) {
+          await page
+            .getByRole("button", { name: "Show navigation", exact: true })
+            .click();
+        }
         await page.getByRole("button", { name: /^Usage today/ }).click();
         await expect(
           page.getByText("Usage over the last 7 days", { exact: true }),
@@ -278,6 +283,20 @@ test.describe("app screenshots", () => {
         await expect(
           page.locator(".recharts-bar-rectangle").first(),
         ).toBeVisible();
+        const popup = page.locator('[data-slot="popover-content"]');
+        await expect(async () => {
+          const bounds = await popup.boundingBox();
+          const viewport = page.viewportSize()!;
+          expect(bounds).not.toBeNull();
+          expect(bounds!.x).toBeGreaterThanOrEqual(7);
+          expect(bounds!.y).toBeGreaterThanOrEqual(7);
+          expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(
+            viewport.width - 7,
+          );
+          expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(
+            viewport.height - 7,
+          );
+        }).toPass();
       }
       if (route.destinationPicker === "start") {
         const dialog = page.getByRole("dialog");
