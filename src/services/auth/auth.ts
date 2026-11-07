@@ -30,6 +30,17 @@ import { authDatabaseHooks } from "./registration";
 import { getMcpOAuthConfig } from "./mcp-oauth-config";
 import { mcpOAuthPlugins, mcpVerificationHook } from "./mcp-oauth-provider";
 
+const oneTimeTokenOptions = {
+  disableClientRequest: true,
+  expiresIn: 1,
+  storeToken: "hashed",
+} as const;
+
+const verifyOneTimeTokenWithoutCookie = oneTimeToken({
+  ...oneTimeTokenOptions,
+  disableSetSessionCookie: true,
+}).endpoints.verifyOneTimeToken;
+
 const managementStatements = {
   user: ["create", "list", "set-password", "set-email", "get", "update"],
   session: ["list", "revoke", "delete"],
@@ -230,11 +241,7 @@ export function createAuth(
         enableSessionForAPIKeys: false,
       }),
       bearer(),
-      oneTimeToken({
-        disableClientRequest: true,
-        expiresIn: 1,
-        storeToken: "hashed",
-      }),
+      oneTimeToken(oneTimeTokenOptions),
       ...(oauthPlugin ? [oauthPlugin] : []),
       ...(mcpOAuth ? mcpOAuthPlugins(prisma, mcpOAuth) : []),
       nextCookies(),
@@ -243,6 +250,24 @@ export function createAuth(
 }
 
 export type AideAuth = ReturnType<typeof createAuth>;
+
+export async function redeemTelevisionOneTimeToken(
+  auth: AideAuth,
+  token: string,
+  userAgent: string,
+) {
+  const context = await auth.$context;
+  // Keep the source credential in the browser by using the cookie-free verifier
+  // for the TV exchange. The mounted verifier still serves the legacy exchange.
+  const { user } = await verifyOneTimeTokenWithoutCookie({
+    body: { token },
+    context,
+  });
+  const session = await context.internalAdapter.createSession(user.id, false, {
+    userAgent,
+  });
+  return { user, session };
+}
 
 let authPromise: Promise<AideAuth> | null = null;
 

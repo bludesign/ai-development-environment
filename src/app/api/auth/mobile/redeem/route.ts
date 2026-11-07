@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 
-import { getAuth } from "@/services/auth";
+import { getAuth, redeemTelevisionOneTimeToken } from "@/services/auth";
 
 import {
   consumeMobileAuthorizationCode,
@@ -43,28 +43,25 @@ export async function POST(request: Request): Promise<Response> {
       return invalidAuthorizationCode();
     }
     const auth = await getAuth();
-    const result = await auth.api.verifyOneTimeToken({
-      body: { token: authorization.oneTimeToken },
-    });
-    // The phone browser keeps its session. Only the bound TV flow creates a
-    // separate credential, after both PKCE and the source session are verified.
-    let session: Pick<typeof result.session, "token" | "expiresAt"> =
-      result.session;
-    if (authorization.sessionPurpose === "television") {
-      const { internalAdapter } = await auth.$context;
-      session = await internalAdapter.createSession(result.user.id, false, {
-        userAgent: request.headers.get("user-agent") ?? "AI Dev for Apple TV",
-      });
-    }
+    const { session, user } =
+      authorization.sessionPurpose === "television"
+        ? await redeemTelevisionOneTimeToken(
+            auth,
+            authorization.oneTimeToken,
+            request.headers.get("user-agent") ?? "AI Dev for Apple TV",
+          )
+        : await auth.api.verifyOneTimeToken({
+            body: { token: authorization.oneTimeToken },
+          });
     return Response.json(
       {
         token: session.token,
         expiresAt: session.expiresAt,
         user: {
-          id: result.user.id,
-          name: result.user.name,
-          email: result.user.email,
-          image: result.user.image ?? null,
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image ?? null,
         },
       },
       {
