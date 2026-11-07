@@ -46,10 +46,20 @@ export async function POST(request: Request): Promise<Response> {
     const result = await auth.api.verifyOneTimeToken({
       body: { token: authorization.oneTimeToken },
     });
+    // The phone browser keeps its session. Only the bound TV flow creates a
+    // separate credential, after both PKCE and the source session are verified.
+    let session: Pick<typeof result.session, "token" | "expiresAt"> =
+      result.session;
+    if (authorization.sessionPurpose === "television") {
+      const { internalAdapter } = await auth.$context;
+      session = await internalAdapter.createSession(result.user.id, false, {
+        userAgent: request.headers.get("user-agent") ?? "AI Dev for Apple TV",
+      });
+    }
     return Response.json(
       {
-        token: result.session.token,
-        expiresAt: result.session.expiresAt,
+        token: session.token,
+        expiresAt: session.expiresAt,
         user: {
           id: result.user.id,
           name: result.user.name,
