@@ -86,7 +86,6 @@ export const routes: RouteEntry[] = [
     name: "sidebar-usage",
     path: "/dashboard/action-center",
     usagePopover: true,
-    desktopOnly: true,
   },
   // Apps
   {

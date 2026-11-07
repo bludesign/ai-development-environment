@@ -18,6 +18,7 @@ import {
   ChartTooltipContent,
 } from "@/components/ui/chart";
 import { Spinner } from "@/components/ui/spinner";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Link } from "@/i18n/navigation";
 import {
   controlPlaneRequest,
@@ -41,6 +42,7 @@ export function SidebarUsagePopover({
   const t = useTranslations("usage");
   const disk = useTranslations("diskSpace");
   const locale = useLocale();
+  const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
   const [history, setHistory] = useState<History | null>(null);
   const [loading, setLoading] = useState(false);
@@ -117,9 +119,10 @@ export function SidebarUsagePopover({
         </button>
       </PopoverTrigger>
       <PopoverContent
-        side="right"
-        align="end"
-        className="w-[min(24rem,calc(100vw-2rem))] gap-3"
+        side={isMobile ? "top" : "right"}
+        align={isMobile ? "start" : "end"}
+        collisionPadding={8}
+        className="max-h-[min(70dvh,var(--radix-popover-content-available-height))] w-[min(24rem,calc(100vw-1rem))] gap-3 overflow-y-auto [overflow-wrap:anywhere]"
       >
         <PopoverHeader>
           <PopoverTitle>{t("sidebarTitle")}</PopoverTitle>
@@ -161,7 +164,7 @@ export function SidebarUsagePopover({
         {history &&
           (history.hasUsage ? (
             <ChartContainer
-              className="h-36 w-full"
+              className="h-36 w-full shrink-0"
               config={{
                 totalCost: {
                   label: t("cost"),

@@ -1,6 +1,6 @@
 import * as z from "zod/v4";
 
-import { getAuth } from "@/services/auth";
+import { getAuth, redeemTelevisionOneTimeToken } from "@/services/auth";
 
 import {
   consumeMobileAuthorizationCode,
@@ -43,18 +43,25 @@ export async function POST(request: Request): Promise<Response> {
       return invalidAuthorizationCode();
     }
     const auth = await getAuth();
-    const result = await auth.api.verifyOneTimeToken({
-      body: { token: authorization.oneTimeToken },
-    });
+    const { session, user } =
+      authorization.sessionPurpose === "television"
+        ? await redeemTelevisionOneTimeToken(
+            auth,
+            authorization.oneTimeToken,
+            request.headers.get("user-agent") ?? "AI Dev for Apple TV",
+          )
+        : await auth.api.verifyOneTimeToken({
+            body: { token: authorization.oneTimeToken },
+          });
     return Response.json(
       {
-        token: result.session.token,
-        expiresAt: result.session.expiresAt,
+        token: session.token,
+        expiresAt: session.expiresAt,
         user: {
-          id: result.user.id,
-          name: result.user.name,
-          email: result.user.email,
-          image: result.user.image ?? null,
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image ?? null,
         },
       },
       {
