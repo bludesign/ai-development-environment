@@ -5,6 +5,7 @@ import type { Verification } from "@/generated/prisma/client";
 import {
   consumeMobileAuthorizationCode,
   createMobileAuthorizationCode,
+  createTelevisionAuthorizationCode,
   isMobileAuthorizationCode,
   isMobileOAuthState,
   isPKCECodeChallenge,
@@ -122,6 +123,48 @@ describe("mobile PKCE", () => {
     expect(results.filter(Boolean)).toEqual([
       { codeChallenge: RFC_CHALLENGE, oneTimeToken: "one-time-token" },
     ]);
+  });
+
+  test("stores the television session purpose with the PKCE binding", async () => {
+    const { records, store } = memoryStore();
+    const code = await createTelevisionAuthorizationCode(
+      "one-time-token",
+      RFC_CHALLENGE,
+      store,
+    );
+    expect(Array.from(records.values())[0]?.value).toContain(
+      '"sessionPurpose":"television"',
+    );
+    const results = await Promise.all([
+      consumeMobileAuthorizationCode(code, store),
+      consumeMobileAuthorizationCode(code, store),
+    ]);
+    expect(results.filter(Boolean)).toEqual([
+      {
+        codeChallenge: RFC_CHALLENGE,
+        oneTimeToken: "one-time-token",
+        sessionPurpose: "television",
+      },
+    ]);
+  });
+
+  test("rejects unknown stored purposes instead of adopting legacy session behavior", async () => {
+    const { records, store } = memoryStore();
+    const code = await createTelevisionAuthorizationCode(
+      "one-time-token",
+      RFC_CHALLENGE,
+      store,
+    );
+    const record = Array.from(records.values())[0]!;
+    record.value = JSON.stringify({
+      codeChallenge: RFC_CHALLENGE,
+      oneTimeToken: "one-time-token",
+      sessionPurpose: "unknown",
+    });
+    await expect(
+      consumeMobileAuthorizationCode(code, store),
+    ).resolves.toBeNull();
+    expect(records.size).toBe(0);
   });
 
   test("consumes and rejects an expired authorization code", async () => {

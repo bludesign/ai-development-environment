@@ -87,6 +87,9 @@ export function AuthForm({
     const result = await authClient.signIn.social({
       provider: configuration.provider.id,
       callbackURL: destination,
+      errorCallbackURL: destination.startsWith("/api/auth/mobile/complete?")
+        ? destination
+        : undefined,
       requestSignUp: intent === "register",
     });
     if (result.error) {

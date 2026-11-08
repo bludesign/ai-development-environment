@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   consumeMobileAuthorizationCode: vi.fn(),
   verifyOneTimeToken: vi.fn(),
+  redeemTelevisionOneTimeToken: vi.fn(),
 }));
 
 vi.mock("@/services/auth", () => ({
   getAuth: async () => ({
     api: { verifyOneTimeToken: mocks.verifyOneTimeToken },
   }),
+  redeemTelevisionOneTimeToken: mocks.redeemTelevisionOneTimeToken,
 }));
 
 vi.mock("../pkce", async (importOriginal) => ({
@@ -36,7 +38,7 @@ beforeEach(() => {
     codeChallenge: RFC_CHALLENGE,
     oneTimeToken: "one-time-token",
   });
-  mocks.verifyOneTimeToken.mockResolvedValue({
+  const source = {
     session: {
       token: "session-token",
       expiresAt: new Date("2026-08-08T12:00:00.000Z"),
@@ -46,6 +48,14 @@ beforeEach(() => {
       name: "Test User",
       email: "test@example.com",
       image: null,
+    },
+  };
+  mocks.verifyOneTimeToken.mockResolvedValue(source);
+  mocks.redeemTelevisionOneTimeToken.mockResolvedValue({
+    user: source.user,
+    session: {
+      token: "independent-tv-session",
+      expiresAt: new Date("2026-08-09T12:00:00.000Z"),
     },
   });
 });
@@ -66,6 +76,77 @@ describe("mobile PKCE redemption", () => {
     expect(mocks.verifyOneTimeToken).toHaveBeenCalledWith({
       body: { token: "one-time-token" },
     });
+    expect(mocks.redeemTelevisionOneTimeToken).not.toHaveBeenCalled();
+  });
+
+  test("uses the cookie-free exchange for a TV code", async () => {
+    mocks.consumeMobileAuthorizationCode.mockResolvedValue({
+      codeChallenge: RFC_CHALLENGE,
+      oneTimeToken: "one-time-token",
+      sessionPurpose: "television",
+    });
+    const response = await POST(
+      request({ code: CODE, code_verifier: RFC_VERIFIER }),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      token: "independent-tv-session",
+      expiresAt: "2026-08-09T12:00:00.000Z",
+    });
+    expect(mocks.verifyOneTimeToken).not.toHaveBeenCalled();
+    expect(mocks.redeemTelevisionOneTimeToken).toHaveBeenCalledWith(
+      expect.objectContaining({ api: expect.anything() }),
+      "one-time-token",
+      "AI Dev for Apple TV",
+    );
+  });
+
+  test("does not let redemption parameters change a legacy code into a TV session", async () => {
+    const response = await POST(
+      request({
+        code: CODE,
+        code_verifier: RFC_VERIFIER,
+        sessionPurpose: "television",
+        platform: "tvos",
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.redeemTelevisionOneTimeToken).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      token: "session-token",
+    });
+  });
+
+  test("does not create a TV session when its verifier is wrong", async () => {
+    mocks.consumeMobileAuthorizationCode.mockResolvedValue({
+      codeChallenge: RFC_CHALLENGE,
+      oneTimeToken: "one-time-token",
+      sessionPurpose: "television",
+    });
+    const response = await POST(
+      request({ code: CODE, code_verifier: "z".repeat(43) }),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.verifyOneTimeToken).not.toHaveBeenCalled();
+    expect(mocks.redeemTelevisionOneTimeToken).not.toHaveBeenCalled();
+  });
+
+  test("sanitizes independent session creation failures", async () => {
+    mocks.consumeMobileAuthorizationCode.mockResolvedValue({
+      codeChallenge: RFC_CHALLENGE,
+      oneTimeToken: "one-time-token",
+      sessionPurpose: "television",
+    });
+    mocks.redeemTelevisionOneTimeToken.mockRejectedValue(
+      new Error("private database error"),
+    );
+    const response = await POST(
+      request({ code: CODE, code_verifier: RFC_VERIFIER }),
+    );
+    expect(response.status).toBe(400);
+    expect(JSON.stringify(await response.json())).not.toContain(
+      "private database error",
+    );
   });
 
   test("consumes but refuses a code when the verifier does not match", async () => {

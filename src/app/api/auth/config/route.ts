@@ -10,6 +10,7 @@ export async function GET(): Promise<Response> {
   return Response.json({
     mode: configuration.mode,
     registration,
+    nearbySignInEnabled: true,
     provider: configuration.provider
       ? {
           id: configuration.provider.providerId,

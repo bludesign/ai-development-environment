@@ -13,6 +13,7 @@ export const MOBILE_AUTHORIZATION_CODE_TTL_MS = 60_000;
 const storedAuthorizationSchema = z.object({
   codeChallenge: z.string().regex(BASE64URL_32_BYTES),
   oneTimeToken: z.string().min(1),
+  sessionPurpose: z.literal("television").optional(),
 });
 
 type StoredAuthorization = z.infer<typeof storedAuthorizationSchema>;
@@ -83,6 +84,32 @@ export async function createMobileAuthorizationCode(
   store?: MobileAuthorizationCodeStore,
   now = new Date(),
 ): Promise<string> {
+  return createAuthorizationCode(oneTimeToken, codeChallenge, store, now);
+}
+
+/** The purpose stays in server-side code storage; clients cannot select it at redemption. */
+export async function createTelevisionAuthorizationCode(
+  oneTimeToken: string,
+  codeChallenge: string,
+  store?: MobileAuthorizationCodeStore,
+  now = new Date(),
+): Promise<string> {
+  return createAuthorizationCode(
+    oneTimeToken,
+    codeChallenge,
+    store,
+    now,
+    "television",
+  );
+}
+
+async function createAuthorizationCode(
+  oneTimeToken: string,
+  codeChallenge: string,
+  store: MobileAuthorizationCodeStore | undefined,
+  now: Date,
+  sessionPurpose?: "television",
+): Promise<string> {
   if (!oneTimeToken || !isPKCECodeChallenge(codeChallenge)) {
     throw new TypeError("A token and valid S256 code challenge are required.");
   }
@@ -100,7 +127,7 @@ export async function createMobileAuthorizationCode(
     data: {
       id: recordID(code),
       identifier: MOBILE_AUTHORIZATION_CODE_IDENTIFIER,
-      value: JSON.stringify({ codeChallenge, oneTimeToken }),
+      value: JSON.stringify({ codeChallenge, oneTimeToken, sessionPurpose }),
       expiresAt,
     },
   });
