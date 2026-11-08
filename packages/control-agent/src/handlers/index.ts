@@ -7,6 +7,13 @@ import {
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
 } from "@ai-development-environment/agent-contract/build-data";
+import {
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_INSPECT_JOB_KIND,
+  SIMULATOR_INVENTORY_JOB_KIND,
+  SIMULATOR_RESET_JOB_KIND,
+} from "@ai-development-environment/agent-contract/simulators";
 import type { BuildProgressReport } from "@ai-development-environment/agent-contract/builds";
 import {
   CODEBASE_BROWSE_JOB_KIND,
@@ -39,6 +46,13 @@ import { runCliHealth } from "./cli-health.js";
 import { inspectIosSigning } from "./signing.js";
 import { runCcusage } from "./ccusage.js";
 import { deleteBuildData, scanBuildData, sizeBuildData } from "./build-data.js";
+import {
+  createSimulator,
+  inspectSimulator,
+  inventorySimulators,
+  performSimulatorAction,
+  resetSimulators,
+} from "./simulators.js";
 import type { ProcessLog, ProcessResult } from "../process-runner.js";
 import type { FetchedCodebaseRefresh } from "../refresh-fetched-codebase.js";
 import {
@@ -240,6 +254,11 @@ export const handlers: Readonly<Record<string, AgentJobHandler>> = {
   [BUILD_DATA_SCAN_JOB_KIND]: scanBuildData,
   [BUILD_DATA_SIZE_JOB_KIND]: sizeBuildData,
   [BUILD_DATA_DELETE_JOB_KIND]: deleteBuildData,
+  [SIMULATOR_INVENTORY_JOB_KIND]: inventorySimulators,
+  [SIMULATOR_INSPECT_JOB_KIND]: inspectSimulator,
+  [SIMULATOR_CREATE_JOB_KIND]: createSimulator,
+  [SIMULATOR_RESET_JOB_KIND]: resetSimulators,
+  [SIMULATOR_ACTION_JOB_KIND]: performSimulatorAction,
   [CODEBASE_BROWSE_JOB_KIND]: browseCodebaseDirectories,
   [CODEBASE_CLONE_JOB_KIND]: cloneCodebase,
   [CODEBASE_CLONE_INSPECT_JOB_KIND]: inspectCloneDestination,

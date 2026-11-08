@@ -88,6 +88,18 @@ import {
   type DerivedDataLocationMode,
 } from "@ai-development-environment/agent-contract/build-data";
 import {
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_INSPECT_JOB_KIND,
+  SIMULATOR_INVENTORY_JOB_KIND,
+  SIMULATOR_JOB_KINDS,
+  SIMULATOR_RESET_JOB_KIND,
+  simulatorActionPayload,
+  simulatorCreatePayload,
+  simulatorEmptyPayload,
+  simulatorInspectPayload,
+} from "@ai-development-environment/agent-contract/simulators";
+import {
   DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB,
   DISK_SPACE_STALE_AFTER_SECONDS,
   monitoredDiskSpaceVolumes,
@@ -238,6 +250,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...COVERAGE_JOB_KINDS,
   ...CRASH_JOB_KINDS,
   ...BUILD_DATA_JOB_KINDS,
+  ...SIMULATOR_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
@@ -332,6 +345,25 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === BUILD_DATA_DELETE_JOB_KIND) {
     buildDataDeletePayload(value);
+    return;
+  }
+  if (
+    kind === SIMULATOR_INVENTORY_JOB_KIND ||
+    kind === SIMULATOR_RESET_JOB_KIND
+  ) {
+    simulatorEmptyPayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_INSPECT_JOB_KIND) {
+    simulatorInspectPayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_CREATE_JOB_KIND) {
+    simulatorCreatePayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_ACTION_JOB_KIND) {
+    simulatorActionPayload(value);
     return;
   }
   if (kind === CODEBASE_BROWSE_JOB_KIND) {

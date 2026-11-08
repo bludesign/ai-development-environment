@@ -58,6 +58,40 @@ beforeEach(() => {
 });
 
 describe("job execution resource derivation", () => {
+  test("scopes simulator actions to their destination and blocks resets during deployment", async () => {
+    const simulatorId = "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA";
+    const deploy = await jobOperationDescriptor(
+      job("ios.build.deploy", {
+        destination: { id: simulatorId.toLowerCase(), type: "SIMULATOR" },
+      }),
+      true,
+    );
+    const action = await jobOperationDescriptor(
+      {
+        agentId: "builder",
+        kind: "simulators.action",
+        payload: { simulatorId, action: "SHUTDOWN" },
+      },
+      true,
+    );
+    const reset = await jobOperationDescriptor(
+      { agentId: "builder", kind: "simulators.reset", payload: {} },
+      true,
+    );
+    expect(operationDescriptorsConflict(action, deploy)).toBe(true);
+    expect(operationDescriptorsConflict(reset, deploy)).toBe(true);
+    expect(
+      operationDescriptorsConflict(action, {
+        ...deploy,
+        resources: deploy.resources.map((resource) => ({
+          ...resource,
+          key: resource.key.replace("builder", "other"),
+          agentId: "other",
+        })),
+      }),
+    ).toBe(false);
+  });
+
   test("reserves the destination branch exclusively for a post-merge switch, including replay", async () => {
     for (const branch of ["main", a.branch]) {
       const descriptor = await jobOperationDescriptor(

@@ -29,6 +29,7 @@ import { seedJira, seedJiraWebhooks } from "./mock-data/jira";
 import { seedWorkflows } from "./mock-data/workflows";
 import { seedCosts } from "./mock-data/costs";
 import { seedBuildData } from "./mock-data/build-data";
+import { seedSimulators } from "./mock-data/simulators";
 import { seedAuth } from "./mock-data/auth";
 import { seedTailscale } from "./mock-data/tailscale";
 import { seedSse } from "./mock-data/sse";
@@ -64,6 +65,7 @@ const seeders: Seeder[] = [
   { name: "workflows", run: seedWorkflows },
   { name: "costs", run: seedCosts },
   { name: "build-data", run: seedBuildData },
+  { name: "simulators", run: seedSimulators },
 ];
 
 async function main(): Promise<void> {

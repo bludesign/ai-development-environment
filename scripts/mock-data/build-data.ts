@@ -1,3 +1,4 @@
+import { dirname } from "node:path";
 import type { PrismaClient } from "../../src/generated/prisma/client";
 
 import { ids } from "./ids";
@@ -11,6 +12,7 @@ type ScanEntry = {
   rootPath: string;
   name: string;
   kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  deviceSupportPlatform?: string;
   workspacePath: string | null;
   modifiedAt: string;
   volumeId: string;
@@ -28,7 +30,11 @@ function scan(
   entries: Omit<ScanEntry, "rootPath" | "volumeId">[],
 ): ScanEntry[] {
   const rootPath = `${rootFolder}/Library/Developer/Xcode/DerivedData`;
-  return entries.map((entry) => ({ ...entry, rootPath, volumeId }));
+  return entries.map((entry) => ({
+    ...entry,
+    rootPath: entry.kind === "DEVICE_SUPPORT" ? dirname(entry.path) : rootPath,
+    volumeId,
+  }));
 }
 
 const STUDIO_ENTRIES = scan("/Users/acme", "disk3s5", [
@@ -90,6 +96,15 @@ const BUILD_ENTRIES = scan("/Users/acme", "disk2s4", [
     workspacePath: null,
     modifiedAt: daysAgo(12).toISOString(),
     sizeBytes: 780 * MIB,
+  },
+  {
+    path: "/Users/acme/Library/Developer/Xcode/tvOS DeviceSupport/26.2 (23K50)",
+    name: "26.2 (23K50)",
+    kind: "DEVICE_SUPPORT",
+    deviceSupportPlatform: "tvOS",
+    workspacePath: null,
+    modifiedAt: daysAgo(4).toISOString(),
+    sizeBytes: 410 * MIB,
   },
 ]);
 

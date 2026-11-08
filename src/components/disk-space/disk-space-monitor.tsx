@@ -47,7 +47,7 @@ const ACTIVE_CONTROL_CLASS =
 const ACTIVE_PRESSURE_CLASS =
   "border-amber-500/30 bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 hover:text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20 dark:hover:text-amber-300";
 
-export function DiskSpaceMonitor() {
+export function DiskSpaceMonitor({ agentId }: { agentId?: string | null }) {
   const t = useTranslations("diskSpace");
   const [overview, setOverview] = useState<DiskSpaceOverview | null>(null);
   const [normal, setNormal] = useState("40");
@@ -55,6 +55,9 @@ export function DiskSpaceMonitor() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visibleAgents =
+    overview?.agents.filter((item) => !agentId || item.agent.id === agentId) ??
+    [];
 
   const load = useCallback(async () => {
     try {
@@ -209,7 +212,10 @@ export function DiskSpaceMonitor() {
         ) : (
           <>
             <div className="grid gap-4 xl:grid-cols-2">
-              {overview.agents.map((agent) => (
+              {visibleAgents.length === 0 && (
+                <p className="text-sm text-muted-foreground">{t("noReport")}</p>
+              )}
+              {visibleAgents.map((agent) => (
                 <div
                   className="space-y-4 rounded-lg border p-4"
                   key={agent.agent.id}

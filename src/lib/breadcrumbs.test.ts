@@ -60,6 +60,7 @@ const labels: Record<BreadcrumbLabelKey, string> = {
   runs: "Runs",
   sessions: "Sessions",
   settings: "Settings",
+  simulators: "Simulators",
   skills: "Skills",
   status: "Status",
   scriptStorage: "Script Storage",
@@ -80,6 +81,19 @@ const labels: Record<BreadcrumbLabelKey, string> = {
 const translate = (key: BreadcrumbLabelKey) => labels[key];
 
 describe("buildAppBreadcrumbs", () => {
+  test("keeps the simulator list link and labels the owning agent and simulator", () => {
+    expect(
+      buildAppBreadcrumbs("/system/simulators/mac/device", translate, {
+        "/system/simulators/mac": "Build Mac",
+        "/system/simulators/mac/device": "Apple TV QA",
+      }),
+    ).toEqual([
+      { href: undefined, isCurrent: false, label: "System" },
+      { href: "/system/simulators", isCurrent: false, label: "Simulators" },
+      { href: undefined, isCurrent: false, label: "Build Mac" },
+      { href: undefined, isCurrent: true, label: "Apple TV QA" },
+    ]);
+  });
   test("marks every detail title as pending before the page publishes it", () => {
     for (const page of globSync("**/page.tsx", {
       cwd: "src/app/[locale]/(dashboard)",

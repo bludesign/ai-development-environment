@@ -25,6 +25,7 @@ export type ActiveAgentOption = {
   name: string;
   hostname: string;
   connectionStatus: string;
+  capabilities?: string[];
 };
 
 type Preferences = {
@@ -192,7 +193,7 @@ function ScopedActiveAgentProvider({
       setLoading(true);
       try {
         const data = await controlPlaneRequest<{ agents: ActiveAgentOption[] }>(
-          `query ActiveAgentOptions { agents { id name hostname connectionStatus } }`,
+          `query ActiveAgentOptions { agents { id name hostname connectionStatus capabilities } }`,
           undefined,
           { signal },
         );

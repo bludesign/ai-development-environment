@@ -106,6 +106,8 @@ type DerivedDataEntry {
   name: String!
   "Category of this derived data entry."
   kind: BuildDataEntryKind!
+  "Apple platform associated with a Device Support cache. Null for other entries."
+  deviceSupportPlatform: String
   "Current status of this derived data entry."
   status: DerivedDataEntryStatus!
   "Filesystem path associated with this derived data entry. May be null when unavailable or not applicable."
@@ -204,6 +206,8 @@ extend type Query {
     first: Int = 100
     "Cursor or identifier after which to return records. Omit it to leave this dimension unfiltered."
     after: ID
+    "Limits deletion history to this agent when provided."
+    agentId: ID
   ): DerivedDataDeletionHistoryPage!
 }
 
@@ -212,6 +216,8 @@ extend type Mutation {
   refreshDerivedData(
     "Identifier of the request."
     requestId: ID!
+    "Limits the scan to this agent when provided."
+    agentId: ID
   ): DerivedDataCollection!
   "Calculates derived data sizes and returns a derived data collection."
   calculateDerivedDataSizes(
@@ -234,7 +240,10 @@ extend type Mutation {
     overrideProtection: Boolean = false
   ): DerivedDataCollection!
   "Clears derived data deletion history and returns the number of affected records."
-  clearDerivedDataDeletionHistory: Int!
+  clearDerivedDataDeletionHistory(
+    "Clears only this agent's history when provided."
+    agentId: ID
+  ): Int!
   "Sets whether derived data entry is locked and returns the updated derived data collection."
   setDerivedDataEntryLocked(
     "Identifier of the collection."

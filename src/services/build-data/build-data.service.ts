@@ -71,6 +71,7 @@ export type BuildDataEntryView = {
   id: string;
   name: string;
   kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  deviceSupportPlatform: string | null;
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
   worktreeId: string | null;
@@ -211,10 +212,11 @@ export class BuildDataService {
 
   async refresh(
     requestId?: string | null,
+    agentId: string | null = null,
   ): Promise<BuildDataCollectionSnapshot> {
     await this.initialize();
     const id = requestId?.trim() || randomUUID();
-    await this.ensureCollection(id);
+    await this.ensureCollection(id, agentId);
     return (await this.getCollection(id))!;
   }
 
@@ -293,19 +295,25 @@ export class BuildDataService {
     return (await this.getCollection(collectionId))!;
   }
 
-  async history(first = 100, after?: string | null) {
+  async history(
+    first = 100,
+    after?: string | null,
+    agentId: string | null = null,
+  ) {
     await this.initialize();
     await this.pruneHistory();
     const take = Math.max(1, Math.min(first, 200));
     const prisma = await getPrismaClient();
+    const scope = agentId === null ? {} : { agentId };
     const cursor = after
       ? await prisma.buildDataDeletionHistory.findUnique({
-          where: { id: after },
+          where: { id: after, ...scope },
           select: { id: true, deletedAt: true },
         })
       : null;
     const items = await prisma.buildDataDeletionHistory.findMany({
       where: {
+        ...scope,
         deletedAt: { gte: new Date(Date.now() - HISTORY_RETENTION_MS) },
         ...(cursor
           ? {
@@ -327,43 +335,63 @@ export class BuildDataService {
     };
   }
 
-  async clearHistory(): Promise<number> {
+  async clearHistory(agentId: string | null = null): Promise<number> {
     await this.initialize();
     const prisma = await getPrismaClient();
-    return (await prisma.buildDataDeletionHistory.deleteMany()).count;
+    return (
+      await prisma.buildDataDeletionHistory.deleteMany(
+        agentId === null ? undefined : { where: { agentId } },
+      )
+    ).count;
   }
 
-  private async ensureCollection(id: string): Promise<void> {
+  private async ensureCollection(
+    id: string,
+    agentId: string | null,
+  ): Promise<void> {
     const prisma = await getPrismaClient();
+    const select = { agentId: true } as const;
     let collection = await prisma.buildDataCollection.findUnique({
       where: { id },
-      select: { id: true },
+      select,
     });
     if (!collection) {
       const agents =
         (await this.agentControlService.listAgents()) as PersistedAgent[];
+      const members =
+        agentId === null
+          ? agents
+          : agents.filter((agent) => agent.id === agentId);
+      if (agentId !== null && members.length === 0)
+        throw new Error("Agent not found");
       try {
         collection = await prisma.buildDataCollection.create({
           data: {
             id,
+            agentId,
             deadlineAt: new Date(Date.now() + COLLECTION_DEADLINE_MS),
             agents: {
-              create: agents.map((agent) => ({
+              create: members.map((agent) => ({
                 agentId: agent.id,
                 initialStatus: initialStatus(agent),
               })),
             },
           },
-          select: { id: true },
+          select,
         });
         this.publish(id);
       } catch (error) {
         collection = await prisma.buildDataCollection.findUnique({
           where: { id },
-          select: { id: true },
+          select,
         });
         if (!collection) throw error;
       }
+    }
+    if (collection.agentId !== agentId) {
+      throw new Error(
+        "Build Data request ID already belongs to a different agent scope",
+      );
     }
     await this.ensureScanJobs(id);
   }
@@ -708,6 +736,10 @@ export class BuildDataService {
           id,
           name: entry.name,
           kind: entry.kind,
+          deviceSupportPlatform:
+            entry.kind === "DEVICE_SUPPORT"
+              ? (entry.deviceSupportPlatform ?? "iOS")
+              : null,
           status:
             entry.kind === "DEVICE_SUPPORT"
               ? "READY"

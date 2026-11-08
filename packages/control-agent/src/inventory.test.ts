@@ -41,8 +41,21 @@ describe("agent inventory", () => {
     expect(capabilities).not.toContain("ios.build.run");
     expect(capabilities).not.toContain("ios.signing.assets.scan");
     expect(capabilities).not.toContain("ios.crash.symbolicate");
+    expect(capabilities).not.toContain("simulators.inventory");
     expect(capabilities).toContain("codebase.refresh");
     expect(capabilities).toContain("runs.protocol.v1");
+  });
+
+  test("advertises simulator administration on macOS", () => {
+    expect(capabilitiesForPlatform("darwin")).toEqual(
+      expect.arrayContaining([
+        "simulators.inventory",
+        "simulators.inspect",
+        "simulators.create",
+        "simulators.reset",
+        "simulators.action",
+      ]),
+    );
   });
 
   test("advertises scoped execution only where process-group recovery is supported", () => {

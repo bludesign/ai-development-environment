@@ -2198,6 +2198,7 @@ model BuildExport {
 
 model BuildDataCollection {
   id         String                     @id
+  agentId    String?
   deadlineAt DateTime
   finishedAt DateTime?
   createdAt  DateTime                   @default(now())

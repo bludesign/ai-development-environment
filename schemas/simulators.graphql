@@ -1,0 +1,178 @@
+"A simulator on an enrolled Mac agent."
+type Simulator {
+  "The simulator UUID on this agent."
+  id: ID!
+  "The configured simulator name."
+  name: String!
+  "The CoreSimulator runtime identifier."
+  runtimeId: ID!
+  "The name of the runtime, when installed."
+  runtimeName: String
+  "The Apple platform of the runtime."
+  platform: String!
+  "The CoreSimulator device type identifier, when known."
+  deviceTypeId: ID
+  "The current CoreSimulator device state."
+  state: String!
+  "Whether the selected Xcode can use this simulator."
+  isAvailable: Boolean!
+  "The reason an unavailable simulator cannot run."
+  availabilityError: String
+  "The data directory on the selected Mac, when available."
+  dataPath: String
+}
+
+"A device type supported by a simulator runtime."
+type SimulatorDeviceType {
+  "The CoreSimulator device type identifier."
+  id: ID!
+  "The device type name."
+  name: String!
+}
+
+"An installed, available simulator runtime."
+type SimulatorRuntime {
+  "The CoreSimulator runtime identifier."
+  id: ID!
+  "The runtime name."
+  name: String!
+  "The Apple platform of this runtime."
+  platform: String!
+  "The runtime version."
+  version: String!
+  "The device types supported by this runtime."
+  deviceTypes: [SimulatorDeviceType!]!
+}
+
+"The current simulators and creation options on one Mac agent."
+type SimulatorInventory {
+  "Available and unavailable simulators on the selected Mac."
+  simulators: [Simulator!]!
+  "Installed, available runtimes for creating simulators."
+  runtimes: [SimulatorRuntime!]!
+}
+
+"An app installed by a user or by a build on a simulator."
+type SimulatorApp {
+  "The app bundle identifier."
+  bundleId: String!
+  "The app display name, falling back to its bundle name or identifier."
+  name: String!
+  "The app version, when declared by the app."
+  version: String
+  "The app build number, when declared by the app."
+  build: String
+  "The app bundle location on the selected Mac, when available."
+  bundlePath: String
+  "The app data directory on the selected Mac, when available."
+  dataPath: String
+}
+
+"The current simulator state and its installed user apps."
+type SimulatorDetails {
+  "The simulator that was inspected."
+  simulator: Simulator!
+  "The installed user apps."
+  apps: [SimulatorApp!]!
+}
+
+"A single operation on a simulator."
+enum SimulatorAction {
+  "Start the simulator and wait for boot to complete."
+  BOOT
+  "Shut down the simulator."
+  SHUTDOWN
+  "Shut down and restart the simulator."
+  REBOOT
+  "Change the simulator name."
+  RENAME
+  "Clone a shut-down simulator in the same device set."
+  CLONE
+  "Erase the contents and settings of a shut-down simulator."
+  ERASE
+  "Permanently delete the simulator."
+  DELETE
+  "Launch an installed app on a booted simulator."
+  LAUNCH_APP
+  "Terminate an installed app on a booted simulator."
+  TERMINATE_APP
+  "Open the simulator data directory in Finder on the agent Mac."
+  OPEN_DATA_FOLDER
+  "Reveal the installed app bundle in Finder on the agent Mac."
+  OPEN_APP_BUNDLE_FOLDER
+  "Open the installed app data directory in Finder on the agent Mac."
+  OPEN_APP_DATA_FOLDER
+}
+
+"The simulator and runtime to create on a selected agent."
+input CreateSimulatorInput {
+  "The selected Mac agent."
+  agentId: ID!
+  "The client-generated request identifier for retries."
+  requestId: ID!
+  "The name of the new simulator."
+  name: String!
+  "The identifier of an installed runtime."
+  runtimeId: ID!
+  "A device type supported by the selected runtime."
+  deviceTypeId: ID!
+}
+
+"An operation and its target simulator on a selected agent."
+input SimulatorActionInput {
+  "The selected Mac agent."
+  agentId: ID!
+  "The client-generated request identifier for retries."
+  requestId: ID!
+  "The simulator UUID on this agent."
+  simulatorId: ID!
+  "The operation to run."
+  action: SimulatorAction!
+  "The new name for rename and clone operations."
+  name: String
+  "The installed app bundle identifier for app operations."
+  bundleId: String
+}
+
+extend type AgentJob {
+  "Inventory returned by a completed simulator inventory job."
+  simulatorInventory: SimulatorInventory
+  "Simulator metadata returned by a completed simulator inspection job."
+  simulatorDetails: SimulatorDetails
+}
+
+extend type Mutation {
+  "Queues a fresh simulator inventory on the selected Mac agent."
+  refreshSimulatorInventory(
+    "The selected Mac agent."
+    agentId: ID!
+    "The client-generated request identifier for retries."
+    requestId: ID!
+  ): AgentJob!
+  "Queues inspection of one simulator on the selected Mac agent."
+  inspectSimulator(
+    "The selected Mac agent."
+    agentId: ID!
+    "The simulator UUID on this agent."
+    simulatorId: ID!
+    "The client-generated request identifier for retries."
+    requestId: ID!
+  ): AgentJob!
+  "Queues creation of a simulator on the selected Mac agent."
+  createSimulator(
+    "The agent, device type, runtime, and name for the new simulator."
+    input: CreateSimulatorInput!
+  ): AgentJob!
+  "Queues a replacement of the agent's simulators with Xcode defaults."
+  resetSimulators(
+    "The selected Mac agent."
+    agentId: ID!
+    "The client-generated request identifier for retries."
+    requestId: ID!
+  ): AgentJob!
+  "Queues a supported action on one simulator on the selected Mac agent."
+  performSimulatorAction(
+    "The target simulator and action parameters."
+    input: SimulatorActionInput!
+  ): AgentJob!
+}

@@ -15,6 +15,8 @@ export type RouteEntry = {
   readyGraphqlOperation?: string;
   /** One of these terminal-state texts must render after the ready operation finishes. */
   readyTexts?: string[];
+  /** Accessible name of a control enabled once the page has finished loading. */
+  readyEnabledButton?: string;
   /**
    * JavaScript evaluated before any of the page's own scripts run. Only for pages whose data
    * depends on an id the client mints at random; see the `usage` route.
@@ -363,6 +365,38 @@ export const routes: RouteEntry[] = [
     initScript: `Object.defineProperty(crypto, "randomUUID", {
       configurable: true,
       value: () => "${ids.buildDataCollections.captured}",
+    });`,
+  },
+  {
+    name: "build-data-device-support",
+    path: "/system/build-data",
+    readyTexts: ["26.2 (23K50)"],
+    scrollTo:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Device Support"))',
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.buildDataCollections.captured}",
+    });`,
+  },
+  {
+    name: "simulators",
+    path: "/system/simulators",
+    readyGraphqlOperation: "RefreshSimulatorInventory",
+    readyTexts: ["QA iPhone 18 Pro"],
+    readyEnabledButton: "Create simulator",
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.inventoryRequest}",
+    });`,
+  },
+  {
+    name: "simulator-detail",
+    path: `/system/simulators/${ids.agents.studio}/${ids.simulators.ios}`,
+    readyGraphqlOperation: "InspectSimulator",
+    readyTexts: ["Acme Weather"],
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.detailRequest}",
     });`,
   },
   {

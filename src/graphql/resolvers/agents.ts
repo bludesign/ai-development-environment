@@ -1,6 +1,7 @@
 import { prependAsyncIterator } from "@/lib/filter-async-iterator";
 import { GraphQLScalarType, Kind, type ValueNode } from "graphql";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
+import { SIMULATOR_JOB_KINDS } from "@ai-development-environment/agent-contract/simulators";
 import { jobBlockedReason } from "@/services/operation-locks/operation-locks.service";
 import {
   CODEBASE_BRANCHES_DELETE_JOB_KIND,
@@ -304,6 +305,8 @@ export const createAgentResolvers = (
           "Saved commands must be launched through startCommandRun",
         );
       }
+      if (SIMULATOR_JOB_KINDS.some((kind) => kind === input.kind))
+        throw new Error("Simulator jobs must use the simulator mutations");
       return agentControlService.createJob(input as never);
     },
     claimAgentJob: (

@@ -117,6 +117,14 @@ test.describe("app screenshots", () => {
           timeout: 30_000,
         });
       }
+      if (route.readyEnabledButton) {
+        await expect(
+          page.getByRole("button", {
+            name: route.readyEnabledButton,
+            exact: true,
+          }),
+        ).toBeEnabled({ timeout: 30_000 });
+      }
       if (route.scrollTo) {
         await scrollToLazyTarget(page, route.scrollTo);
       }

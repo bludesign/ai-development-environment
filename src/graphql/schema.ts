@@ -18,6 +18,8 @@ import { createAgentResolvers } from "./resolvers/agents";
 import { createHealthResolvers } from "./resolvers/health";
 import { createCcusageResolvers } from "./resolvers/ccusage";
 import { createBuildDataResolvers } from "./resolvers/build-data";
+import { createSimulatorResolvers } from "./resolvers/simulators";
+import { SimulatorsService } from "@/services/simulators/simulators.service";
 import { createJiraResolvers } from "./resolvers/jira";
 import { createGitHubResolvers } from "./resolvers/github";
 import { createGitLabResolvers } from "./resolvers/gitlab";
@@ -143,6 +145,7 @@ export const createSchema = (
     createGitLabResolvers(gitLabService, gitHubService),
     createCcusageResolvers(ccusageService),
     createBuildDataResolvers(buildDataService),
+    createSimulatorResolvers(new SimulatorsService(agentControlService)),
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
     createWorktreeResolvers(worktreesService, worktreeAutomationService),
