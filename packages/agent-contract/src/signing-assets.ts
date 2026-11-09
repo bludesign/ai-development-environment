@@ -1,7 +1,7 @@
 import {
   PROVISIONING_PROFILE_TYPES,
   type ProvisioningProfileType,
-} from "./builds.js";
+} from "@ai-development-environment/agent-contract/builds";
 
 export const SIGNING_ASSETS_SCAN_JOB_KIND = "ios.signing.assets.scan";
 export const SIGNING_PROFILE_READ_JOB_KIND = "ios.signing.profile.read";
