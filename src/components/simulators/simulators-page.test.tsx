@@ -20,6 +20,7 @@ import {
 
 import { SimulatorDetailPage } from "./simulator-detail-page";
 import type { Simulator } from "./simulator-client";
+import { SimulatorFleetDialog } from "./simulator-fleet-dialog";
 import { SimulatorsPage } from "./simulators-page";
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -135,6 +136,7 @@ describe("Simulator management", () => {
     cleanup();
     request.mockReset();
     subscriptions.mockReset();
+    vi.unstubAllGlobals();
     localStorage.removeItem(activeAgentStorageKey("simulator-test"));
   });
 
@@ -185,7 +187,7 @@ describe("Simulator management", () => {
             action: "BOOT",
           }),
         },
-        expect.anything(),
+        { signal: expect.any(AbortSignal) },
       ),
     );
   });
@@ -217,7 +219,7 @@ describe("Simulator management", () => {
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation InspectSimulator"),
       expect.objectContaining({ agentId: "studio", simulatorId: iphone.id }),
-      expect.anything(),
+      { signal: expect.any(AbortSignal), cancelBeforeDispatch: true },
     );
     const appMenu = screen.getByRole("button", {
       name: "Actions for Acme Weather",
@@ -243,6 +245,142 @@ describe("Simulator management", () => {
         expect.anything(),
       ),
     );
+  });
+
+  test("offers actions on a loaded Mac while another Mac's inventory is pending", async () => {
+    const pendingInventory = new Promise<never>(() => {});
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables, options) => {
+      if (
+        query.includes("mutation RefreshSimulatorInventory") &&
+        variables?.agentId === "studio"
+      ) {
+        return pendingInventory;
+      }
+      return fallback(query, variables, options);
+    });
+    render(
+      <ActiveAgentProvider userId="simulator-test">
+        <SimulatorsPage />
+      </ActiveAgentProvider>,
+    );
+    const row = (
+      await screen.findByRole("link", { name: appleTv.name })
+    ).closest("tr")!;
+    expect(
+      (within(row).getByRole("button", { name: "Start" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    for (const name of ["Create simulator", "Reset to defaults", "Refresh"]) {
+      expect(
+        (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
+      ).toBe(false);
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    const dialog = screen.getByRole("dialog");
+    expect(
+      within(dialog).getByRole("combobox", { name: "Agent" }).textContent,
+    ).toBe("Remote Mac");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: `Select ${appleTv.name}` }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Delete selected",
+      }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation SimulatorAction"),
+        {
+          input: expect.objectContaining({
+            agentId: "remote",
+            simulatorId: appleTv.id,
+            action: "DELETE",
+          }),
+        },
+        { signal: expect.any(AbortSignal) },
+      ),
+    );
+  });
+
+  test("keeps a bulk selection but blocks deletion while a selected Mac refreshes", async () => {
+    const studio = { ...appleTv, name: "Studio TV" };
+    const pendingInventory = new Promise<never>(() => {});
+    let studioScans = 0;
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables, options) => {
+      if (
+        query.includes("mutation RefreshSimulatorInventory") &&
+        variables?.agentId === "studio"
+      ) {
+        return ++studioScans === 1
+          ? (inventory("studio", [studio]) as never)
+          : pendingInventory;
+      }
+      return fallback(query, variables, options);
+    });
+    render(
+      <ActiveAgentProvider userId="simulator-test">
+        <SimulatorsPage />
+      </ActiveAgentProvider>,
+    );
+    await screen.findByRole("link", { name: studio.name });
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const studioCheckbox = screen.getByRole("checkbox", {
+      name: `Select ${studio.name}`,
+    });
+    fireEvent.click(studioCheckbox);
+    const remove = screen.getByRole("button", {
+      name: "Delete selected",
+    }) as HTMLButtonElement;
+    expect(remove.disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(remove.disabled).toBe(true);
+    expect(studioCheckbox.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByRole("checkbox", {
+            name: `Select ${appleTv.name}`,
+          }) as HTMLButtonElement
+        ).disabled,
+      ).toBe(false),
+    );
+  });
+
+  test("lets the user choose the remaining eligible Mac in an open reset dialog", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    );
+    Element.prototype.scrollIntoView = vi.fn();
+    const onReset = vi.fn(async () => {});
+    const props = {
+      inventories: {},
+      mode: "reset" as const,
+      onClose: vi.fn(),
+      onCreate: vi.fn(),
+      onReset,
+    };
+    const { rerender } = render(
+      <SimulatorFleetDialog {...props} agents={agents} />,
+    );
+    rerender(<SimulatorFleetDialog {...props} agents={agents.slice(1)} />);
+    const agent = screen.getByRole("combobox", { name: "Agent" });
+    fireEvent.click(agent);
+    fireEvent.click(await screen.findByRole("option", { name: "Remote Mac" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset to defaults" }));
+    await waitFor(() => expect(onReset).toHaveBeenCalledWith("remote"));
   });
 
   test("selects visible eligible devices within an agent group and drops selection on a scope change", async () => {

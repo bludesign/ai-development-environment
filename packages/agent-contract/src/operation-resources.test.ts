@@ -185,6 +185,27 @@ describe("operation resource conflict policy", () => {
 });
 
 describe("operation resource normalization and validation", () => {
+  test("reconciles legacy simulator UUID casing without folding other keys", () => {
+    const uuid = "AABBCCDD-1122-3344-5566-778899AABBCC";
+    const destination = (type: string, id: string): OperationResource => ({
+      kind: "DESTINATION",
+      agentId: "builder",
+      key: `builder:destination:${type}:${id}`,
+      mode: "WRITE",
+    });
+    const current = destination("SIMULATOR", uuid);
+    const legacy = destination("SIMULATOR", uuid.toLowerCase());
+    expect(parseOperationDescriptor(descriptor(legacy))).toEqual(
+      descriptor(current),
+    );
+    expectConflict(legacy, current, true);
+    expectConflict(
+      destination("PHYSICAL_DEVICE", uuid),
+      destination("PHYSICAL_DEVICE", uuid.toLowerCase()),
+      false,
+    );
+  });
+
   test("deduplicates resource identities using their strongest requested mode and stable order", () => {
     const normalized = normalizeOperationResources([
       target("z", "READ"),

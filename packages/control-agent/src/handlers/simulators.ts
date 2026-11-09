@@ -745,10 +745,12 @@ export async function resetSimulators(
         "A simulator started during reset. Shut it down and retry",
       );
   } catch (error) {
+    // Staging may have exhausted the job deadline or been cancelled.
+    const cleanup = commandRunner(30_000, new AbortController().signal);
     const leftovers: string[] = [];
     for (const id of replacements) {
       try {
-        await simctl(run, "delete", id);
+        await simctl(cleanup, "delete", id);
       } catch {
         leftovers.push(id);
       }
@@ -762,7 +764,12 @@ export async function resetSimulators(
   let deleted = 0;
   try {
     for (const original of originals) {
-      await deleteDevice(run, original);
+      const current = selectedSimulator(await hostInventory(run), original.id);
+      if (current.state !== "Shutdown")
+        throw new Error(
+          "A simulator started during reset. Shut it down and retry",
+        );
+      await deleteDevice(run, current);
       deleted++;
     }
   } catch (error) {

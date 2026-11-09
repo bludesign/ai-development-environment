@@ -199,12 +199,9 @@ export async function jobOperationDescriptor(
         (isBuild &&
           ["TEST", "TEST_WITHOUT_BUILDING"].includes(String(p.action))))
     ) {
-      const type = destination.type ?? "SIMULATOR";
-      const id =
-        type === "SIMULATOR" ? destination.id.toUpperCase() : destination.id;
       resources.push({
         kind: "DESTINATION",
-        key: `${input.agentId}:destination:${type}:${id}`,
+        key: `${input.agentId}:destination:${destination.type ?? "SIMULATOR"}:${destination.id}`,
         mode: "WRITE",
         ...context,
       });

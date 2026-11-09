@@ -80,6 +80,17 @@ function inventory(
   return response(JSON.stringify({ devices, runtimes }));
 }
 
+function defaultProfile() {
+  return response(
+    JSON.stringify({
+      createByDefaultForRuntimeVersions: {
+        versionMin: "27.2",
+        versionMax: "99.99",
+      },
+    }),
+  );
+}
+
 function commands() {
   return capture.mock.calls.map(([input]) => input.args);
 }
@@ -348,28 +359,22 @@ describe("simulator jobs", () => {
   });
 
   test("preflights profiles and stages defaults before deleting original simulators", async () => {
+    const staged = inventory({
+      [tvRuntimeId]: [device(), device(replacementId)],
+    });
     capture
       .mockResolvedValueOnce(inventory())
-      .mockResolvedValueOnce(
-        response(
-          JSON.stringify({
-            createByDefaultForRuntimeVersions: {
-              versionMin: "27.2",
-              versionMax: "99.99",
-            },
-          }),
-        ),
-      )
+      .mockResolvedValueOnce(defaultProfile())
       .mockResolvedValueOnce(response(replacementId))
-      .mockResolvedValueOnce(
-        inventory({ [tvRuntimeId]: [device(), device(replacementId)] }),
-      )
+      .mockResolvedValueOnce(staged)
+      .mockResolvedValueOnce(staged)
       .mockResolvedValueOnce(response());
     await resetSimulators({}, timeout, signal());
     expect(commands().map((args) => args[1])).toEqual([
       "list",
       "json",
       "create",
+      "list",
       "list",
       "delete",
     ]);
@@ -413,16 +418,7 @@ describe("simulator jobs", () => {
   test("keeps every original when a device boots while reset is staging", async () => {
     capture
       .mockResolvedValueOnce(inventory())
-      .mockResolvedValueOnce(
-        response(
-          JSON.stringify({
-            createByDefaultForRuntimeVersions: {
-              versionMin: "27.2",
-              versionMax: "99.99",
-            },
-          }),
-        ),
-      )
+      .mockResolvedValueOnce(defaultProfile())
       .mockResolvedValueOnce(response(replacementId))
       .mockResolvedValueOnce(
         inventory({
@@ -439,4 +435,70 @@ describe("simulator jobs", () => {
     expect(commands().at(-1)).toEqual(["simctl", "delete", replacementId]);
     expect(commands()).not.toContainEqual(["simctl", "delete", simulatorId]);
   });
+
+  test("keeps an original that boots while earlier originals are being deleted", async () => {
+    const secondId = "CCCCCCCC-CCCC-CCCC-CCCC-CCCCCCCCCCCC";
+    const second = device(secondId, { name: "Second Apple TV" });
+    const staged = inventory({
+      [tvRuntimeId]: [device(), second, device(replacementId)],
+    });
+    capture
+      .mockResolvedValueOnce(inventory({ [tvRuntimeId]: [device(), second] }))
+      .mockResolvedValueOnce(defaultProfile())
+      .mockResolvedValueOnce(response(replacementId))
+      .mockResolvedValueOnce(staged)
+      .mockResolvedValueOnce(staged)
+      .mockResolvedValueOnce(response())
+      .mockResolvedValueOnce(
+        inventory({
+          [tvRuntimeId]: [
+            { ...second, state: "Booted" },
+            device(replacementId),
+          ],
+        }),
+      );
+
+    await expect(resetSimulators({}, timeout, signal())).rejects.toThrow(
+      "removed 1 of 2 original simulators: A simulator started during reset",
+    );
+    expect(commands().filter((args) => args[1] === "delete")).toEqual([
+      ["simctl", "delete", simulatorId],
+    ]);
+  });
+
+  test.each(["timeout", "cancellation"])(
+    "cleans up staged defaults after %s during verification",
+    async (failure) => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      try {
+        const startedAt = Date.now();
+        const controller = new AbortController();
+        capture
+          .mockResolvedValueOnce(inventory())
+          .mockResolvedValueOnce(defaultProfile())
+          .mockResolvedValueOnce(response(replacementId))
+          .mockImplementationOnce(async () => {
+            if (failure === "timeout") {
+              vi.setSystemTime(startedAt + timeout);
+              return { ...response(), exitCode: null, timedOut: true };
+            }
+            controller.abort(new Error("Reset cancelled"));
+            return { ...response(), exitCode: null, cancelled: true };
+          })
+          .mockResolvedValueOnce(response());
+
+        await expect(
+          resetSimulators({}, timeout, controller.signal),
+        ).rejects.toThrow(/Original simulators were kept\.$/);
+        expect(commands().filter((args) => args[1] === "delete")).toEqual([
+          ["simctl", "delete", replacementId],
+        ]);
+        const cleanup = capture.mock.lastCall?.[0];
+        expect(cleanup?.timeoutMs).toBeGreaterThan(0);
+        expect(cleanup?.signal.aborted).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 });

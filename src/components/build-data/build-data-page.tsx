@@ -223,6 +223,7 @@ function BuildDataScope({
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyVersion, setHistoryVersion] = useState(0);
   const collectionRef = useRef<DerivedDataCollection | null>(null);
+  const scopeLifecycle = useRef<AbortController | null>(null);
   const collectionRequest = useRef<AbortController | null>(null);
   const historyRequest = useRef<AbortController | null>(null);
   const collectionVersion = useRef(0);
@@ -388,15 +389,17 @@ function BuildDataScope({
     [agentId],
   );
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    scopeLifecycle.current = controller;
+    return () => {
+      controller.abort();
       if (armedDeleteTimer.current) {
         window.clearTimeout(armedDeleteTimer.current);
       }
       historyRequest.current?.abort();
-    },
-    [],
-  );
+    };
+  }, []);
 
   useEffect(() => {
     if (!ready) return;
@@ -456,7 +459,6 @@ function BuildDataScope({
           requestId: createClientId(),
           overrideProtection,
         },
-        { signal, cancelBeforeDispatch: true },
       );
       if (signal?.aborted) return;
       if (version === collectionVersion.current)
@@ -564,7 +566,6 @@ function BuildDataScope({
           }
         }`,
         { collectionId: collection.id, entryId: entry.id, locked },
-        { signal, cancelBeforeDispatch: true },
       );
       if (!signal?.aborted) applyCollection(data.setDerivedDataEntryLocked);
     } catch (value) {
@@ -924,14 +925,13 @@ function BuildDataScope({
                     : "clearHistoryDescription",
                 )}
                 onConfirm={async () => {
-                  const signal = collectionRequest.current?.signal;
+                  const signal = scopeLifecycle.current?.signal;
                   try {
                     await controlPlaneRequest(
                       `mutation ClearDerivedDataDeletionHistory($agentId: ID) {
                         clearDerivedDataDeletionHistory(agentId: $agentId)
                       }`,
                       { agentId },
-                      { signal, cancelBeforeDispatch: true },
                     );
                     if (!signal?.aborted)
                       setHistoryVersion((value) => value + 1);

@@ -115,7 +115,9 @@ export function SimulatorFleetDialog({
             <SearchableSelect
               {...selectorText}
               ariaLabel={t("agent")}
-              disabled={busy || agents.length === 1}
+              disabled={
+                busy || !agents.length || (agents.length === 1 && !!agent)
+              }
               onValueChange={(id) => {
                 setAgentId(id);
                 setRuntimeId("");
@@ -127,7 +129,7 @@ export function SimulatorFleetDialog({
                 keywords: hostname,
               }))}
               placeholder={t("selectAgent")}
-              value={agentId}
+              value={agent?.id ?? ""}
             />
           </div>
           {creating && (

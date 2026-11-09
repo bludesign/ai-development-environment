@@ -185,11 +185,12 @@ async function runJob(
   operation: string,
   fields: string,
   signal: AbortSignal,
+  options?: { cancelBeforeDispatch: true },
 ) {
   const result = await controlPlaneRequest<Record<string, SimulatorJob>>(
     mutation,
     variables,
-    { signal, cancelBeforeDispatch: true },
+    { signal, ...options },
   );
   const initial = Object.values(result)[0];
   if (!initial) throw new Error("The simulator job did not start.");
@@ -212,6 +213,7 @@ export async function refreshSimulatorInventory(
     "SimulatorInventoryJob",
     INVENTORY_FIELDS,
     signal,
+    { cancelBeforeDispatch: true },
   );
   if (!job.simulatorInventory)
     throw new Error(
@@ -233,6 +235,7 @@ export async function inspectSimulator(
     "SimulatorDetailJob",
     DETAIL_FIELDS,
     signal,
+    { cancelBeforeDispatch: true },
   );
   if (!job.simulatorDetails)
     throw new Error(

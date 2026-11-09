@@ -191,10 +191,12 @@ async function scanDeviceSupport(
   signal: AbortSignal,
 ): Promise<{ entries: BuildDataScanEntry[]; warnings: string[] }> {
   const xcode = join(homedir(), "Library", "Developer", "Xcode");
-  const iosOverride = process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY;
+  const iosRoot =
+    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY ||
+    join(xcode, "iOS DeviceSupport");
   const entries: BuildDataScanEntry[] = [];
   const warnings: string[] = [];
-  const roots = new Map<string, string>();
+  const roots: [path: string, platform: string][] = [[iosRoot, "iOS"]];
   const scanned = new Set<string>();
   const suffix = " DeviceSupport";
   const warn = (path: string, error: unknown) => {
@@ -210,22 +212,20 @@ async function scanDeviceSupport(
     for (const child of await readdir(root, { withFileTypes: true })) {
       if (!child.isDirectory() || !child.name.endsWith(suffix)) continue;
       const platform = child.name.slice(0, -suffix.length).trim();
-      if (!platform || (platform === "iOS" && iosOverride)) continue;
-      roots.set(
+      if (!platform || platform === "iOS") continue;
+      roots.push([
         join(root, child.name),
         platform === "xrOS" ? "visionOS" : platform,
-      );
+      ]);
     }
   } catch (error) {
     warn(xcode, error);
   }
-  if (iosOverride) roots.set(iosOverride, "iOS");
-
   for (const [path, platform] of roots) {
     signal.throwIfAborted();
     try {
       const rootPath = await realpath(path);
-      if ((path !== iosOverride && rootPath !== path) || scanned.has(rootPath))
+      if ((path !== iosRoot && rootPath !== path) || scanned.has(rootPath))
         continue;
       scanned.add(rootPath);
       for (const child of await readdir(rootPath, { withFileTypes: true })) {

@@ -48,14 +48,16 @@ export function storedDescriptor(
 ): OperationDescriptor {
   return {
     version: 1,
-    resources: resources.map((resource) => ({
-      kind: resource.kind as OperationResource["kind"],
-      key: resource.key,
-      mode: resource.mode as OperationResource["mode"],
-      ...(resource.agentId ? { agentId: resource.agentId } : {}),
-      ...(resource.codebaseId ? { codebaseId: resource.codebaseId } : {}),
-      ...(resource.path ? { path: resource.path } : {}),
-    })),
+    resources: normalizeOperationResources(
+      resources.map((resource) => ({
+        kind: resource.kind as OperationResource["kind"],
+        key: resource.key,
+        mode: resource.mode as OperationResource["mode"],
+        ...(resource.agentId ? { agentId: resource.agentId } : {}),
+        ...(resource.codebaseId ? { codebaseId: resource.codebaseId } : {}),
+        ...(resource.path ? { path: resource.path } : {}),
+      })),
+    ),
   };
 }
 

@@ -365,6 +365,35 @@ describe("Build Data agent handlers", () => {
     );
   });
 
+  test("scans the legacy iOS Device Support symlink without following discovered symlinks", async () => {
+    delete process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY;
+    const xcode = join(homedir(), "Library", "Developer", "Xcode");
+    const deviceSupport = await realpath(await temporaryDirectory());
+    const outside = await temporaryDirectory();
+    await mkdir(xcode, { recursive: true });
+    await mkdir(join(deviceSupport, "iPhone 26.0"));
+    await mkdir(join(outside, "Unrelated cache"));
+    await symlink(deviceSupport, join(xcode, "iOS DeviceSupport"));
+    await symlink(outside, join(xcode, "tvOS DeviceSupport"));
+    await symlink(outside, join(deviceSupport, "Linked Support"));
+
+    const result = (await scanBuildData(
+      { mode: "DEFAULT", path: null, worktrees: [] },
+      10_000,
+      signal(),
+      log,
+    )) as Awaited<ReturnType<typeof scanBuildData>> & { entries: unknown[] };
+
+    expect(result.entries).toEqual([
+      expect.objectContaining({
+        path: join(deviceSupport, "iPhone 26.0"),
+        rootPath: deviceSupport,
+        kind: "DEVICE_SUPPORT",
+        deviceSupportPlatform: "iOS",
+      }),
+    ]);
+  });
+
   test("calculates allocated usage and only deletes validated direct children", async () => {
     const parent = await temporaryDirectory();
     const root = join(parent, "DerivedData");

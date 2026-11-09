@@ -225,13 +225,19 @@ function SimulatorList({
   const t = useTranslations("simulators");
   const tc = useTranslations("common");
   const locale = useLocale();
+  const eligibleIds = agents
+    .filter((agent) => simulatorAgentSupports(agent, "inventory"))
+    .map(({ id }) => id)
+    .join("\0");
   const [inventories, setInventories] = useState<
     Record<string, SimulatorInventory>
   >({});
   const [agentErrors, setAgentErrors] = useState<
     Record<string, string | undefined>
   >({});
-  const [refreshing, setRefreshing] = useState(true);
+  const [refreshingAgents, setRefreshingAgents] = useState(
+    () => new Set(eligibleIds ? eligibleIds.split("\0") : []),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -258,18 +264,28 @@ function SimulatorList({
   const setSelected = (keys: Set<string>) =>
     setSelection({ result: completedDeletion, keys });
   const operationsBusy = busy || deleting;
-
-  const eligibleIds = agents
-    .filter((agent) => simulatorAgentSupports(agent, "inventory"))
-    .map(({ id }) => id)
-    .join("\0");
+  const refreshing = refreshingAgents.size > 0;
+  const pendingReconciliation =
+    completedDeletion !== reconciledDeletion ? completedDeletion : null;
+  const inventoryPending = (agentId: string) =>
+    refreshingAgents.has(agentId) ||
+    Boolean(pendingReconciliation?.agentIds.includes(agentId));
+  const inventoryReady = (agentId: string) =>
+    Boolean(inventories[agentId]) &&
+    !agentErrors[agentId] &&
+    !inventoryPending(agentId);
+  const refreshableIds = eligibleIds
+    ? eligibleIds.split("\0").filter((id) => !inventoryPending(id))
+    : [];
   const refresh = useCallback(
     async (onlyAgentIds?: string[]) => {
       const agentIds = eligibleIds ? eligibleIds.split("\0") : [];
       const targets = onlyAgentIds
         ? agentIds.filter((id) => onlyAgentIds.includes(id))
         : agentIds;
-      setRefreshing(targets.length > 0 || inventoryRequests.current.size > 0);
+      setRefreshingAgents(
+        new Set([...inventoryRequests.current.keys(), ...targets]),
+      );
       await Promise.all(
         targets.map(async (id) => {
           inventoryRequests.current.get(id)?.abort();
@@ -292,7 +308,7 @@ function SimulatorList({
           } finally {
             if (inventoryRequests.current.get(id) === controller) {
               inventoryRequests.current.delete(id);
-              setRefreshing(inventoryRequests.current.size > 0);
+              setRefreshingAgents(new Set(inventoryRequests.current.keys()));
             }
           }
         }),
@@ -334,8 +350,8 @@ function SimulatorList({
       await action(controller.signal);
     } finally {
       if (!controller.signal.aborted) {
-        await refresh(agentIds);
-        if (!controller.signal.aborted) setBusy(false);
+        void refresh(agentIds);
+        setBusy(false);
       }
     }
   }
@@ -406,10 +422,12 @@ function SimulatorList({
     );
 
   const createAgents = agents.filter(
-    (agent) => simulatorAgentSupports(agent, "create") && inventories[agent.id],
+    (agent) =>
+      simulatorAgentSupports(agent, "create") && inventoryReady(agent.id),
   );
-  const resetAgents = agents.filter((agent) =>
-    simulatorAgentSupports(agent, "reset"),
+  const resetAgents = agents.filter(
+    (agent) =>
+      simulatorAgentSupports(agent, "reset") && inventoryReady(agent.id),
   );
   const noMatchingRows = rows.length > 0 && filtered.length === 0;
   const groups = agents
@@ -422,13 +440,13 @@ function SimulatorList({
     !agentErrors[agent.id] &&
     simulatorAgentSupports(agent, "action") &&
     canDeleteSimulator(simulator);
-  const selectedVisible = new Set(
-    filtered
-      .filter((row) => canDelete(row) && selected.has(simulatorRowKey(row)))
-      .map(simulatorRowKey),
+  const selectedRows = filtered.filter(
+    (row) => canDelete(row) && selected.has(simulatorRowKey(row)),
   );
-  const selectionBusy =
-    operationsBusy || refreshing || completedDeletion !== reconciledDeletion;
+  const selectedVisible = new Set(selectedRows.map(simulatorRowKey));
+  const selectedInventoryPending = selectedRows.some(({ agent }) =>
+    inventoryPending(agent.id),
+  );
 
   function changeFilter(setFilter: (value: string) => void, value: string) {
     setFilter(value);
@@ -440,20 +458,39 @@ function SimulatorList({
     if (editMode) setSelected(new Set());
   }
 
+  function canConfirmDelete(row: SimulatorRow) {
+    return (
+      canDelete(row) &&
+      !inventoryPending(row.agent.id) &&
+      !inventoryRequests.current.has(row.agent.id)
+    );
+  }
+
   async function deleteSelected(targets: Set<string>) {
     const targetGroups = groups
       .map(({ rows }) =>
         rows.filter(
-          (row) => canDelete(row) && targets.has(simulatorRowKey(row)),
+          (row) => targets.has(simulatorRowKey(row)) && canConfirmDelete(row),
         ),
       )
       .filter((rows) => rows.length > 0);
-    if (selectionBusy || targetGroups.flat().length !== targets.size) {
+    if (operationsBusy || targetGroups.flat().length !== targets.size) {
       setError(t("selectionChanged"));
       return;
     }
     setError(null);
     await onDelete(targetGroups);
+  }
+
+  async function deleteOne(target: SimulatorRow) {
+    const row = rows.find(
+      (row) => simulatorRowKey(row) === simulatorRowKey(target),
+    );
+    if (operationsBusy || !row || !canConfirmDelete(row)) {
+      setError(t("selectionChanged"));
+      return;
+    }
+    await runRowAction(row, "DELETE");
   }
 
   return (
@@ -503,8 +540,8 @@ function SimulatorList({
           </SelectContent>
         </Select>
         <Button
-          disabled={selectionBusy || !eligibleIds}
-          onClick={() => void refresh()}
+          disabled={operationsBusy || !refreshableIds.length}
+          onClick={() => void refresh(refreshableIds)}
           variant="outline"
         >
           <RefreshCw className={refreshing ? "animate-spin" : undefined} />{" "}
@@ -518,14 +555,14 @@ function SimulatorList({
           {editMode ? <X /> : <ListFilter />} {t(editMode ? "done" : "edit")}
         </Button>
         <Button
-          disabled={editMode || selectionBusy || !resetAgents.length}
+          disabled={editMode || operationsBusy || !resetAgents.length}
           onClick={() => setDialog("reset")}
           variant="outline"
         >
           {t("reset")}
         </Button>
         <Button
-          disabled={editMode || selectionBusy || !createAgents.length}
+          disabled={editMode || operationsBusy || !createAgents.length}
           onClick={() => setDialog("create")}
         >
           <Plus /> {t("create")}
@@ -538,7 +575,11 @@ function SimulatorList({
             {t("selectedCount", { count: selectedVisible.size })}
           </span>
           <Button
-            disabled={selectionBusy || !selectedVisible.size}
+            disabled={
+              operationsBusy ||
+              selectedInventoryPending ||
+              !selectedVisible.size
+            }
             onClick={() => setBulkDeletion(selectedVisible)}
             size="sm"
             variant="destructive"
@@ -608,7 +649,9 @@ function SimulatorList({
                     {editMode && (
                       <TableCell className="px-2 py-1.5">
                         <SelectAllCheckbox
-                          disabled={selectionBusy}
+                          disabled={
+                            operationsBusy || inventoryPending(agent.id)
+                          }
                           ids={rows.filter(canDelete).map(simulatorRowKey)}
                           label={t("selectAllAgent", { agent: agent.name })}
                           onChange={setSelected}
@@ -630,8 +673,10 @@ function SimulatorList({
                   </TableRow>
                   {rows.map((row) => {
                     const { agent, simulator, deviceTypeName } = row;
+                    const agentBusy =
+                      operationsBusy || inventoryPending(agent.id);
                     const canAct =
-                      !selectionBusy &&
+                      !agentBusy &&
                       !agentErrors[agent.id] &&
                       simulatorAgentSupports(agent, "action");
                     const booted = simulator.state.toLowerCase() === "booted";
@@ -652,7 +697,7 @@ function SimulatorList({
                                 name: simulator.name,
                               })}
                               checked={isSelected}
-                              disabled={selectionBusy || !canDelete(row)}
+                              disabled={agentBusy || !canDelete(row)}
                               onCheckedChange={(checked) => {
                                 const next = new Set(selectedVisible);
                                 if (checked === true) next.add(key);
@@ -727,7 +772,7 @@ function SimulatorList({
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                   <DropdownMenuItem
-                                    disabled={!deletable}
+                                    disabled={!canAct || !deletable}
                                     onSelect={() => setDeletion(row)}
                                     variant="destructive"
                                   >
@@ -791,7 +836,7 @@ function SimulatorList({
             name: deletion.simulator.name,
             agent: deletion.agent.name,
           })}
-          onConfirm={() => runRowAction(deletion, "DELETE")}
+          onConfirm={() => deleteOne(deletion)}
           onOpenChange={(open) => {
             if (!open) setDeletion(null);
           }}

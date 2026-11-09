@@ -518,6 +518,64 @@ describe("durable worktree admission with real SQLite", () => {
       await prisma.operationHolder.count({ where: { state: "HELD" } }),
     ).toBe(0);
   });
+
+  test("claims a legacy simulator deployment and keeps its lowercase lock effective", async () => {
+    const id = "legacy-simulator-deployment";
+    const simulatorId = "AABBCCDD-1122-3344-5566-778899AABBCC";
+    const legacyId = simulatorId.toLowerCase();
+    const resource = {
+      kind: "DESTINATION",
+      mode: "WRITE",
+      agentId: "agent",
+      key: `agent:destination:SIMULATOR:${legacyId}`,
+    };
+    await prisma.agentJob.create({
+      data: {
+        id,
+        agentId: "agent",
+        kind: "ios.build.deploy",
+        status: "QUEUED",
+        idempotencyKey: id,
+        timeoutSeconds: 60,
+        payloadJson: JSON.stringify({
+          deployments: [{ destination: { id: legacyId, type: "SIMULATOR" } }],
+        }),
+        operationResourcesJson: JSON.stringify({
+          version: 1,
+          resources: [resource],
+        }),
+      },
+    });
+    await prisma.operationHolder.create({
+      data: {
+        id: `AGENT_JOB:${id}`,
+        ownerKind: "AGENT_JOB",
+        ownerId: id,
+        resources: { create: { id: `${id}:destination`, ...resource } },
+      },
+    });
+
+    const service = new AgentControlService();
+    await expect(
+      service.claimJob("agent", id, "deployment"),
+    ).resolves.toMatchObject({
+      status: "RUNNING",
+    });
+    const shutdown = await service.createJob({
+      agentId: "agent",
+      kind: "simulators.action",
+      payload: { simulatorId, action: "SHUTDOWN" },
+      idempotencyKey: "shutdown",
+    });
+    await expect(
+      service.claimJob("agent", shutdown.id, "shutdown"),
+    ).rejects.toBeInstanceOf(ResourceBusyError);
+    await service.completeJob("agent", id, "SUCCEEDED", {}, null, "deployment");
+    await expect(
+      service.claimJob("agent", shutdown.id, "shutdown"),
+    ).resolves.toMatchObject({ status: "RUNNING" });
+  });
+
   test("runs two sibling builds and a third worktree mutation together", async () => {
     await enqueue("build-a", "a");
     await enqueue("build-b", "b");
