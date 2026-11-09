@@ -34,7 +34,10 @@ describe("tool API authorization", () => {
     });
     const allowed = await authorizeToolRequest(
       new Request("https://control.example/api/tools/call", {
-        headers: { "x-request-id": "request-1" },
+        headers: {
+          "x-request-id": "request-1",
+          "x-forwarded-for": "192.0.2.1",
+        },
       }),
       "TOOLS_PAGE",
     );
@@ -42,7 +45,8 @@ describe("tool API authorization", () => {
       context: {
         source: "TOOLS_PAGE",
         correlationId: "request-1",
-        caller: "user:user-1@unknown",
+        caller: "user:user-1@192.0.2.1",
+        callerIdentity: ["user", "user-1"],
       },
     });
   });
@@ -80,7 +84,10 @@ describe("tool API authorization", () => {
       "MCP",
     );
     expect(apiKey).toMatchObject({
-      context: { caller: "api-key:key-1@unknown" },
+      context: {
+        caller: "api-key:key-1@unknown",
+        callerIdentity: ["api-key", "key-1"],
+      },
     });
   });
 

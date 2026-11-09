@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
@@ -13,6 +14,11 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import {
+  ActiveAgentProvider,
+  activeAgentStorageKey,
+  useActiveAgent,
+} from "@/components/active-agent/active-agent-provider";
 
 import { BuildDataPage } from "./build-data-page";
 
@@ -128,6 +134,15 @@ function collection(operation: "IDLE" | "SIZING" | "DELETING" = "IDLE") {
   };
 }
 
+function SelectOtherAgent() {
+  const { selectAgent } = useActiveAgent();
+  return (
+    <button onClick={() => selectAgent("other-agent")} type="button">
+      Make other agent active
+    </button>
+  );
+}
+
 describe("BuildDataPage", () => {
   beforeEach(() => {
     Object.defineProperties(HTMLElement.prototype, {
@@ -161,9 +176,245 @@ describe("BuildDataPage", () => {
 
   afterEach(() => {
     cleanup();
+    localStorage.removeItem(activeAgentStorageKey("build-data-scope-test"));
     vi.useRealTimers();
     request.mockReset();
     subscriptions.mockReset();
+  });
+
+  test("follows the active agent for scans, history, and operations while dropping stale results", async () => {
+    const other = { ...agent, id: "other-agent", name: "Other Mac" };
+    const snapshot = collection();
+    const scoped = {
+      ...snapshot,
+      id: "other-collection",
+      progress: {
+        ...snapshot.progress,
+        agents: [{ ...snapshot.progress.agents[0], agent: other }],
+      },
+      entries: [
+        {
+          ...snapshot.entries[2],
+          id: "apple-tv-support",
+          name: "Apple TV symbols",
+          agent: other,
+          deviceSupportPlatform: "tvOS",
+        },
+      ],
+    };
+    let finishOriginal!: (value: {
+      refreshDerivedData: typeof snapshot;
+    }) => void;
+    const original = new Promise<{ refreshDerivedData: typeof snapshot }>(
+      (resolve) => {
+        finishOriginal = resolve;
+      },
+    );
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables, options) => {
+      if (String(query).includes("query ActiveAgentOptions"))
+        return { agents: [agent, other] } as never;
+      if (String(query).includes("mutation RefreshDerivedData")) {
+        if (variables?.agentId === other.id)
+          return { refreshDerivedData: scoped } as never;
+        return original as never;
+      }
+      if (String(query).includes("mutation ClearDerivedDataDeletionHistory"))
+        return { clearDerivedDataDeletionHistory: 1 } as never;
+      if (
+        String(query).includes("query DerivedDataDeletionHistory") &&
+        variables?.agentId === other.id
+      ) {
+        return {
+          derivedDataDeletionHistory: {
+            items: [
+              {
+                id: "deleted-other",
+                agentId: other.id,
+                agentName: other.name,
+                folderName: "Other deleted folder",
+                worktreeId: null,
+                worktreePath: null,
+                source: "USER",
+                entryKind: "PROJECT",
+                deletedAt: new Date(0).toISOString(),
+              },
+            ],
+            nextCursor: null,
+          },
+        } as never;
+      }
+      if (String(query).includes("mutation BuildDataOperation"))
+        return { calculateDerivedDataSizes: scoped } as never;
+      return fallback(query, variables, options);
+    });
+    localStorage.setItem(
+      activeAgentStorageKey("build-data-scope-test"),
+      JSON.stringify({
+        activeAgentId: null,
+        pageAgents: { "build-data": agent.id },
+      }),
+    );
+    render(
+      <ActiveAgentProvider userId="build-data-scope-test">
+        <SelectOtherAgent />
+        <BuildDataPage />
+      </ActiveAgentProvider>,
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation RefreshDerivedData"),
+        expect.objectContaining({ agentId: agent.id }),
+        expect.anything(),
+      ),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Make other agent active" }),
+    );
+    await screen.findByText("Apple TV symbols");
+    expect(screen.getByText("tvOS")).toBeTruthy();
+    await screen.findByText("Other deleted folder");
+    await act(async () => finishOriginal({ refreshDerivedData: snapshot }));
+    expect(screen.queryByText("App-hash")).toBeNull();
+    expect(
+      screen
+        .getByRole("link", { name: "Manage simulators" })
+        .getAttribute("href"),
+    ).toBe("/system/simulators");
+    fireEvent.click(screen.getByRole("button", { name: "Calculate sizes" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation BuildDataOperation"),
+        expect.objectContaining({
+          collectionId: scoped.id,
+          entryIds: ["apple-tv-support"],
+        }),
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Clear history",
+      }),
+    );
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation ClearDerivedDataDeletionHistory"),
+        { agentId: other.id },
+      ),
+    );
+  });
+
+  test("reconciles cleared history when a scan refresh happens before the clear completes", async () => {
+    let finishClear!: () => void;
+    const pendingClear = new Promise<void>((resolve) => {
+      finishClear = resolve;
+    });
+    let history = [
+      {
+        id: "deleted-app",
+        agentId: agent.id,
+        agentName: agent.name,
+        folderName: "Deleted app cache",
+        worktreeId: null,
+        worktreePath: null,
+        source: "USER",
+        entryKind: "PROJECT",
+        deletedAt: new Date(0).toISOString(),
+      },
+    ];
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, ...args) => {
+      if (query.includes("mutation ClearDerivedDataDeletionHistory")) {
+        await pendingClear;
+        history = [];
+        return { clearDerivedDataDeletionHistory: 1 } as never;
+      }
+      if (query.includes("query DerivedDataDeletionHistory"))
+        return {
+          derivedDataDeletionHistory: { items: history, nextCursor: null },
+        } as never;
+      return fallback(query, ...args);
+    });
+
+    render(<BuildDataPage />);
+    await screen.findByText("Deleted app cache");
+    fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "Clear history",
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          query.includes("mutation RefreshDerivedData"),
+        ),
+      ).toHaveLength(2),
+    );
+    await act(async () => finishClear());
+
+    await screen.findByText("No Derived Data has been deleted yet.");
+    expect(screen.queryByText("Deleted app cache")).toBeNull();
+  });
+
+  test("dispatches a confirmed queued deletion to its original collection after switching agents", async () => {
+    const other = { ...agent, id: "other-agent", name: "Other Mac" };
+    const snapshot = collection();
+    let releaseQueue!: () => void;
+    const queue = new Promise<void>((resolve) => {
+      releaseQueue = resolve;
+    });
+    const dispatchDelete = vi.fn();
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables, options) => {
+      if (query.includes("query ActiveAgentOptions"))
+        return { agents: [agent, other] } as never;
+      if (
+        query.includes("mutation RefreshDerivedData") &&
+        variables?.agentId === other.id
+      )
+        return {
+          refreshDerivedData: {
+            ...snapshot,
+            id: "other-collection",
+            entries: [
+              { ...snapshot.entries[0], name: "Other cache", agent: other },
+            ],
+          },
+        } as never;
+      if (query.includes("deleteDerivedDataEntries")) {
+        await queue;
+        if (options?.cancelBeforeDispatch) options.signal?.throwIfAborted();
+        dispatchDelete(variables);
+      }
+      return fallback(query, variables, options);
+    });
+
+    render(
+      <ActiveAgentProvider userId="build-data-scope-test">
+        <SelectOtherAgent />
+        <BuildDataPage />
+      </ActiveAgentProvider>,
+    );
+    await screen.findByText("App-hash");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select App-hash" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Make other agent active" }),
+    );
+    await screen.findByText("Other cache");
+    await act(async () => releaseQueue());
+
+    expect(dispatchDelete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        collectionId: snapshot.id,
+        entryIds: ["entry-1"],
+      }),
+    );
+    expect(screen.queryByText("App-hash")).toBeNull();
   });
 
   test.each(["IDLE", "SIZING", "DELETING"] as const)(

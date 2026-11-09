@@ -10,9 +10,21 @@ export function registerCapabilityActionAdapters(
 ): void {
   for (const action of WORKFLOW_CAPABILITY_ACTIONS) {
     executor.register(action.kind, async (context) => {
+      const { config } = context.node;
+      if (
+        action.kind === "BUILD_DATA_CLEAR_HISTORY" &&
+        Object.hasOwn(config, "agentId")
+      ) {
+        const { agentId } = config;
+        if (typeof agentId !== "string" || !agentId.trim()) {
+          throw new Error(
+            "Build Data history cleanup requires a resolved agent ID when agent scope is configured",
+          );
+        }
+      }
       const args: Record<string, unknown> = {};
       for (const field of action.fields) {
-        const value = context.node.config[field.key];
+        const value = config[field.key];
         if (value !== undefined) args[field.key] = value;
         else if (field.key === "requestId")
           args.requestId = `${context.run.id}:${context.node.id}`;

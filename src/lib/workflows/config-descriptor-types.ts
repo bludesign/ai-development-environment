@@ -78,6 +78,8 @@ export type ConfigFieldDescriptor = {
     equals: unknown;
   };
   options?: ConfigOptionSource;
+  /** A field in prior step outputs that can also identify this resource. */
+  stepOutputSessionField?: string;
   required?: boolean;
   default?: unknown;
   placeholder?: string;
@@ -89,6 +91,8 @@ export type ConfigFieldDescriptor = {
   multiline?: boolean;
   /** Value type for entries in a `record` control. Defaults to strings. */
   recordValueType?: "string" | "json";
+  /** Schema for the literal value of a JSON control. */
+  jsonSchema?: Record<string, unknown>;
   /** Value authoring modes. Undefined → literal only. */
   valueModes?: readonly ConfigValueMode[];
   /**

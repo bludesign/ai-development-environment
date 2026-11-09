@@ -12,8 +12,12 @@ import type { McpOAuthPrincipal } from "@/services/auth/mcp-oauth";
 export type ToolInvocationContext = {
   /** Server-authenticated managed run scope, never supplied by tool arguments. */
   runId?: string;
+  runAgentId?: string;
+  workflowRunId?: string;
   authentication?: "apiKey" | "oauth" | "session" | "agent";
   oauthPrincipal?: McpOAuthPrincipal;
+  /** Server-authenticated caller identity, independent of request metadata. */
+  callerIdentity?: readonly string[];
   caller: string;
   correlationId: string;
   source: "MCP" | "TOOLS_PAGE" | "WORKFLOW";

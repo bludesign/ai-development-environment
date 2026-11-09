@@ -282,6 +282,12 @@ export function workflowTriggerResourceLink(
       nested(record(session.steps), "trigger", "id"),
     );
   }
+  if (kind === "SIMULATOR_OPERATION_RESULT") {
+    return resourceLink(
+      "AGENT_JOB",
+      nested(session, "simulatorOperation", "jobId"),
+    );
+  }
   if (
     kind === "AGENT_CONNECTION" ||
     kind === "AGENT_DISK_REPORT" ||

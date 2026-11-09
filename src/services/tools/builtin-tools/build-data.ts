@@ -9,6 +9,8 @@ import {
 } from "../builtin-tools";
 import { serviceTool } from "./service-tool";
 
+const agentId = z.string().min(1).nullable().optional();
+
 export function createBuildDataToolGroup(
   service: BuildDataService,
 ): BuiltInToolGroup {
@@ -30,25 +32,30 @@ export function createBuildDataToolGroup(
       serviceTool({
         name: "get_build_data_deletion_history",
         title: "Get build data deletion history",
-        description: "Get paginated build-data cleanup history.",
+        description:
+          "Get paginated build-data cleanup history for one agent or the fleet.",
         inputSchema: z.object({
           first: z.number().int().min(1).max(500).default(100),
           after: z.string().nullable().optional(),
+          agentId,
         }),
         service,
         method: "history",
-        arguments: ({ first, after }) => [first, after],
+        arguments: ({ first, after, agentId }) => [first, after, agentId],
         resultKey: "page",
       }),
       serviceTool({
         name: "refresh_build_data",
         title: "Refresh build data",
         description:
-          "Collect current derived-data entries from enrolled agents.",
-        inputSchema: z.object({ requestId: z.string().nullable().optional() }),
+          "Collect current build-data entries from one agent or the fleet.",
+        inputSchema: z.object({
+          requestId: z.string().nullable().optional(),
+          agentId,
+        }),
         service,
         method: "refresh",
-        arguments: ({ requestId }) => [requestId],
+        arguments: ({ requestId, agentId }) => [requestId, agentId],
         resultKey: "collection",
         annotations: WRITE_ANNOTATIONS,
       }),
@@ -96,11 +103,12 @@ export function createBuildDataToolGroup(
       serviceTool({
         name: "clear_build_data_history",
         title: "Clear build data history",
-        description: "Permanently clear build-data deletion history.",
-        inputSchema: z.object({}),
+        description:
+          "Permanently clear build-data deletion history for one agent or the fleet.",
+        inputSchema: z.object({ agentId }),
         service,
         method: "clearHistory",
-        arguments: () => [],
+        arguments: ({ agentId }) => [agentId],
         resultKey: "count",
         annotations: DESTRUCTIVE_ANNOTATIONS,
       }),

@@ -82,6 +82,27 @@ function registry() {
 }
 
 describe("built-in tool registry", () => {
+  test("forwards the optional agent for build data tools", async () => {
+    const refresh = vi.fn();
+    const history = vi.fn();
+    const clearHistory = vi.fn();
+    const tools = createBuiltInToolRegistry({
+      codebaseTools: {} as never,
+      buildData: { refresh, history, clearHistory } as never,
+    });
+    for (const agentId of [undefined, "studio"]) {
+      await tools.callByName("refresh_build_data", {
+        requestId: "request-1",
+        agentId,
+      });
+      await tools.callByName("get_build_data_deletion_history", { agentId });
+      await tools.callByName("clear_build_data_history", { agentId });
+      expect(refresh).toHaveBeenLastCalledWith("request-1", agentId);
+      expect(history).toHaveBeenLastCalledWith(100, undefined, agentId);
+      expect(clearHistory).toHaveBeenLastCalledWith(agentId);
+    }
+  });
+
   test("projects the complete nested catalog with globally unique names", () => {
     const catalog = registry().value.catalog();
     expect(catalog.map(({ id }) => id)).toEqual([
@@ -188,6 +209,7 @@ describe("built-in tool registry", () => {
       gitlab: placeholder,
       skills: placeholder,
       buildData: placeholder,
+      simulators: placeholder,
       tailscale: placeholder,
       signingAssets: placeholder,
       iosDevices: placeholder,
@@ -213,6 +235,7 @@ describe("built-in tool registry", () => {
         "builtin:gitlab",
         "builtin:skills",
         "builtin:build-data",
+        "builtin:simulators",
         "builtin:tailscale",
         "builtin:signing-assets",
         "builtin:ios-devices",
@@ -224,7 +247,7 @@ describe("built-in tool registry", () => {
       ]),
     );
     const tools = expanded.definitions();
-    expect(tools).toHaveLength(428);
+    expect(tools).toHaveLength(445);
     expect(new Set(tools.map(({ name }) => name)).size).toBe(tools.length);
     expect(tools.every(({ annotations }) => Boolean(annotations))).toBe(true);
   });
@@ -248,6 +271,7 @@ describe("built-in tool registry", () => {
       gitlab: placeholder,
       skills: placeholder,
       buildData: placeholder,
+      simulators: placeholder,
       tailscale: placeholder,
       signingAssets: placeholder,
       iosDevices: placeholder,
@@ -273,10 +297,10 @@ describe("built-in tool registry", () => {
       toolAdministration: placeholder,
     };
     const complete = createBuiltInToolRegistry(services);
-    expect(complete.definitions()).toHaveLength(560);
-    expect(complete.catalog()).toHaveLength(30);
+    expect(complete.definitions()).toHaveLength(577);
+    expect(complete.catalog()).toHaveLength(31);
     expect(new Set(complete.definitions().map(({ name }) => name)).size).toBe(
-      560,
+      577,
     );
     expect(complete.catalog().map(({ id }) => id)).toEqual(
       expect.arrayContaining([

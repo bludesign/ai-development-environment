@@ -267,12 +267,14 @@ export const WORKFLOW_CAPABILITY_ACTIONS = [
       field("requestId", "text", true),
     ],
   ),
-  action(
-    "BUILD_DATA_CLEAR_HISTORY",
-    "Build Data",
-    "clear_build_data_history",
-    [],
-  ),
+  action("BUILD_DATA_CLEAR_HISTORY", "Build Data", "clear_build_data_history", [
+    {
+      ...field("agentId", "resource"),
+      label: "Agent",
+      options: { kind: "resource", resource: "agent", sessionPath: "agent.id" },
+      help: "Leave unset to clear history across all agents. A binding must resolve to an agent ID.",
+    },
+  ]),
   action(
     "GITLAB_DELETE_AUTO_RETRY",
     "GitLab",

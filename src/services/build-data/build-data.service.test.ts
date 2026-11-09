@@ -247,6 +247,117 @@ describe("BuildDataService", () => {
     expect(page.nextCursor).toBe("new");
   });
 
+  test("scopes history at the cursor and data queries and clears only the selected agent", async () => {
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const findUnique = vi
+      .fn()
+      .mockResolvedValue({ id: "cursor", deletedAt: new Date() });
+    const findMany = vi.fn().mockResolvedValue([]);
+    getPrismaClient.mockResolvedValue({
+      buildDataDeletionHistory: { deleteMany, findUnique, findMany },
+    });
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+    } as unknown as AgentControlService);
+
+    await service.history(3, "cursor", "agent-1");
+    expect(findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "cursor", agentId: "agent-1" } }),
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        take: 4,
+        where: expect.objectContaining({
+          agentId: "agent-1",
+          OR: expect.any(Array),
+        }),
+      }),
+    );
+    expect(await service.clearHistory("agent-1")).toBe(1);
+    expect(deleteMany).toHaveBeenLastCalledWith({
+      where: { agentId: "agent-1" },
+    });
+  });
+
+  test("labels legacy Device Support entries as iOS and preserves reported platforms", async () => {
+    const collection = collectionWithOperation();
+    collection.jobs[0]!.resultJson = JSON.stringify({
+      entries: [
+        {
+          path: "/Xcode/iOS DeviceSupport/26.2",
+          rootPath: "/Xcode/iOS DeviceSupport",
+          name: "26.2",
+          kind: "DEVICE_SUPPORT",
+          workspacePath: null,
+        },
+        {
+          path: "/Xcode/tvOS DeviceSupport/26.2",
+          rootPath: "/Xcode/tvOS DeviceSupport",
+          name: "26.2",
+          kind: "DEVICE_SUPPORT",
+          deviceSupportPlatform: "tvOS",
+          workspacePath: null,
+        },
+      ],
+      warnings: [],
+    });
+    getPrismaClient.mockResolvedValue({
+      ...unlockedEntries(),
+      buildDataCollection: {
+        findUnique: vi.fn().mockResolvedValue(collection),
+      },
+      buildDataDeletionHistory: { deleteMany: vi.fn() },
+      worktree: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+    } as unknown as AgentControlService);
+
+    const result = await service.getCollection(collection.id);
+    expect(
+      result?.entries.map((entry) => entry.deviceSupportPlatform).sort(),
+    ).toEqual(["iOS", "tvOS"]);
+  });
+
+  test("scopes a new scan to one agent and rejects reuse of its request ID with a different scope", async () => {
+    const collection = collectionWithOperation();
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(collection)
+      .mockResolvedValueOnce(collection)
+      .mockResolvedValueOnce({ agentId: "agent-1" });
+    const create = vi.fn().mockResolvedValue({ agentId: "agent-1" });
+    const listAgents = vi
+      .fn()
+      .mockResolvedValue([agent(), { ...agent(), id: "agent-2" }]);
+    getPrismaClient.mockResolvedValue({
+      ...unlockedEntries(),
+      buildDataDeletionHistory: { deleteMany: vi.fn() },
+      buildDataCollection: { findUnique, create },
+      worktree: { findMany: vi.fn().mockResolvedValue([]) },
+    });
+    const service = new BuildDataService({
+      registerCompletionHandler: vi.fn(),
+      listAgents,
+    } as unknown as AgentControlService);
+
+    await service.refresh("collection-1", "agent-1");
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          agentId: "agent-1",
+          agents: {
+            create: [{ agentId: "agent-1", initialStatus: "QUEUING" }],
+          },
+        }),
+      }),
+    );
+    await expect(service.refresh("collection-1", "agent-2")).rejects.toThrow(
+      "different agent scope",
+    );
+  });
+
   test("rejects operations when an agent went offline after its scan", async () => {
     const collection = collectionWithOperation();
     const prisma = {

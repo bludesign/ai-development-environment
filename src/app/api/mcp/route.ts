@@ -69,7 +69,12 @@ async function handle(request: Request): Promise<Response> {
         { status: 403 },
       );
     }
-    context = { ...authorization.context, runId };
+    context = {
+      ...authorization.context,
+      runId,
+      runAgentId: authorization.agentId,
+      workflowRunId: snapshot.workflowRunId,
+    };
     allowedToolNames = new Set(snapshot.toolNames);
     toolSnapshot = snapshot.snapshot;
     runRepositoryId = snapshot.repositoryId;

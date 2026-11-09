@@ -55,6 +55,7 @@ export type BreadcrumbLabelKey =
   | "runs"
   | "sessions"
   | "settings"
+  | "simulators"
   | "skills"
   | "status"
   | "scriptStorage"
@@ -133,6 +134,7 @@ const STATIC_SEGMENTS: Record<string, BreadcrumbLabelKey> = {
   runs: "runs",
   sessions: "sessions",
   settings: "settings",
+  simulators: "simulators",
   storage: "scriptStorage",
   skills: "skills",
   status: "status",
@@ -242,6 +244,7 @@ const ROUTABLE_STATIC_PATHS = new Set([
   "/debugging/sse/new",
   "/debugging/sse/storage",
   "/system/settings",
+  "/system/simulators",
   "/system/status",
   "/system/tailscale",
   "/ai/skills",
@@ -283,6 +286,7 @@ const ROUTABLE_DYNAMIC_PATHS = [
 // repository slugs in GitHub URLs remain readable while the PR title loads.
 const TITLE_PATH_PATTERNS = [
   ...ROUTABLE_DYNAMIC_PATHS,
+  /^\/system\/simulators\/[^/]+(?:\/[^/]+)?$/,
   /^\/dashboard\/builds\/configurations\/[^/]+$/,
   /^\/dashboard\/codebases\/repositories\/[^/]+$/,
   /^\/dashboard\/commands\/(?!new$|runs$)[^/]+$/,

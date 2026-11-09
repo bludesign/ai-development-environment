@@ -287,7 +287,10 @@ function ResourceField({
         return (
           path === resourceSessionPath ||
           (path.startsWith(`${namespace}.`) &&
-            path.endsWith(`.${sessionField}`))
+            path.endsWith(`.${sessionField}`)) ||
+          (field.stepOutputSessionField !== undefined &&
+            /^steps\.[\w-]+\.output\.([\w-]+)$/.exec(path)?.[1] ===
+              field.stepOutputSessionField)
         );
       })
     : sessionPaths;

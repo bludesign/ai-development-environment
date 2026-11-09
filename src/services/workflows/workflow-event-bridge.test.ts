@@ -17,6 +17,92 @@ import type { DiskSpaceChangedPayload } from "@/services/disk-space";
 
 import { WorkflowEventBridge } from "./workflow-event-bridge";
 
+test("simulator completion events are scoped to terminal app and MCP operations", async () => {
+  const record = vi.fn().mockResolvedValue({});
+  const registerCompletionObserver = vi.fn();
+  const bridge = new WorkflowEventBridge(
+    { record } as never,
+    { registerCompletionObserver } as never,
+  );
+  bridge.start();
+  try {
+    const [observe] = registerCompletionObserver.mock.calls[0]!;
+    const simulatorId = "01234567-89AB-CDEF-0123-456789ABCDEF";
+    const job = {
+      id: "delete-1",
+      agentId: "mac",
+      kind: "simulators.action",
+      status: "SUCCEEDED",
+      idempotencyKey: "simulator-automation:mcp:request:target",
+      payloadJson: JSON.stringify({ simulatorId, action: "DELETE" }),
+      resultJson: '{"completed":true}',
+      error: null,
+      timeoutSeconds: 120,
+    };
+    await observe({ ...job, kind: "simulators.inventory" });
+    await observe({ ...job, kind: "simulators.inspect" });
+    await observe({ ...job, status: "CANCELLING" });
+    await observe({
+      ...job,
+      idempotencyKey: "simulator-automation:workflow:request",
+    });
+    expect(record).not.toHaveBeenCalled();
+    await observe(job);
+    await observe(job);
+    await observe({ ...job, id: "delete-2" });
+    await observe({
+      ...job,
+      id: "reset-job",
+      kind: "simulators.reset",
+      idempotencyKey: "simulators.reset:ui-request",
+      payloadJson: "{}",
+      status: "CANCELLED",
+      error: "Reset cancelled",
+    });
+    expect(record.mock.calls.map(([event]) => event.dedupeKey)).toEqual([
+      "simulator-operation:delete-1:SUCCEEDED",
+      "simulator-operation:delete-1:SUCCEEDED",
+      "simulator-operation:delete-2:SUCCEEDED",
+      "simulator-operation:reset-job:CANCELLED",
+    ]);
+    expect(record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "SIMULATOR_OPERATION_RESULT",
+        subjectKey: "mac",
+        payload: expect.objectContaining({
+          sessionData: {
+            agent: { id: "mac" },
+            simulator: { id: simulatorId },
+            simulatorOperation: {
+              jobId: "delete-1",
+              operation: "DELETE",
+              status: "SUCCEEDED",
+              error: null,
+            },
+          },
+        }),
+      }),
+    );
+    expect(record).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          sessionData: {
+            agent: { id: "mac" },
+            simulatorOperation: {
+              jobId: "reset-job",
+              operation: "RESET",
+              status: "CANCELLED",
+              error: "Reset cancelled",
+            },
+          },
+        }),
+      }),
+    );
+  } finally {
+    bridge.stop();
+  }
+});
+
 function worktree(baseBehind: number | null) {
   return {
     id: "worktree-1",

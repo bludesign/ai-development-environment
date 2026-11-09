@@ -25,6 +25,7 @@ import type { ModelCostsService } from "@/services/model-costs";
 import type { NotificationsService } from "@/services/notifications";
 import type { PollingService } from "@/services/polling";
 import type { SigningAssetsService } from "@/services/signing-assets";
+import type { SimulatorsService } from "@/services/simulators/simulators.service";
 import type { SkillsService } from "@/services/skills";
 import type { SystemStatusService } from "@/services/system-status";
 import type { PushNotificationsService } from "@/services/push-notifications";
@@ -62,6 +63,7 @@ import { createNotificationToolGroup } from "./builtin-tools/notifications";
 import { createRunToolGroup } from "./builtin-tools/runs";
 import { createRepositoryTransferToolGroup } from "./builtin-tools/repository-transfer";
 import { createSigningAssetToolGroup } from "./builtin-tools/signing-assets";
+import { createSimulatorToolGroup } from "./builtin-tools/simulators";
 import { createSkillToolGroup } from "./builtin-tools/skills";
 import { createSystemToolGroup } from "./builtin-tools/system";
 import { createUsageCostToolGroup } from "./builtin-tools/usage-costs";
@@ -70,7 +72,10 @@ import { createWorktreeToolGroup } from "./builtin-tools/worktrees";
 import { createToolAdministrationGroup } from "./builtin-tools/tool-administration";
 import type { ToolAdministrationCallbacks } from "./builtin-tools/tool-administration";
 import { createTailscaleToolGroup } from "./builtin-tools/tailscale";
-import type { ToolCallAuditService } from "./tool-call-audit.service";
+import type {
+  ToolCallAuditService,
+  ToolInvocationContext,
+} from "./tool-call-audit.service";
 import { createWorktreeAutomationToolGroup } from "./builtin-tools/worktree-automations";
 import { createSseToolGroup } from "./builtin-tools/sse";
 import type { ToolAnnotations, ToolCatalogGroup } from "./types";
@@ -120,7 +125,7 @@ export type BuiltInToolDefinition = {
   inputSchema: z.ZodType;
   outputSchema: z.ZodType;
   annotations: ToolAnnotations;
-  invoke: (input: unknown) => Promise<unknown>;
+  invoke: (input: unknown, context?: ToolInvocationContext) => Promise<unknown>;
 };
 
 export type BuiltInToolGroup = {
@@ -161,6 +166,7 @@ export type BuiltInToolServices = {
   notifications?: NotificationsService;
   polling?: PollingService;
   signingAssets?: SigningAssetsService;
+  simulators?: SimulatorsService;
   skills?: SkillsService;
   systemStatus?: SystemStatusService;
   sse?: SseService;
@@ -185,7 +191,10 @@ export function defineTool<I extends z.ZodType, O extends z.ZodType>(input: {
   inputSchema: I;
   outputSchema: O;
   annotations?: ToolAnnotations;
-  handler: (value: z.output<I>) => Promise<unknown> | unknown;
+  handler: (
+    value: z.output<I>,
+    context?: ToolInvocationContext,
+  ) => Promise<unknown> | unknown;
 }): BuiltInToolDefinition {
   return {
     name: input.name,
@@ -194,9 +203,9 @@ export function defineTool<I extends z.ZodType, O extends z.ZodType>(input: {
     inputSchema: input.inputSchema,
     outputSchema: input.outputSchema,
     annotations: input.annotations ?? READ_ONLY_ANNOTATIONS,
-    invoke: async (value) => {
+    invoke: async (value, context) => {
       const parsed = input.inputSchema.parse(value) as z.output<I>;
-      return input.outputSchema.parse(await input.handler(parsed));
+      return input.outputSchema.parse(await input.handler(parsed, context));
     },
   };
 }
@@ -303,18 +312,27 @@ export class BuiltInToolRegistry {
     return this.byName.get(name)?.groupId ?? null;
   }
 
-  async call(groupId: string, name: string, args: unknown) {
+  async call(
+    groupId: string,
+    name: string,
+    args: unknown,
+    context?: ToolInvocationContext,
+  ) {
     const indexed = this.byName.get(name);
     if (!indexed || indexed.groupId !== groupId) {
       throw new Error(`Unknown built-in tool: ${name}`);
     }
-    return toolResult(await indexed.definition.invoke(args));
+    return toolResult(await indexed.definition.invoke(args, context));
   }
 
-  async callByName(name: string, args: unknown) {
+  async callByName(
+    name: string,
+    args: unknown,
+    context?: ToolInvocationContext,
+  ) {
     const indexed = this.byName.get(name);
     if (!indexed) throw new Error(`Unknown built-in tool: ${name}`);
-    return toolResult(await indexed.definition.invoke(args));
+    return toolResult(await indexed.definition.invoke(args, context));
   }
 }
 
@@ -358,6 +376,8 @@ export function createBuiltInToolRegistry(
     groups.push(createTailscaleToolGroup(services.tailscale));
   if (services.signingAssets)
     groups.push(createSigningAssetToolGroup(services.signingAssets));
+  if (services.simulators)
+    groups.push(createSimulatorToolGroup(services.simulators));
   if (services.iosDevices)
     groups.push(createIosDeviceToolGroup(services.iosDevices));
   if (services.notifications)

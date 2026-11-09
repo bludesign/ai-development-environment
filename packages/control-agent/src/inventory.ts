@@ -12,6 +12,7 @@ import {
 
 import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contract";
 import { BUILD_DATA_JOB_KINDS } from "@ai-development-environment/agent-contract/build-data";
+import { SIMULATOR_JOB_KINDS } from "@ai-development-environment/agent-contract/simulators";
 import {
   CODEBASE_JOB_KINDS,
   CODEBASE_DEFAULT_BRANCHES_CAPABILITY,
@@ -61,6 +62,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
 const MACOS_AGENT_CAPABILITIES = [
   WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   ...BUILD_DATA_JOB_KINDS,
+  ...SIMULATOR_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
   // `atos` ships with Xcode, so only a Mac can name crash frames.

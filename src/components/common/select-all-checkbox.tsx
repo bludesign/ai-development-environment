@@ -9,11 +9,13 @@ import { Checkbox } from "@/components/ui/checkbox";
  * grows a selection column agrees on what a half-selected group looks like.
  */
 export function SelectAllCheckbox({
+  disabled = false,
   ids,
   label,
   onChange,
   selected,
 }: {
+  disabled?: boolean;
   ids: string[];
   label: string;
   onChange: (next: Set<string>) => void;
@@ -25,7 +27,7 @@ export function SelectAllCheckbox({
     <Checkbox
       aria-label={label}
       checked={all ? true : some ? "indeterminate" : false}
-      disabled={!ids.length}
+      disabled={disabled || !ids.length}
       onCheckedChange={(checked) => {
         const next = new Set(selected);
         /* An indeterminate box reports its next state as `true`, so a partly

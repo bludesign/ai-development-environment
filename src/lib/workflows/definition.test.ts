@@ -55,6 +55,48 @@ function definition(nodes: WorkflowNodeDefinition[]): WorkflowDefinition {
 }
 
 describe("workflow definition validation", () => {
+  test("binds a simulator inspection's agent and UUID into boot and launch steps", () => {
+    const inspect = node("inspect", "SIMULATOR_INSPECT");
+    inspect.config = {
+      agentId: "mac",
+      simulatorId: "01234567-89AB-CDEF-0123-456789ABCDEF",
+    };
+    const boot = node("boot", "SIMULATOR_DEVICE_ACTION");
+    boot.config = {
+      agentId: { source: "SESSION", path: "steps.inspect.output.agentId" },
+      simulatorId: {
+        source: "SESSION",
+        path: "steps.inspect.output.simulatorId",
+      },
+      action: "BOOT",
+    };
+    const launch = node("launch", "SIMULATOR_APP_ACTION");
+    launch.config = {
+      agentId: { source: "SESSION", path: "steps.boot.output.agentId" },
+      simulatorId: { source: "SESSION", path: "steps.boot.output.simulatorId" },
+      action: "LAUNCH_APP",
+      bundleId: "example.app",
+    };
+    const value = definition([inspect, boot, launch]);
+    value.edges.push(
+      {
+        id: "inspect-boot",
+        source: "inspect",
+        target: "boot",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+      {
+        id: "boot-launch",
+        source: "boot",
+        target: "launch",
+        sourceHandle: "success",
+        targetHandle: "input",
+      },
+    );
+    expect(validateWorkflowDefinition(value).diagnostics).toEqual([]);
+  });
+
   test("accepts a connected versioned DAG", () => {
     const result = validateWorkflowDefinition(definition([node("load")]));
     expect(result.definition?.format).toBe("aide.workflow");

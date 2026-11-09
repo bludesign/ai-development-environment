@@ -59,6 +59,8 @@ function completedJob(kind: string) {
     buildDataCollectionId: null,
     kind,
     payloadJson: "{}",
+    idempotencyKey: "job-1",
+    timeoutSeconds: 120,
     status: "SUCCEEDED",
     resultJson: "{}",
     error: null,

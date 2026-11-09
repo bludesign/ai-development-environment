@@ -15,6 +15,8 @@ export type RouteEntry = {
   readyGraphqlOperation?: string;
   /** One of these terminal-state texts must render after the ready operation finishes. */
   readyTexts?: string[];
+  /** Accessible name of a control enabled once the page has finished loading. */
+  readyEnabledButton?: string;
   /**
    * JavaScript evaluated before any of the page's own scripts run. Only for pages whose data
    * depends on an id the client mints at random; see the `usage` route.
@@ -54,7 +56,22 @@ export type RouteEntry = {
   desktopOnly?: boolean;
   /** Expand two independent Claude child conversations in the session Agents card. */
   sessionAgents?: boolean;
+  /** Show simulator Edit mode with one agent's eligible devices selected. */
+  simulatorSelection?: boolean;
+  /** Show simulator automation entries in the tool catalog or workflow palette. */
+  simulatorAutomation?: "tools" | "workflows";
 };
+
+const simulatorInventoryCapture = {
+  path: "/system/simulators",
+  readyGraphqlOperation: "RefreshSimulatorInventory",
+  readyTexts: ["QA iPhone 18 Pro"],
+  readyEnabledButton: "Create simulator",
+  initScript: `Object.defineProperty(crypto, "randomUUID", {
+    configurable: true,
+    value: () => "${ids.simulators.inventoryRequest}",
+  });`,
+} satisfies Omit<RouteEntry, "name">;
 
 export const routes: RouteEntry[] = [
   {
@@ -366,6 +383,49 @@ export const routes: RouteEntry[] = [
     });`,
   },
   {
+    name: "build-data-device-support",
+    path: "/system/build-data",
+    readyTexts: ["26.2 (23K50)"],
+    scrollTo:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Device Support"))',
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.buildDataCollections.captured}",
+    });`,
+  },
+  {
+    ...simulatorInventoryCapture,
+    name: "simulators",
+  },
+  {
+    ...simulatorInventoryCapture,
+    name: "simulators-edit",
+    simulatorSelection: true,
+  },
+  {
+    name: "simulator-detail",
+    path: `/system/simulators/${ids.agents.studio}/${ids.simulators.ios}`,
+    readyGraphqlOperation: "InspectSimulator",
+    readyTexts: ["Acme Weather"],
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.detailRequest}",
+    });`,
+  },
+  {
+    name: "simulator-detail-unavailable",
+    path: `/system/simulators/${ids.agents.ci}/${ids.simulators.legacyIOS}`,
+    readyGraphqlOperation: "InspectSimulator",
+    readyTexts: [
+      "The simulator runtime is unavailable, so installed apps can’t be loaded.",
+    ],
+    readyEnabledButton: "Delete simulator",
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.detailRequest}",
+    });`,
+  },
+  {
     name: "tailscale",
     path: "/system/tailscale",
     readyGraphqlOperation: "TailscaleServeOverview",
@@ -532,6 +592,12 @@ export const routes: RouteEntry[] = [
   // Tools
   { name: "tools", path: "/system/tools", readyTexts: ["Core Tools"] },
   {
+    name: "tools-simulators",
+    path: "/system/tools",
+    readyTexts: ["Core Tools"],
+    simulatorAutomation: "tools",
+  },
+  {
     name: "tools-catalog-export",
     path: "/system/tools",
     readyTexts: ["Core Tools"],
@@ -566,6 +632,11 @@ export const routes: RouteEntry[] = [
   {
     name: "workflow-edit",
     path: `/dashboard/workflows/${ids.workflows.prReview}/edit`,
+  },
+  {
+    name: "workflow-simulators",
+    path: `/dashboard/workflows/${ids.workflows.prReview}/edit`,
+    simulatorAutomation: "workflows",
   },
   { name: "workflow-new", path: "/dashboard/workflows/new" },
   {

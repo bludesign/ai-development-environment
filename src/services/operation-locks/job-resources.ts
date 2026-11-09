@@ -5,6 +5,15 @@ import {
   type OperationResource,
 } from "@ai-development-environment/agent-contract/operation-resources";
 import { WORKTREE_POST_MERGE_SWITCH_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_INSPECT_JOB_KIND,
+  SIMULATOR_INVENTORY_JOB_KIND,
+  SIMULATOR_RESET_JOB_KIND,
+  simulatorActionPayload,
+  simulatorInspectPayload,
+} from "@ai-development-environment/agent-contract/simulators";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import { posix, win32 } from "node:path";
@@ -74,6 +83,42 @@ export async function jobOperationDescriptor(
       resources: input.codebaseId || command ? barrier() : [],
     };
   const resources: OperationResource[] = [];
+  if (input.kind === SIMULATOR_RESET_JOB_KIND)
+    return { version: 1, resources: barrier() };
+  if (
+    input.kind === SIMULATOR_INVENTORY_JOB_KIND ||
+    input.kind === SIMULATOR_CREATE_JOB_KIND ||
+    input.kind === SIMULATOR_INSPECT_JOB_KIND ||
+    input.kind === SIMULATOR_ACTION_JOB_KIND
+  ) {
+    const action =
+      input.kind === SIMULATOR_ACTION_JOB_KIND
+        ? simulatorActionPayload(p)
+        : null;
+    const changesRoster =
+      input.kind === SIMULATOR_CREATE_JOB_KIND ||
+      action?.action === "CLONE" ||
+      action?.action === "DELETE";
+    resources.push({
+      kind: "DESTINATION",
+      key: `${input.agentId}:simulator-set`,
+      mode: changesRoster ? "WRITE" : "READ",
+      ...context,
+    });
+    const simulatorId =
+      action?.simulatorId ??
+      (input.kind === SIMULATOR_INSPECT_JOB_KIND
+        ? simulatorInspectPayload(p).simulatorId
+        : null);
+    if (simulatorId)
+      resources.push({
+        kind: "DESTINATION",
+        key: `${input.agentId}:destination:SIMULATOR:${simulatorId}`,
+        mode: !action || action.action.startsWith("OPEN_") ? "READ" : "WRITE",
+        ...context,
+      });
+    return { version: 1, resources: normalizeOperationResources(resources) };
+  }
   if (input.kind === "jira.branch.generate") return { version: 1, resources };
   if (
     !input.codebaseId &&

@@ -271,6 +271,31 @@ const expansionStep = (
     ...facts,
   });
 
+const simulatorStep = (
+  kind: WorkflowStepKind,
+  label: string,
+  description: string,
+  resultFields: string[],
+  mutatesExternal = false,
+) =>
+  step(
+    kind,
+    "Simulators",
+    label,
+    "AGENT",
+    [],
+    [
+      "steps.<stepId>.output",
+      ...resultFields.map((field) => `steps.<stepId>.output.${field}`),
+    ],
+    {
+      description,
+      details:
+        "Uses the enrolled Mac's simulator service and waits for its agent job results. Bind inputs to earlier step outputs to pass agent and simulator IDs through a workflow.",
+      mutatesExternal,
+    },
+  );
+
 const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
   expansionStep(
     "COMMAND_RERUN",
@@ -371,6 +396,73 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
     "Set build-data lock",
     ["buildData.id"],
     ["buildData.*"],
+  ),
+  simulatorStep(
+    "SIMULATOR_INVENTORY",
+    "List simulators",
+    "Collect simulators, runtimes, and device types from an agent.",
+    [
+      "jobId",
+      "agentId",
+      "inventory",
+      "inventory.simulators",
+      "inventory.runtimes",
+    ],
+  ),
+  simulatorStep(
+    "SIMULATOR_INSPECT",
+    "Inspect simulator",
+    "Load a simulator's details and installed apps.",
+    [
+      "jobId",
+      "agentId",
+      "simulatorId",
+      "details",
+      "details.simulator",
+      "details.apps",
+    ],
+  ),
+  simulatorStep(
+    "SIMULATOR_CREATE",
+    "Create simulator",
+    "Create a device for a runtime and device type, then return its UUID.",
+    ["jobId", "agentId", "simulatorId"],
+    true,
+  ),
+  simulatorStep(
+    "SIMULATOR_DEVICE_ACTION",
+    "Control simulator",
+    "Boot, shut down, reboot, rename, clone, or erase a simulator.",
+    ["jobId", "agentId", "simulatorId"],
+    true,
+  ),
+  simulatorStep(
+    "SIMULATOR_APP_ACTION",
+    "Control simulator app",
+    "Launch or terminate an installed app by its bundle ID.",
+    ["jobId", "agentId", "simulatorId", "bundleId"],
+    true,
+  ),
+  simulatorStep(
+    "SIMULATOR_OPEN_FOLDER",
+    "Open simulator folder",
+    "Open device data, an app bundle, or app data in Finder on the agent.",
+    ["jobId", "agentId", "simulatorId", "bundleId"],
+    true,
+  ),
+  simulatorStep(
+    "SIMULATOR_DELETE",
+    "Delete selected simulators",
+    "Delete selected devices by agent and UUID, with a result for each device.",
+    ["targets"],
+    true,
+  ),
+  simulatorStep(
+    "SIMULATOR_RESET",
+    "Reset simulators",
+    "Replace one agent's simulator roster with the Xcode defaults.",
+    ["jobId", "agentId"],
+    true,
   ),
   expansionStep(
     "TAILSCALE_SERVE_INSPECT",
@@ -2068,6 +2160,18 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
     "Build Data",
     "Build-data cleanup result",
     ["buildData.*", "cleanup.*", "agent.*"],
+  ),
+  trigger(
+    "SIMULATOR_OPERATION_RESULT",
+    "Simulators",
+    "Simulator operation result",
+    ["agent.id", "simulator.id", "simulatorOperation.*"],
+    {
+      description:
+        "Fires when an app or standalone MCP simulator operation finishes.",
+      details:
+        "Filter by agent, operation, or outcome. Each selected deletion emits its own result. Simulator jobs started by workflows return through their step results.",
+    },
   ),
   expansionTrigger(
     "POLLING_OPERATION_STATE",

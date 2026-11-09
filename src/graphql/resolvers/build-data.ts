@@ -27,21 +27,25 @@ export const createBuildDataResolvers = (service: BuildDataService) => ({
     },
     derivedDataDeletionHistory: (
       _root: unknown,
-      { first, after }: { first?: number; after?: string | null },
+      {
+        first,
+        after,
+        agentId,
+      }: { first?: number; after?: string | null; agentId?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.history(first, after);
+      return service.history(first, after, agentId);
     },
   },
   Mutation: {
     refreshDerivedData: (
       _root: unknown,
-      { requestId }: { requestId: string },
+      { requestId, agentId }: { requestId: string; agentId?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.refresh(requestId);
+      return service.refresh(requestId, agentId);
     },
     calculateDerivedDataSizes: (
       _root: unknown,
@@ -92,11 +96,11 @@ export const createBuildDataResolvers = (service: BuildDataService) => ({
     },
     clearDerivedDataDeletionHistory: (
       _root: unknown,
-      _args: unknown,
+      { agentId }: { agentId?: string | null },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.clearHistory();
+      return service.clearHistory(agentId);
     },
   },
   Subscription: {

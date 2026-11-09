@@ -9,7 +9,7 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
@@ -32,6 +32,10 @@ import {
 } from "./build-data.js";
 
 vi.mock("../capture-command.js", () => ({ captureCommand: vi.fn() }));
+vi.mock("node:os", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:os")>()),
+  homedir: vi.fn(),
+}));
 
 const temporaryDirectories: string[] = [];
 const capture = vi.mocked(captureCommand);
@@ -44,7 +48,8 @@ async function temporaryDirectory() {
   return directory;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.mocked(homedir).mockReturnValue(await temporaryDirectory());
   process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY = join(
     tmpdir(),
     `missing-device-support-${process.pid}`,
@@ -304,13 +309,27 @@ describe("Build Data agent handlers", () => {
     ]);
   });
 
-  test("scans direct iOS Device Support children without following symlinks", async () => {
+  test("scans Apple platform Device Support and honors the iOS override without following discovered symlinks", async () => {
     const derivedData = await temporaryDirectory();
     const deviceSupport = await temporaryDirectory();
     process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY = deviceSupport;
     await mkdir(join(deviceSupport, "iPhone17,1 26.0 (23A123)"));
     const outside = await temporaryDirectory();
     await symlink(outside, join(deviceSupport, "Linked Support"));
+    const xcode = join(homedir(), "Library", "Developer", "Xcode");
+    await mkdir(join(xcode, "iOS DeviceSupport", "Ignored built-in iOS"), {
+      recursive: true,
+    });
+    await mkdir(join(xcode, "tvOS DeviceSupport", "26.0 (23J123)"), {
+      recursive: true,
+    });
+    await mkdir(join(xcode, "watchOS DeviceSupport", "26.0 (23R123)"), {
+      recursive: true,
+    });
+    await mkdir(join(xcode, "xrOS DeviceSupport", "26.0 (23M123)"), {
+      recursive: true,
+    });
+    await symlink(outside, join(xcode, "Linked DeviceSupport"));
 
     const result = (await scanBuildData(
       { mode: "ABSOLUTE", path: derivedData, worktrees: [] },
@@ -321,11 +340,56 @@ describe("Build Data agent handlers", () => {
       entries: Array<{ name: string; kind: string; rootPath: string }>;
     };
 
+    expect(result.entries).toHaveLength(4);
+    expect(result.entries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "iPhone17,1 26.0 (23A123)",
+          kind: "DEVICE_SUPPORT",
+          deviceSupportPlatform: "iOS",
+          rootPath: await realpath(deviceSupport),
+        }),
+        expect.objectContaining({
+          name: "26.0 (23J123)",
+          deviceSupportPlatform: "tvOS",
+        }),
+        expect.objectContaining({
+          name: "26.0 (23R123)",
+          deviceSupportPlatform: "watchOS",
+        }),
+        expect.objectContaining({
+          name: "26.0 (23M123)",
+          deviceSupportPlatform: "visionOS",
+        }),
+      ]),
+    );
+  });
+
+  test("scans the legacy iOS Device Support symlink without following discovered symlinks", async () => {
+    delete process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY;
+    const xcode = join(homedir(), "Library", "Developer", "Xcode");
+    const deviceSupport = await realpath(await temporaryDirectory());
+    const outside = await temporaryDirectory();
+    await mkdir(xcode, { recursive: true });
+    await mkdir(join(deviceSupport, "iPhone 26.0"));
+    await mkdir(join(outside, "Unrelated cache"));
+    await symlink(deviceSupport, join(xcode, "iOS DeviceSupport"));
+    await symlink(outside, join(xcode, "tvOS DeviceSupport"));
+    await symlink(outside, join(deviceSupport, "Linked Support"));
+
+    const result = (await scanBuildData(
+      { mode: "DEFAULT", path: null, worktrees: [] },
+      10_000,
+      signal(),
+      log,
+    )) as Awaited<ReturnType<typeof scanBuildData>> & { entries: unknown[] };
+
     expect(result.entries).toEqual([
       expect.objectContaining({
-        name: "iPhone17,1 26.0 (23A123)",
+        path: join(deviceSupport, "iPhone 26.0"),
+        rootPath: deviceSupport,
         kind: "DEVICE_SUPPORT",
-        rootPath: await realpath(deviceSupport),
+        deviceSupportPlatform: "iOS",
       }),
     ]);
   });

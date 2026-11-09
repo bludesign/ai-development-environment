@@ -8,6 +8,7 @@ import "server-only";
 import { AgentControlService } from "@/services/agent-control";
 import { CcusageService } from "@/services/ccusage";
 import { BuildDataService } from "@/services/build-data";
+import { SimulatorsService } from "@/services/simulators/simulators.service";
 import { BuildsService } from "@/services/builds";
 import { CodebasesService, CodebaseToolsService } from "@/services/codebases";
 import { CrashesService } from "@/services/crashes/crashes.service";
@@ -61,6 +62,7 @@ export type ServerServices = {
   agentControlService: AgentControlService;
   ccusageService: CcusageService;
   buildDataService: BuildDataService;
+  simulatorsService: SimulatorsService;
   buildsService: BuildsService;
   codebasesService: CodebasesService;
   codebaseToolsService: CodebaseToolsService;
@@ -117,6 +119,7 @@ function createServerServices(): ServerServices {
   commandsService.startRuntime();
   const ccusageService = new CcusageService(agentControlService);
   const buildDataService = new BuildDataService(agentControlService);
+  const simulatorsService = new SimulatorsService(agentControlService);
   const tailscaleServeService = new TailscaleServeService(agentControlService);
   const telemetryService = new TelemetryService();
   const crashesService = new CrashesService(
@@ -271,6 +274,7 @@ function createServerServices(): ServerServices {
       github: gitHubService,
       gitlab: gitLabService,
       buildData: buildDataService,
+      simulators: simulatorsService,
       tailscale: tailscaleServeService,
       cacheServer: cacheServerService,
       ccusage: ccusageService,
@@ -331,6 +335,7 @@ function createServerServices(): ServerServices {
     tools: toolsService,
     diskSpace: diskSpaceService,
     buildData: buildDataService,
+    simulators: simulatorsService,
     ccusage: ccusageService,
     iosDevices: iosDevicesService,
     modelCosts: modelCostsService,
@@ -374,6 +379,7 @@ function createServerServices(): ServerServices {
     agentControlService,
     ccusageService,
     buildDataService,
+    simulatorsService,
     buildsService,
     codebasesService,
     codebaseToolsService,

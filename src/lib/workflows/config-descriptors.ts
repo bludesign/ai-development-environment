@@ -23,6 +23,14 @@ import {
 } from "./kinds";
 import { workflowValueSessionPaths } from "./session";
 import { WORKFLOW_CAPABILITY_ACTIONS } from "./capability-actions";
+import {
+  SIMULATOR_APP_ACTIONS,
+  SIMULATOR_COMPLETION_OPERATIONS,
+  SIMULATOR_COMPLETION_STATUSES,
+  SIMULATOR_DEVICE_ACTIONS,
+  SIMULATOR_FOLDER_ACTIONS,
+} from "./simulators";
+import { WAIT_TIMEOUT_HELP } from "./wait-timing";
 
 /**
  * The config every step and trigger kind accepts, described declaratively.
@@ -187,6 +195,21 @@ const resourceMulti = (
     ...rest,
   };
 };
+
+const simulatorAgent = () =>
+  resource("agentId", "Agent", "agent", {
+    required: true,
+    stepOutputSessionField: "agentId",
+  });
+
+const simulatorUuid = () =>
+  text("simulatorId", "Simulator UUID", { required: true });
+
+const confirmSimulatorChange = (options: FieldOptions = {}) =>
+  bool("confirm", "Confirm destructive operation", {
+    help: "Required to erase, delete, or reset simulators.",
+    ...options,
+  });
 
 const stringList = (
   key: string,
@@ -989,7 +1012,82 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   SKILL_SKIP_SYNC: {
     fields: [text("runId", "Sync run ID", { required: true })],
   },
-  BUILD_DATA_REFRESH: { fields: [] },
+  BUILD_DATA_REFRESH: {
+    fields: [
+      resource("agentId", "Agent", "agent", {
+        help: "Leave empty to refresh build data for all agents.",
+      }),
+    ],
+  },
+  SIMULATOR_INVENTORY: { fields: [simulatorAgent()] },
+  SIMULATOR_INSPECT: { fields: [simulatorAgent(), simulatorUuid()] },
+  SIMULATOR_CREATE: {
+    fields: [
+      simulatorAgent(),
+      text("name", "Name", { required: true }),
+      text("runtimeId", "Runtime ID", { required: true }),
+      text("deviceTypeId", "Device type ID", { required: true }),
+    ],
+  },
+  SIMULATOR_DEVICE_ACTION: {
+    fields: [
+      simulatorAgent(),
+      simulatorUuid(),
+      enumField("action", "Action", staticOptions(SIMULATOR_DEVICE_ACTIONS), {
+        required: true,
+      }),
+      text("name", "Name", { help: "Required for Rename and Clone." }),
+      confirmSimulatorChange({
+        visibleWhen: { key: "action", equals: "ERASE" },
+      }),
+    ],
+  },
+  SIMULATOR_APP_ACTION: {
+    fields: [
+      simulatorAgent(),
+      simulatorUuid(),
+      enumField("action", "Action", staticOptions(SIMULATOR_APP_ACTIONS), {
+        required: true,
+      }),
+      text("bundleId", "Bundle ID", { required: true }),
+    ],
+  },
+  SIMULATOR_OPEN_FOLDER: {
+    fields: [
+      simulatorAgent(),
+      simulatorUuid(),
+      enumField("action", "Folder", staticOptions(SIMULATOR_FOLDER_ACTIONS), {
+        required: true,
+      }),
+      text("bundleId", "Bundle ID", { help: "Required for app folders." }),
+    ],
+  },
+  SIMULATOR_DELETE: {
+    fields: [
+      json("targets", "Targets", {
+        required: true,
+        help: "An array of objects with agentId and simulatorId keys.",
+        valueModes: ["literal", "session", "interpolation"],
+        jsonSchema: {
+          type: "array",
+          minItems: 1,
+          items: {
+            type: "object",
+            required: ["agentId", "simulatorId"],
+            properties: {
+              agentId: { type: "string" },
+              simulatorId: { type: "string" },
+            },
+            additionalProperties: false,
+          },
+        },
+      }),
+      confirmSimulatorChange({ required: true }),
+    ],
+  },
+  SIMULATOR_RESET: {
+    fields: [simulatorAgent(), confirmSimulatorChange({ required: true })],
+  },
   BUILD_DATA_DELETE: {
     fields: [
       text("collectionId", "Collection ID", { required: true }),
@@ -1520,6 +1618,14 @@ const POLLED_WAIT_STEP_KINDS: readonly WorkflowStepKind[] = [
   "COMMAND_RERUN",
   "BUILD_REBUILD",
   "BUILD_DATA_REFRESH",
+  "SIMULATOR_INVENTORY",
+  "SIMULATOR_INSPECT",
+  "SIMULATOR_CREATE",
+  "SIMULATOR_DEVICE_ACTION",
+  "SIMULATOR_APP_ACTION",
+  "SIMULATOR_OPEN_FOLDER",
+  "SIMULATOR_DELETE",
+  "SIMULATOR_RESET",
   "TAILSCALE_SERVE_INSPECT",
   "TAILSCALE_SERVE_UPSERT_TEMPLATE",
   "TAILSCALE_SERVE_SET_AGENT_ENABLED",
@@ -1552,7 +1658,7 @@ const cadenceField = (): ConfigFieldDescriptor =>
 
 const waitTimeoutField = (): ConfigFieldDescriptor =>
   num("timeoutSeconds", "Timeout (seconds)", {
-    help: "How long to keep waiting before the step fails. Leave empty to wait for as long as the work takes.",
+    help: WAIT_TIMEOUT_HELP,
   });
 
 function addWaitFields(
@@ -1711,6 +1817,7 @@ const ALL_TRIGGER_KINDS: WorkflowTriggerKind[] = [
   "SIGNING_ASSET_EXPIRING",
   "BUILD_DATA_THRESHOLD",
   "BUILD_DATA_CLEANUP_RESULT",
+  "SIMULATOR_OPERATION_RESULT",
   "POLLING_OPERATION_STATE",
   "MODEL_COST_CATALOG_CHANGED",
   "CREDENTIAL_STORE_DEGRADED",
@@ -1854,6 +1961,24 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
             default: "LTE",
           }),
           json("thresholdValue", "Threshold value", { default: 30 }),
+        ]),
+      ];
+    }
+    if (kind === "SIMULATOR_OPERATION_RESULT") {
+      return [
+        kind,
+        triggerWithFilters([
+          resource("agentId", "Agent", "agent"),
+          enumField(
+            "operation",
+            "Operation",
+            staticOptions(SIMULATOR_COMPLETION_OPERATIONS),
+          ),
+          enumField(
+            "status",
+            "Outcome",
+            staticOptions(SIMULATOR_COMPLETION_STATUSES),
+          ),
         ]),
       ];
     }

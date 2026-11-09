@@ -1,4 +1,5 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
+import { SIMULATOR_JOB_KINDS } from "@ai-development-environment/agent-contract/simulators";
 
 import { ids } from "./ids";
 import { daysAgo, fromNow, hoursAgo, minutesAgo } from "./time";
@@ -33,6 +34,7 @@ const AGENT_CAPABILITIES = [
   "buildData.scan",
   "buildData.size",
   "buildData.delete",
+  ...SIMULATOR_JOB_KINDS,
   "codebase.browse",
   "codebase.inspect",
   "codebase.refresh",
@@ -292,6 +294,7 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
               "ios.agentRunDestinations.inspect",
               "ios.artifact.transfer.upload",
               "ios.build.remoteDeploy",
+              ...SIMULATOR_JOB_KINDS,
             ].includes(capability),
         ),
       ),

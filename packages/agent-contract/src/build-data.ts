@@ -33,6 +33,7 @@ export type BuildDataTarget = {
 export type BuildDataScanEntry = BuildDataTarget & {
   name: string;
   kind: BuildDataScanEntryKind;
+  deviceSupportPlatform?: string | null;
   workspacePath: string | null;
   modifiedAt: string | null;
   volumeId: string | null;
@@ -282,6 +283,10 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
         ),
         name: stringValue(entry.name, `build data entries[${index}].name`),
         kind: kind as BuildDataScanEntryKind,
+        deviceSupportPlatform: optionalNullableString(
+          entry.deviceSupportPlatform,
+          `build data entries[${index}].deviceSupportPlatform`,
+        ),
         workspacePath: nullableString(
           entry.workspacePath,
           `build data entries[${index}].workspacePath`,

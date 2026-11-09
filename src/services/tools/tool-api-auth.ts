@@ -62,6 +62,11 @@ export async function authorizeToolRequest(
       return {
         context: {
           authentication: "oauth",
+          callerIdentity: [
+            "oauth",
+            result.principal.userId,
+            result.principal.clientId,
+          ],
           caller: `oauth:user:${result.principal.userId}:client:${encodeURIComponent(result.principal.clientId)}@${requestAddress(request)}`,
           correlationId: requestCorrelationId(request),
           source: endpoint,
@@ -82,14 +87,15 @@ export async function authorizeToolRequest(
         ),
       };
     }
-    const caller =
+    const callerIdentity =
       principal.kind === "user"
-        ? `user:${principal.userId}`
-        : `api-key:${principal.apiKeyId}`;
+        ? ["user", principal.userId]
+        : ["api-key", principal.apiKeyId];
     return {
       context: {
         authentication: principal.kind === "apiKey" ? "apiKey" : "session",
-        caller: `${caller}@${requestAddress(request)}`,
+        callerIdentity,
+        caller: `${callerIdentity.join(":")}@${requestAddress(request)}`,
         correlationId: requestCorrelationId(request),
         source: endpoint,
       },

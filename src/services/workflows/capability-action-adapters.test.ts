@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { WORKFLOW_CAPABILITY_ACTIONS } from "@/lib/workflows/capability-actions";
 import { WORKFLOW_STEP_BY_KIND } from "@/lib/workflows/definition";
 import { getConfigDescriptor } from "@/lib/workflows/config-descriptors";
+import { resolveWorkflowValue } from "@/lib/workflows/session";
 import { createBuiltInToolRegistry } from "@/services/tools/builtin-tools";
 import { registerCapabilityActionAdapters } from "./capability-action-adapters";
 import {
@@ -143,4 +144,50 @@ describe("dedicated workflow capability actions", () => {
       } as unknown as WorkflowExecutionContext),
     ).rejects.toThrow("failed");
   });
+
+  test.each([undefined, "mac"])(
+    "clears Build Data history with agent scope %s",
+    async (agentId) => {
+      const executor = new WorkflowStepExecutor();
+      const callBuiltInTool = vi
+        .fn()
+        .mockResolvedValue({ structuredContent: { count: 1 } });
+      registerCapabilityActionAdapters(executor, { callBuiltInTool });
+      await executor.execute({
+        run: { id: "r" },
+        attempt: { id: "a" },
+        node: {
+          id: "clear",
+          kind: "BUILD_DATA_CLEAR_HISTORY",
+          config: agentId ? { agentId } : {},
+        },
+      } as unknown as WorkflowExecutionContext);
+      expect(callBuiltInTool).toHaveBeenCalledWith(
+        "clear_build_data_history",
+        agentId ? { agentId } : {},
+        expect.objectContaining({ source: "WORKFLOW" }),
+      );
+    },
+  );
+
+  test.each([undefined, null, " "])(
+    "rejects a Build Data history cleanup scope that resolves to %s",
+    async (id) => {
+      const executor = new WorkflowStepExecutor();
+      const callBuiltInTool = vi.fn();
+      registerCapabilityActionAdapters(executor, { callBuiltInTool });
+      const sessionData = { agent: { id } };
+      const config = resolveWorkflowValue(
+        { agentId: { source: "SESSION", path: "agent.id" } },
+        sessionData,
+      );
+      await expect(
+        executor.execute({
+          node: { id: "clear", kind: "BUILD_DATA_CLEAR_HISTORY", config },
+          sessionData,
+        } as unknown as WorkflowExecutionContext),
+      ).rejects.toThrow("requires a resolved agent ID");
+      expect(callBuiltInTool).not.toHaveBeenCalled();
+    },
+  );
 });

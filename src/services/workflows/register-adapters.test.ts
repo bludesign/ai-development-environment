@@ -682,6 +682,37 @@ describe("workflow expansion adapters", () => {
     return executor;
   }
 
+  test.each([undefined, "mac"])(
+    "refreshes Build Data with agent scope %s",
+    async (agentId) => {
+      const callTool = vi.fn().mockResolvedValue({
+        structuredContent: {
+          collection: { id: "collection-1", status: "COMPLETED" },
+        },
+      });
+      const input = context("actual-worktree");
+      input.node = {
+        ...input.node,
+        kind: "BUILD_DATA_REFRESH",
+        config: { agentId },
+      };
+
+      await expansionExecutor(callTool).execute(input);
+
+      expect(callTool).toHaveBeenCalledWith(
+        {
+          groupId: "builtin:build-data",
+          name: "refresh_build_data",
+          arguments: {
+            requestId: "workflow-run:attempt:build-data",
+            ...(agentId ? { agentId } : {}),
+          },
+        },
+        expect.objectContaining({ source: "WORKFLOW" }),
+      );
+    },
+  );
+
   test("sends typed Tailscale templates and waits on durable fleet operations", async () => {
     const callTool = vi.fn().mockResolvedValue({
       structuredContent: {

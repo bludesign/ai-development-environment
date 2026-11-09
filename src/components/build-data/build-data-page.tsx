@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  ArrowUpRight,
   Calculator,
   Check,
   Lock,
@@ -17,8 +18,17 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 
+import {
+  useActiveAgent,
+  usePageAgentFilter,
+} from "@/components/active-agent/active-agent-provider";
+import {
+  ALL_PAGE_AGENTS,
+  PageAgentFilter,
+} from "@/components/active-agent/page-agent-filter";
 import { AGENT_FIELDS } from "@/components/agents/graphql-fields";
 import type { Agent } from "@/components/agents/types";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
@@ -90,6 +100,7 @@ type DerivedDataEntry = {
   id: string;
   name: string;
   kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  deviceSupportPlatform?: string | null;
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
   worktreeId: string | null;
@@ -143,7 +154,7 @@ const COLLECTION_FIELDS = `
     agents { agent { ${AGENT_FIELDS} } status jobId error warnings }
   }
   entries {
-    id name kind status workspacePath worktreeId worktreePath sizeBytes operation error
+    id name kind deviceSupportPlatform status workspacePath worktreeId worktreePath sizeBytes operation error
     modifiedAt volumeId locked activeResources { kind id label href }
     agent { ${AGENT_FIELDS} }
   }
@@ -161,6 +172,39 @@ function formatBytes(value: number, locale: string): string {
 }
 
 export function BuildDataPage() {
+  const { activeAgentId, ready } = useActiveAgent();
+  const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
+    "build-data",
+    ALL_PAGE_AGENTS,
+  );
+  const agentId =
+    activeAgentId ??
+    (selectedAgentId === ALL_PAGE_AGENTS ? null : selectedAgentId);
+
+  return (
+    <BuildDataScope
+      agentId={agentId}
+      key={agentId ?? ALL_PAGE_AGENTS}
+      ready={ready}
+      filter={
+        <PageAgentFilter
+          value={selectedAgentId}
+          onValueChange={setSelectedAgentId}
+        />
+      }
+    />
+  );
+}
+
+function BuildDataScope({
+  agentId,
+  ready,
+  filter,
+}: {
+  agentId: string | null;
+  ready: boolean;
+  filter: ReactNode;
+}) {
   const t = useTranslations("buildData");
   const tc = useTranslations("common");
   const locale = useLocale();
@@ -179,6 +223,9 @@ export function BuildDataPage() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyVersion, setHistoryVersion] = useState(0);
   const collectionRef = useRef<DerivedDataCollection | null>(null);
+  const scopeLifecycle = useRef<AbortController | null>(null);
+  const collectionRequest = useRef<AbortController | null>(null);
+  const historyRequest = useRef<AbortController | null>(null);
   const collectionVersion = useRef(0);
   const operationBusyRef = useRef(false);
 
@@ -197,6 +244,7 @@ export function BuildDataPage() {
   }, []);
 
   useEffect(() => {
+    if (!ready) return;
     let disposed = false;
     let reconciling = false;
     let starting = true;
@@ -204,6 +252,7 @@ export function BuildDataPage() {
     collectionVersion.current += 1;
     const startVersion = collectionVersion.current;
     const controller = new AbortController();
+    collectionRequest.current = controller;
     const subscription = controlPlaneSubscriptions().subscribe<{
       derivedDataCollectionChanged: DerivedDataCollection;
     }>(
@@ -251,10 +300,11 @@ export function BuildDataPage() {
       }
     };
     void controlPlaneRequest<{ refreshDerivedData: DerivedDataCollection }>(
-      `mutation RefreshDerivedData($requestId: ID!) {
-        refreshDerivedData(requestId: $requestId) { ${COLLECTION_FIELDS} }
+      `mutation RefreshDerivedData($requestId: ID!, $agentId: ID) {
+        refreshDerivedData(requestId: $requestId, agentId: $agentId) { ${COLLECTION_FIELDS} }
       }`,
-      { requestId: collectionId },
+      { requestId: collectionId, agentId },
+      { signal: controller.signal, cancelBeforeDispatch: true },
     )
       .then(
         (data) =>
@@ -298,51 +348,64 @@ export function BuildDataPage() {
       subscription();
       window.clearInterval(timer);
     };
-  }, [applyCollection, collectionId]);
+  }, [agentId, applyCollection, collectionId, ready]);
 
-  const loadHistory = useCallback(async (after?: string | null) => {
-    setHistoryLoading(true);
-    try {
-      const data = await controlPlaneRequest<{
-        derivedDataDeletionHistory: {
-          items: HistoryItem[];
-          nextCursor: string | null;
-        };
-      }>(
-        `query DerivedDataDeletionHistory($after: ID) {
-          derivedDataDeletionHistory(first: 100, after: $after) {
+  const loadHistory = useCallback(
+    async (after?: string | null) => {
+      historyRequest.current?.abort();
+      const controller = new AbortController();
+      historyRequest.current = controller;
+      setHistoryLoading(true);
+      try {
+        const data = await controlPlaneRequest<{
+          derivedDataDeletionHistory: {
+            items: HistoryItem[];
+            nextCursor: string | null;
+          };
+        }>(
+          `query DerivedDataDeletionHistory($after: ID, $agentId: ID) {
+          derivedDataDeletionHistory(first: 100, after: $after, agentId: $agentId) {
             items { id agentId agentName folderName worktreeId worktreePath source entryKind deletedAt }
             nextCursor
           }
         }`,
-        { after: after ?? null },
-      );
-      setHistory((current) =>
-        after
-          ? [...current, ...data.derivedDataDeletionHistory.items]
-          : data.derivedDataDeletionHistory.items,
-      );
-      setHistoryCursor(data.derivedDataDeletionHistory.nextCursor);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(
-    () => () => {
-      if (armedDeleteTimer.current) {
-        window.clearTimeout(armedDeleteTimer.current);
+          { after: after ?? null, agentId },
+          { signal: controller.signal },
+        );
+        if (controller.signal.aborted) return;
+        setHistory((current) =>
+          after
+            ? [...current, ...data.derivedDataDeletionHistory.items]
+            : data.derivedDataDeletionHistory.items,
+        );
+        setHistoryCursor(data.derivedDataDeletionHistory.nextCursor);
+      } catch (value) {
+        if (!controller.signal.aborted)
+          setError(value instanceof Error ? value.message : String(value));
+      } finally {
+        if (!controller.signal.aborted) setHistoryLoading(false);
       }
     },
-    [],
+    [agentId],
   );
 
   useEffect(() => {
+    const controller = new AbortController();
+    scopeLifecycle.current = controller;
+    return () => {
+      controller.abort();
+      if (armedDeleteTimer.current) {
+        window.clearTimeout(armedDeleteTimer.current);
+      }
+      historyRequest.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return;
     const timer = window.setTimeout(() => void loadHistory(), 0);
     return () => window.clearTimeout(timer);
-  }, [historyVersion, loadHistory]);
+  }, [historyVersion, loadHistory, ready]);
 
   const allEntries = collection?.entries ?? [];
   const entries = allEntries.filter((entry) => entry.kind !== "DEVICE_SUPPORT");
@@ -352,9 +415,14 @@ export function BuildDataPage() {
   const activeOperation = allEntries.some(
     (entry) => entry.operation !== "IDLE",
   );
-  const selectedEntries = allEntries.filter((entry) => selected.has(entry.id));
+  const actionsBlocked =
+    loading ||
+    collection?.status !== "COMPLETED" ||
+    activeOperation ||
+    operationBusy;
+  const selectedEntries = entries.filter((entry) => selected.has(entry.id));
   const allSelected =
-    allEntries.length > 0 && selectedEntries.length === allEntries.length;
+    entries.length > 0 && selectedEntries.length === entries.length;
   const someSelected = selectedEntries.length > 0 && !allSelected;
 
   const runOperation = async (
@@ -363,6 +431,7 @@ export function BuildDataPage() {
     overrideProtection = false,
   ) => {
     if (!collection) return;
+    const signal = collectionRequest.current?.signal;
     operationBusyRef.current = true;
     const version = ++collectionVersion.current;
     setOperationBusy(true);
@@ -391,6 +460,7 @@ export function BuildDataPage() {
           overrideProtection,
         },
       );
+      if (signal?.aborted) return;
       if (version === collectionVersion.current)
         applyCollection(data[operation]);
       if (operation === "deleteDerivedDataEntries") {
@@ -398,10 +468,11 @@ export function BuildDataPage() {
         setArmedDeleteKey(null);
       }
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!signal?.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
       operationBusyRef.current = false;
-      setOperationBusy(false);
+      if (!signal?.aborted) setOperationBusy(false);
     }
   };
 
@@ -441,8 +512,8 @@ export function BuildDataPage() {
     setCollectionId(createClientId());
   };
 
-  const inlineDelete = (key: string, entryIds: string[]) => {
-    if (armedDeleteKey !== key) {
+  const inlineDelete = (key: string, entryIds: string[], confirmed = false) => {
+    if (!confirmed && armedDeleteKey !== key) {
       setArmedDeleteKey(key);
       if (armedDeleteTimer.current) {
         window.clearTimeout(armedDeleteTimer.current);
@@ -483,6 +554,7 @@ export function BuildDataPage() {
 
   const setLocked = async (entry: DerivedDataEntry, locked: boolean) => {
     if (!collection) return;
+    const signal = collectionRequest.current?.signal;
     setOperationBusy(true);
     try {
       const data = await controlPlaneRequest<{
@@ -495,11 +567,12 @@ export function BuildDataPage() {
         }`,
         { collectionId: collection.id, entryId: entry.id, locked },
       );
-      applyCollection(data.setDerivedDataEntryLocked);
+      if (!signal?.aborted) applyCollection(data.setDerivedDataEntryLocked);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (!signal?.aborted)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setOperationBusy(false);
+      if (!signal?.aborted) setOperationBusy(false);
     }
   };
 
@@ -534,11 +607,10 @@ export function BuildDataPage() {
             {t("description")}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-start gap-2">
+          {filter}
           <Button
-            disabled={
-              !allEntries.length || loading || activeOperation || operationBusy
-            }
+            disabled={!allEntries.length || actionsBlocked}
             onClick={() =>
               void runOperation(
                 "calculateDerivedDataSizes",
@@ -550,7 +622,7 @@ export function BuildDataPage() {
             <Calculator /> {t("calculateSizes")}
           </Button>
           <Button
-            disabled={loading || activeOperation}
+            disabled={loading || activeOperation || operationBusy}
             onClick={refresh}
             variant="outline"
           >
@@ -566,7 +638,7 @@ export function BuildDataPage() {
         </Alert>
       )}
 
-      <DiskSpaceMonitor />
+      {ready && <DiskSpaceMonitor agentId={agentId} />}
 
       {collection && <ProgressPanel collection={collection} />}
 
@@ -582,7 +654,7 @@ export function BuildDataPage() {
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>
-      ) : allEntries.length === 0 ? (
+      ) : entries.length === 0 ? (
         <Empty>
           <EmptyHeader>
             <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
@@ -604,7 +676,7 @@ export function BuildDataPage() {
                   </p>
                   <Button
                     className="w-40"
-                    disabled={activeOperation || operationBusy}
+                    disabled={actionsBlocked}
                     onClick={() =>
                       inlineDelete(
                         bulkDeleteKey,
@@ -634,11 +706,14 @@ export function BuildDataPage() {
                         }
                         onCheckedChange={(checked) => {
                           setArmedDeleteKey(null);
-                          setSelected(
-                            checked === true
-                              ? new Set(allEntries.map((entry) => entry.id))
-                              : new Set(),
-                          );
+                          setSelected((current) => {
+                            const next = new Set(current);
+                            for (const entry of entries) {
+                              if (checked === true) next.add(entry.id);
+                              else next.delete(entry.id);
+                            }
+                            return next;
+                          });
                         }}
                       />
                     </TableHead>
@@ -760,7 +835,7 @@ export function BuildDataPage() {
                                 aria-label={t("entryActions", {
                                   name: entry.name,
                                 })}
-                                disabled={activeOperation || operationBusy}
+                                disabled={actionsBlocked}
                                 size="icon-sm"
                                 variant="ghost"
                               >
@@ -808,28 +883,31 @@ export function BuildDataPage() {
               </Table>
             </Card>
           )}
-          <DeviceSupportCard
-            activeOperation={activeOperation || operationBusy}
-            entries={deviceSupportEntries}
-            locale={locale}
-            onDelete={(entryId) =>
-              void runOperation("deleteDerivedDataEntries", [entryId])
-            }
-            onDeleteMany={(entryIds) =>
-              void runOperation("deleteDerivedDataEntries", entryIds)
-            }
-            onSelectionChange={(entryId, checked) => {
-              setArmedDeleteKey(null);
-              setSelected((current) => {
-                const next = new Set(current);
-                if (checked) next.add(entryId);
-                else next.delete(entryId);
-                return next;
-              });
-            }}
-            selected={selected}
-          />
         </>
+      )}
+
+      {(!loading || collection) && (
+        <DeviceSupportCard
+          activeOperation={actionsBlocked}
+          entries={deviceSupportEntries}
+          locale={locale}
+          onDelete={(entryId) =>
+            inlineDelete(`device:${entryId}`, [entryId], true)
+          }
+          onDeleteMany={(entryIds) =>
+            inlineDelete("device:bulk", entryIds, true)
+          }
+          onSelectionChange={(entryId, checked) => {
+            setArmedDeleteKey(null);
+            setSelected((current) => {
+              const next = new Set(current);
+              if (checked) next.add(entryId);
+              else next.delete(entryId);
+              return next;
+            });
+          }}
+          selected={selected}
+        />
       )}
 
       <Card className="gap-0 py-0">
@@ -841,12 +919,28 @@ export function BuildDataPage() {
               <ConfirmationDialog
                 actionLabel={t("clearHistory")}
                 cancelLabel={tc("cancel")}
-                description={t("clearHistoryDescription")}
+                description={t(
+                  agentId
+                    ? "clearAgentHistoryDescription"
+                    : "clearHistoryDescription",
+                )}
                 onConfirm={async () => {
-                  await controlPlaneRequest(
-                    `mutation { clearDerivedDataDeletionHistory }`,
-                  );
-                  setHistoryVersion((value) => value + 1);
+                  const signal = scopeLifecycle.current?.signal;
+                  try {
+                    await controlPlaneRequest(
+                      `mutation ClearDerivedDataDeletionHistory($agentId: ID) {
+                        clearDerivedDataDeletionHistory(agentId: $agentId)
+                      }`,
+                      { agentId },
+                    );
+                    if (!signal?.aborted)
+                      setHistoryVersion((value) => value + 1);
+                  } catch (value) {
+                    if (!signal?.aborted)
+                      setError(
+                        value instanceof Error ? value.message : String(value),
+                      );
+                  }
                 }}
                 title={t("clearHistoryTitle")}
                 trigger={
@@ -963,8 +1057,13 @@ function DeviceSupportCard({
       <CardHeader className="max-sm:has-data-[slot=card-action]:grid-cols-1">
         <CardTitle>{t("deviceSupportTitle")}</CardTitle>
         <CardDescription>{t("deviceSupportDescription")}</CardDescription>
-        {selectedEntries.length > 0 && (
-          <CardAction className="max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
+        <CardAction className="flex flex-wrap items-start gap-2 max-sm:col-start-1 max-sm:row-start-3 max-sm:row-span-1 max-sm:mt-3 max-sm:justify-self-stretch">
+          <Button asChild size="sm" variant="outline">
+            <Link href="/system/simulators">
+              <ArrowUpRight /> {t("manageSimulators")}
+            </Link>
+          </Button>
+          {selectedEntries.length > 0 && (
             <ConfirmationDialog
               actionLabel={t("deleteSelected")}
               cancelLabel={tc("cancel")}
@@ -981,8 +1080,8 @@ function DeviceSupportCard({
                 </Button>
               }
             />
-          </CardAction>
-        )}
+          )}
+        </CardAction>
       </CardHeader>
       {entries.length === 0 ? (
         <Empty className="py-8">
@@ -1011,6 +1110,7 @@ function DeviceSupportCard({
                   }}
                 />
               </TableHead>
+              <TableHead>{t("deviceSupportPlatform")}</TableHead>
               <TableHead>{t("deviceSupportVersion")}</TableHead>
               <TableHead>{t("size")}</TableHead>
               <TableHead>{t("agent")}</TableHead>
@@ -1031,6 +1131,7 @@ function DeviceSupportCard({
                     }
                   />
                 </TableCell>
+                <TableCell>{entry.deviceSupportPlatform ?? "—"}</TableCell>
                 <TableCell>
                   <span className="font-mono text-xs">{entry.name}</span>
                   {entry.operation !== "IDLE" && <Spinner className="ml-2" />}

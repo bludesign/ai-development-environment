@@ -117,6 +117,14 @@ test.describe("app screenshots", () => {
           timeout: 30_000,
         });
       }
+      if (route.readyEnabledButton) {
+        await expect(
+          page.getByRole("button", {
+            name: route.readyEnabledButton,
+            exact: true,
+          }),
+        ).toBeEnabled({ timeout: 30_000 });
+      }
       if (route.scrollTo) {
         await scrollToLazyTarget(page, route.scrollTo);
       }
@@ -172,6 +180,58 @@ test.describe("app screenshots", () => {
       if (route.clickButton) {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
+      }
+      if (route.simulatorAutomation === "tools") {
+        await page
+          .getByRole("searchbox", { name: /search tools/i })
+          .fill("Simulators");
+        const group = page.getByRole("heading", {
+          name: "Simulators",
+          exact: true,
+        });
+        await expect(group).toBeVisible();
+        await group.evaluate((heading) =>
+          heading.closest('[data-slot="card"]')?.scrollIntoView({
+            behavior: "instant",
+            block: "start",
+          }),
+        );
+        await expect(
+          page.getByText("refresh_simulator_inventory", { exact: true }),
+        ).toBeVisible();
+      }
+      if (route.simulatorAutomation === "workflows") {
+        await page
+          .getByRole("textbox", { name: "Search steps" })
+          .fill("Simulators");
+        const category = page.locator("section").filter({
+          has: page.getByText("Simulators", { exact: true }),
+        });
+        await expect(category.first()).toBeVisible();
+        await expect(category.getByRole("button").first()).toBeVisible();
+        await expect(
+          page.getByText("Simulator operation result", { exact: true }),
+        ).toBeVisible();
+      }
+      if (route.simulatorSelection) {
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        const group = page.getByRole("checkbox", {
+          name: "Select all simulators on Studio Mac",
+          exact: true,
+        });
+        await group.check();
+        await expect(
+          page.getByRole("checkbox", { name: "Select Living Room Apple TV" }),
+        ).toBeChecked();
+        await expect(
+          page.getByRole("checkbox", { name: "Select Watch QA" }),
+        ).toBeChecked();
+        await expect(
+          page.getByRole("checkbox", { name: "Select QA iPhone 18 Pro" }),
+        ).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "Delete selected" }),
+        ).toBeEnabled();
       }
       if (route.mcpAuthorizationReview) {
         await page

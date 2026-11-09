@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   callBuiltInTool: vi.fn(),
   callRunBuiltInTool: vi.fn(),
+  callSnapshotTool: vi.fn(),
   mcpRunToolNames: vi.fn(),
   mcpPresetSnapshot: vi.fn().mockResolvedValue(null),
   builtInTools: { definitions: vi.fn(() => [] as Array<{ name: string }>) },
@@ -42,6 +43,67 @@ beforeEach(() => {
 });
 
 describe("MCP endpoint authentication", () => {
+  test("passes trusted run-agent and workflow provenance to frozen simulator tools", async () => {
+    authorization.authorizeRunMcpRequest.mockResolvedValueOnce({
+      agentId: "agent-1",
+      context: {
+        caller: "agent:agent-1",
+        correlationId: "run-request",
+        source: "MCP",
+      },
+    });
+    const name = "refresh_simulator_inventory";
+    const entry = {
+      name,
+      inputSchema: { type: "object" },
+      reference: { source: "BUILTIN", name },
+    };
+    mocks.mcpRunToolNames.mockResolvedValueOnce({
+      status: "OK",
+      toolNames: [name],
+      repositoryId: null,
+      workflowRunId: "workflow-1",
+      snapshot: { schemaVersion: 1, tools: [entry] },
+    });
+    mocks.callSnapshotTool.mockResolvedValueOnce({
+      content: [{ type: "text", text: "Queued" }],
+    });
+    const args = { agentId: "agent-2", requestId: "request-1" };
+    const response = await POST(
+      new Request("https://control.example/api/mcp?run=run-1", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(mocks.mcpRunToolNames).toHaveBeenCalledExactlyOnceWith(
+      "run-1",
+      "agent-1",
+    );
+    expect(mocks.callSnapshotTool).toHaveBeenCalledExactlyOnceWith(
+      entry,
+      args,
+      expect.objectContaining({
+        runId: "run-1",
+        runAgentId: "agent-1",
+        workflowRunId: "workflow-1",
+      }),
+      null,
+      expect.any(AbortSignal),
+    );
+  });
+
   test("rejects mixed and duplicate scope query modes", async () => {
     await expect(
       POST(

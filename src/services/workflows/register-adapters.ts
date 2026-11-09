@@ -38,6 +38,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { RunsService } from "@/services/runs";
 import type { SkillsService } from "@/services/skills";
 import type { SigningAssetsService } from "@/services/signing-assets";
+import type { SimulatorsService } from "@/services/simulators/simulators.service";
 import type { TailscaleServeService } from "@/services/tailscale";
 import type { ToolsService } from "@/services/tools";
 import type {
@@ -60,6 +61,7 @@ import type {
   WorkflowStepExecutor,
 } from "./step-executor";
 import type { WorkflowsService } from "./workflows.service";
+import { registerSimulatorAdapters } from "./simulator-adapters";
 
 export type WorkflowAdapterServices = {
   agentControl: AgentControlService;
@@ -82,6 +84,7 @@ export type WorkflowAdapterServices = {
   iosDevices: IosDevicesService;
   modelCosts: ModelCostsService;
   signingAssets: SigningAssetsService;
+  simulators: SimulatorsService;
   tailscale: TailscaleServeService;
 };
 
@@ -349,6 +352,7 @@ export function registerWorkflowAdapters(
   services: WorkflowAdapterServices,
 ): void {
   registerWaitPollers(workflows, services);
+  registerSimulatorAdapters(workflows, executor, services.simulators);
   registerJiraAdapters(executor, services);
   registerGitHubAdapters(executor, services);
   registerWorktreeAdapters(executor, services);
@@ -712,12 +716,16 @@ function registerExpansionAdapters(
       },
     ),
   );
-  executor.register("BUILD_DATA_REFRESH", (context) =>
-    call(
+  executor.register("BUILD_DATA_REFRESH", (context) => {
+    const agentId = optionalText(context.node.config.agentId, 500);
+    return call(
       context,
       "builtin:build-data",
       "refresh_build_data",
-      { requestId: requestId(context, "build-data") },
+      {
+        requestId: requestId(context, "build-data"),
+        ...(agentId ? { agentId } : {}),
+      },
       {
         sessionPatch: (output) => ({
           buildData: object(output.collection, "Build-data collection output"),
@@ -737,8 +745,8 @@ function registerExpansionAdapters(
               );
         },
       },
-    ),
-  );
+    );
+  });
   executor.register("BUILD_DATA_DELETE", (context) =>
     call(
       context,

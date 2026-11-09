@@ -66,6 +66,15 @@ function overlappingPaths(a: string, b: string): boolean {
   );
 }
 
+function operationResourceKey({ kind, key }: OperationResource): string {
+  if (kind !== "DESTINATION") return key;
+  // Legacy jobs persisted the simulator UUID exactly as the client sent it.
+  return key.replace(
+    /(:destination:SIMULATOR:)([a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12})$/,
+    (_match, prefix: string, id: string) => prefix + id.toUpperCase(),
+  );
+}
+
 export function operationResourcesConflict(
   a: OperationResource,
   b: OperationResource,
@@ -91,7 +100,7 @@ export function operationResourcesConflict(
     a.kind === b.kind &&
     (a.kind === "PATH"
       ? agentOverlap && overlappingPaths(a.path ?? a.key, b.path ?? b.key)
-      : a.key === b.key);
+      : operationResourceKey(a) === operationResourceKey(b));
   if (!same) return false;
   if (a.mode === "INTENT" && b.mode === "INTENT") return false;
   if (a.mode === "READ" && (b.mode === "READ" || b.mode === "BUILD"))
@@ -121,10 +130,11 @@ export function normalizeOperationResources(
       !Object.hasOwn(strength, resource.mode)
     )
       throw new Error("Invalid operation resource");
-    const id = `${resource.kind}:${resource.key}`;
+    const key = operationResourceKey(resource);
+    const id = `${resource.kind}:${key}`;
     const old = unique.get(id);
     if (!old || strength[resource.mode] > strength[old.mode])
-      unique.set(id, resource);
+      unique.set(id, key === resource.key ? resource : { ...resource, key });
   }
   return [...unique.values()].sort((a, b) =>
     `${a.kind}:${a.key}`.localeCompare(`${b.kind}:${b.key}`),

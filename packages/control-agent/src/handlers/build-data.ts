@@ -189,49 +189,65 @@ async function scanRoot(
 
 async function scanDeviceSupport(
   signal: AbortSignal,
-): Promise<{ entries: BuildDataScanEntry[]; warning: string | null }> {
-  const configuredRoot = join(
-    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY ?? homedir(),
-    ...(process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY
-      ? []
-      : ["Library", "Developer", "Xcode", "iOS DeviceSupport"]),
-  );
-  signal.throwIfAborted();
-  let rootPath: string;
-  try {
-    rootPath = await realpath(configuredRoot);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { entries: [], warning: null };
+): Promise<{ entries: BuildDataScanEntry[]; warnings: string[] }> {
+  const xcode = join(homedir(), "Library", "Developer", "Xcode");
+  const iosRoot =
+    process.env.ADE_IOS_DEVICE_SUPPORT_DIRECTORY ||
+    join(xcode, "iOS DeviceSupport");
+  const entries: BuildDataScanEntry[] = [];
+  const warnings: string[] = [];
+  const roots: [path: string, platform: string][] = [[iosRoot, "iOS"]];
+  const scanned = new Set<string>();
+  const suffix = " DeviceSupport";
+  const warn = (path: string, error: unknown) => {
+    signal.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      warnings.push(`${path}: ${errorMessage(error)}`);
     }
-    return {
-      entries: [],
-      warning: `${configuredRoot}: ${errorMessage(error)}`,
-    };
-  }
+  };
+
   try {
-    const children = await readdir(rootPath, { withFileTypes: true });
-    return {
-      entries: children
-        .filter((child) => child.isDirectory() && !child.isSymbolicLink())
-        .map((child) => ({
+    signal.throwIfAborted();
+    const root = await realpath(xcode);
+    for (const child of await readdir(root, { withFileTypes: true })) {
+      if (!child.isDirectory() || !child.name.endsWith(suffix)) continue;
+      const platform = child.name.slice(0, -suffix.length).trim();
+      if (!platform || platform === "iOS") continue;
+      roots.push([
+        join(root, child.name),
+        platform === "xrOS" ? "visionOS" : platform,
+      ]);
+    }
+  } catch (error) {
+    warn(xcode, error);
+  }
+  for (const [path, platform] of roots) {
+    signal.throwIfAborted();
+    try {
+      const rootPath = await realpath(path);
+      if ((path !== iosRoot && rootPath !== path) || scanned.has(rootPath))
+        continue;
+      scanned.add(rootPath);
+      for (const child of await readdir(rootPath, { withFileTypes: true })) {
+        if (!child.isDirectory()) continue;
+        entries.push({
           path: join(rootPath, child.name),
           rootPath,
           name: child.name,
-          kind: "DEVICE_SUPPORT" as const,
+          kind: "DEVICE_SUPPORT",
+          deviceSupportPlatform: platform,
           workspacePath: null,
           modifiedAt: null,
           volumeId: null,
-        }))
-        .sort((first, second) => first.name.localeCompare(second.name)),
-      warning: null,
-    };
-  } catch (error) {
-    return {
-      entries: [],
-      warning: `${rootPath}: ${errorMessage(error)}`,
-    };
+        });
+      }
+    } catch (error) {
+      warn(path, error);
+    }
   }
+
+  entries.sort((first, second) => first.name.localeCompare(second.name));
+  return { entries, warnings };
 }
 
 export const scanBuildData: AgentJobHandler = async (
@@ -260,7 +276,7 @@ export const scanBuildData: AgentJobHandler = async (
   }
   const deviceSupport = await scanDeviceSupport(signal);
   entries.push(...deviceSupport.entries);
-  if (deviceSupport.warning) warnings.push(deviceSupport.warning);
+  warnings.push(...deviceSupport.warnings);
   return { ...successfulProcess, entries, warnings };
 };
 

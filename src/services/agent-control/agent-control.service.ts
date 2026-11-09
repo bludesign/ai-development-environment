@@ -88,6 +88,18 @@ import {
   type DerivedDataLocationMode,
 } from "@ai-development-environment/agent-contract/build-data";
 import {
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_INSPECT_JOB_KIND,
+  SIMULATOR_INVENTORY_JOB_KIND,
+  SIMULATOR_JOB_KINDS,
+  SIMULATOR_RESET_JOB_KIND,
+  simulatorActionPayload,
+  simulatorCreatePayload,
+  simulatorEmptyPayload,
+  simulatorInspectPayload,
+} from "@ai-development-environment/agent-contract/simulators";
+import {
   DEFAULT_DISK_SPACE_PRESSURE_THRESHOLD_GIB,
   DISK_SPACE_STALE_AFTER_SECONDS,
   monitoredDiskSpaceVolumes,
@@ -238,6 +250,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...COVERAGE_JOB_KINDS,
   ...CRASH_JOB_KINDS,
   ...BUILD_DATA_JOB_KINDS,
+  ...SIMULATOR_JOB_KINDS,
   ...CODEBASE_JOB_KINDS,
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
@@ -261,6 +274,12 @@ type CompletionHandler = (job: {
   resultJson: string | null;
   error: string | null;
 }) => Promise<void>;
+type CompletionObserver = (
+  job: Parameters<CompletionHandler>[0] & {
+    idempotencyKey: string;
+    timeoutSeconds: number;
+  },
+) => Promise<void>;
 type ConnectionHandler = (agentId: string) => Promise<void>;
 
 export type RequestIdentity = {
@@ -332,6 +351,25 @@ export function validateJob(kind: string, payload: unknown): void {
   }
   if (kind === BUILD_DATA_DELETE_JOB_KIND) {
     buildDataDeletePayload(value);
+    return;
+  }
+  if (
+    kind === SIMULATOR_INVENTORY_JOB_KIND ||
+    kind === SIMULATOR_RESET_JOB_KIND
+  ) {
+    simulatorEmptyPayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_INSPECT_JOB_KIND) {
+    simulatorInspectPayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_CREATE_JOB_KIND) {
+    simulatorCreatePayload(value);
+    return;
+  }
+  if (kind === SIMULATOR_ACTION_JOB_KIND) {
+    simulatorActionPayload(value);
     return;
   }
   if (kind === CODEBASE_BROWSE_JOB_KIND) {
@@ -593,7 +631,7 @@ function publishJob(job: {
 
 export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
-  private readonly completionObservers = new Set<CompletionHandler>();
+  private readonly completionObservers = new Set<CompletionObserver>();
   private readonly connectionHandlers = new Set<ConnectionHandler>();
   private readonly buildAdmissionGuards = new Set<
     (worktreeId: string) => Promise<void>
@@ -657,7 +695,7 @@ export class AgentControlService {
     this.completionHandlers.set(kind, handler);
   }
 
-  registerCompletionObserver(handler: CompletionHandler): void {
+  registerCompletionObserver(handler: CompletionObserver): void {
     this.completionObservers.add(handler);
   }
 
@@ -710,7 +748,7 @@ export class AgentControlService {
     });
   }
 
-  private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
+  private async projectCompletion(job: Parameters<CompletionObserver>[0]) {
     await this.completionHandlers.get(job.kind)?.(job);
     await Promise.allSettled(
       [...this.completionObservers].map((observer) => observer(job)),
@@ -1137,6 +1175,13 @@ export class AgentControlService {
   async getJob(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findUnique({ where: { id } });
+  }
+
+  async getJobByIdempotencyKey(agentId: string, idempotencyKey: string) {
+    const prisma = await getPrismaClient();
+    return prisma.agentJob.findUnique({
+      where: { agentId_idempotencyKey: { agentId, idempotencyKey } },
+    });
   }
 
   async getJobCommandName(job: {
@@ -1737,34 +1782,42 @@ export class AgentControlService {
 
   async cancelJob(jobId: string) {
     const prisma = await getPrismaClient();
-    const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new Error("Job not found");
-    if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
-    const commandCancellation =
-      job.kind === COMMAND_RUN_JOB_KIND ||
-      Boolean(
-        job.status !== "QUEUED" &&
-        (job.executionToken || job.codebaseId || job.operationResourcesJson),
-      );
-    const updated = await prisma.agentJob.update({
-      where: { id: jobId },
-      data: commandCancellation
-        ? { status: "CANCELLING" }
-        : { status: "CANCELLED", finishedAt: new Date() },
-    });
-    if (updated.status === "CANCELLED") {
-      await releaseOperation(
-        "AGENT_JOB",
-        jobId,
-        job.executionToken ?? `legacy:${jobId}`,
-      );
-      await this.projectCompletion(updated);
+    while (true) {
+      const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
+      if (!job) throw new Error("Job not found");
+      if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
+      const needsAcknowledgement =
+        job.kind === COMMAND_RUN_JOB_KIND ||
+        Boolean(
+          job.status !== "QUEUED" &&
+          (job.executionToken || job.codebaseId || job.operationResourcesJson),
+        );
+      const updated = await prisma.$transaction(async (transaction) => {
+        const [cancelled] = await transaction.agentJob.updateManyAndReturn({
+          where: { id: jobId, status: job.status },
+          data: needsAcknowledgement
+            ? { status: "CANCELLING" }
+            : { status: "CANCELLED", finishedAt: new Date() },
+        });
+        if (cancelled?.status === "CANCELLED") {
+          await releaseOperation(
+            "AGENT_JOB",
+            jobId,
+            cancelled.executionToken ?? `legacy:${jobId}`,
+            transaction,
+          );
+        }
+        return cancelled;
+      });
+      // A claim or completion can change whether cancellation needs an agent acknowledgement.
+      if (!updated) continue;
+      if (updated.status === "CANCELLED") await this.projectCompletion(updated);
+      publishJob(updated);
+      agentEventBus.publish(agentEventsTopic(updated.agentId), {
+        agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
+      });
+      return updated;
     }
-    publishJob(updated);
-    agentEventBus.publish(agentEventsTopic(job.agentId), {
-      agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
-    });
-    return updated;
   }
 
   async timeoutCollectionJobs(collectionId: string) {

@@ -6,6 +6,7 @@ import {
   type WorkflowDefinition,
 } from "@/lib/workflows/definition";
 import { WorkflowEventsService } from "./workflow-events.service";
+import { SIMULATOR_JOBS_WAIT } from "./simulator-adapters";
 import { WorkflowsService } from "./workflows.service";
 
 const prisma = vi.hoisted(() => ({
@@ -1333,6 +1334,115 @@ describe("workflow runtime lifecycle guards", () => {
     expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
   });
 
+  test("cancels linked simulator jobs after closing the run and retries cleanup on repeated cancellation", async () => {
+    const run = { status: "WAITING", worktreeId: null };
+    prisma.workflowRun.findUnique.mockResolvedValue(run);
+    prisma.workflowRun.updateMany.mockImplementationOnce(async () => {
+      run.status = "CANCELLED";
+      return { count: 1 };
+    });
+    prisma.workflowRunResourceLink.findMany.mockResolvedValue([
+      { resourceId: "simulator-job" },
+    ]);
+    const observedStatuses: string[] = [];
+    const cancelJob = vi.fn(async () => {
+      observedStatuses.push(run.status);
+    });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        cancelJob,
+        registerCompletionHandler: vi.fn(),
+        registerCompletionObserver: vi.fn(),
+      } as never,
+    );
+
+    await service.lifecycle("run-1", "CANCEL");
+    await service.lifecycle("run-1", "CANCEL");
+
+    expect(prisma.workflowRunResourceLink.findMany).toHaveBeenCalledWith({
+      where: {
+        runId: "run-1",
+        kind: "AGENT_JOB",
+        attempt: {
+          waits: {
+            some: { kind: SIMULATOR_JOBS_WAIT, status: { not: "RESOLVED" } },
+          },
+        },
+      },
+      select: { resourceId: true },
+      distinct: ["resourceId"],
+    });
+    expect(prisma.workflowWait.updateMany).toHaveBeenCalledOnce();
+    expect(cancelJob.mock.calls).toEqual([
+      ["simulator-job"],
+      ["simulator-job"],
+    ]);
+    expect(observedStatuses).toEqual(["CANCELLED", "CANCELLED"]);
+  });
+
+  test("cancels a simulator job whose submission finishes after run cancellation", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue({ status: "CANCELLED" });
+    const cancelJob = vi.fn().mockResolvedValue({ status: "CANCELLED" });
+    const service = new WorkflowsService(
+      new WorkflowEventsService(),
+      undefined,
+      undefined,
+      undefined,
+      {
+        cancelJob,
+        registerCompletionHandler: vi.fn(),
+        registerCompletionObserver: vi.fn(),
+      } as never,
+    );
+
+    await internals(service).parkAttempt(
+      { id: "attempt-1", runId: "run-1" },
+      { id: "reset", kind: "SIMULATOR_RESET" },
+      {
+        wait: { kind: SIMULATOR_JOBS_WAIT },
+        links: [{ kind: "AGENT_JOB", resourceId: "late-simulator-job" }],
+      },
+    );
+
+    expect(prisma.workflowWait.create).not.toHaveBeenCalled();
+    expect(cancelJob).toHaveBeenCalledExactlyOnceWith("late-simulator-job");
+  });
+
+  test("restores completed simulator output at its declared path for downstream steps in the same iteration", async () => {
+    const output = { simulatorId: "01234567-89AB-CDEF-0123-456789ABCDEF" };
+    prisma.workflowStepAttempt.findMany.mockResolvedValue([
+      {
+        nodeId: "create",
+        kind: "SIMULATOR_CREATE",
+        outputJson: JSON.stringify({ value: output }),
+      },
+    ]);
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    const data = await internals(service).iterationSessionData(
+      { id: "run-1" },
+      { generation: 1, iterationKey: "2" },
+      { steps: { earlier: { output: { preserved: true } } } },
+    );
+
+    expect(prisma.workflowStepAttempt.findMany).toHaveBeenCalledWith({
+      where: {
+        runId: "run-1",
+        generation: 1,
+        iterationKey: "2",
+        status: "SUCCEEDED",
+      },
+      orderBy: { finishedAt: "asc" },
+    });
+    expect(data).toEqual({
+      steps: { create: { output }, earlier: { output: { preserved: true } } },
+    });
+  });
+
   test("names the step and what it parked on when a step waits", async () => {
     prisma.workflowRun.findUnique.mockResolvedValue({ status: "RUNNING" });
     const service = new WorkflowsService(new WorkflowEventsService());
@@ -1812,6 +1922,49 @@ describe("workflow runtime lifecycle guards", () => {
     expect(
       Math.round((update.data.resumeAfter.getTime() - Date.now()) / 1_000),
     ).toBe(7);
+  });
+
+  test("persists successful and failed simulator targets on a failed bulk step", async () => {
+    const wait = pendingCommandWait({});
+    const definition = JSON.parse(wait.attempt.run.version.definitionJson);
+    definition.nodes[0].kind = "SIMULATOR_DELETE";
+    wait.attempt.run.version.definitionJson = JSON.stringify(definition);
+    prisma.workflowWait.findMany.mockResolvedValue([
+      {
+        ...wait,
+        kind: SIMULATOR_JOBS_WAIT,
+        externalKey: "serialized simulator targets",
+      },
+    ]);
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    prisma.workflowRun.findUnique.mockResolvedValue({
+      id: "run-1",
+      status: "WAITING",
+      sessionDataJson: "{}",
+    });
+    const output = {
+      targets: [
+        { jobId: "deleted", status: "SUCCEEDED", error: null },
+        { jobId: "failed", status: "FAILED", error: "Simulator is booted" },
+      ],
+    };
+    const service = new WorkflowsService(new WorkflowEventsService());
+    service.registerWaitPoller(SIMULATOR_JOBS_WAIT, async () => ({
+      pending: false,
+      result: output,
+      error: "1 of 2 simulator deletions failed",
+    }));
+
+    await internals(service).resolveDueWaits();
+
+    const update = prisma.workflowRun.update.mock.calls[0]?.[0];
+    expect(JSON.parse(update.data.sessionDataJson).steps["step-1"]).toEqual({
+      status: "FAILED",
+      error: "1 of 2 simulator deletions failed",
+      output,
+    });
+    const attempt = prisma.workflowStepAttempt.updateMany.mock.calls[0]?.[0];
+    expect(JSON.parse(attempt.data.outputJson)).toEqual({ value: output });
   });
 
   test("parks ready attempts as part of requesting a pause", async () => {

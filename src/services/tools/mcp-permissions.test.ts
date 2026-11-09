@@ -30,6 +30,7 @@ function productionRegistry() {
     gitlab: placeholder,
     skills: placeholder,
     buildData: placeholder,
+    simulators: placeholder,
     tailscale: placeholder,
     signingAssets: placeholder,
     iosDevices: placeholder,
@@ -72,6 +73,15 @@ function oauthContext(scopes: readonly string[]): ToolInvocationContext {
 }
 
 const newPermissionBoundaries: Array<[string, McpPermission]> = [
+  ["get_simulator_job", "read"],
+  ["inspect_simulator", "read"],
+  ["refresh_simulator_inventory", "read"],
+  ["create_simulator", "write"],
+  ["open_simulator_data_folder", "write"],
+  ["delete_simulators", "destructive"],
+  ["erase_simulator", "destructive"],
+  ["launch_simulator_app", "destructive"],
+  ["reset_simulators", "destructive"],
   ["get_repository_transfer_operation", "read"],
   ["get_crash_settings", "read"],
   ["get_run_drafts", "read"],
@@ -114,7 +124,7 @@ const newPermissionBoundaries: Array<[string, McpPermission]> = [
 describe("MCP server-owned permissions", () => {
   test("classifies every built-in exactly once with no stale entries", () => {
     const registry = productionRegistry();
-    expect(registry.definitions()).toHaveLength(560);
+    expect(registry.definitions()).toHaveLength(577);
     expect([...BUILT_IN_MCP_PERMISSIONS.keys()].sort()).toEqual(
       registry
         .definitions()
