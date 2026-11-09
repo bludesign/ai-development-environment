@@ -29,6 +29,13 @@ type NamespaceField = { name: string; description: string };
  * sync.
  */
 export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
+  simulator: [{ name: "id", description: "Simulator UUID when available" }],
+  simulatorOperation: [
+    { name: "jobId", description: "Simulator agent job ID" },
+    { name: "operation", description: "Simulator operation" },
+    { name: "status", description: "Terminal agent job status" },
+    { name: "error", description: "Job error, if any" },
+  ],
   change: [
     { name: "reason", description: "Domain change reason" },
     { name: "ids", description: "Changed entity ids or storage keys" },

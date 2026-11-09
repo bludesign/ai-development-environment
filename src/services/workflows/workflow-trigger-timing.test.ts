@@ -52,6 +52,24 @@ function matcher() {
 }
 
 describe("timed workflow triggers", () => {
+  test("matches simulator completion by agent, operation, and outcome", async () => {
+    const matches = matcher();
+    const config = { agentId: "mac", operation: "DELETE", status: "SUCCEEDED" };
+    const payload = {
+      agent: { id: "mac" },
+      simulatorOperation: { operation: "DELETE", status: "SUCCEEDED" },
+    };
+    const match = (filters: Record<string, unknown>) =>
+      matches("SIMULATOR_OPERATION_RESULT", filters, payload);
+    await expect(match({})).resolves.toBe(true);
+    await expect(match(config)).resolves.toBe(true);
+    await expect(match({ ...config, agentId: "different-mac" })).resolves.toBe(
+      false,
+    );
+    await expect(match({ ...config, operation: "ERASE" })).resolves.toBe(false);
+    await expect(match({ ...config, status: "FAILED" })).resolves.toBe(false);
+  });
+
   test("dirty filters do not suppress clean resets or consume a nonmatching threshold crossing", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-28T12:00:00Z"));

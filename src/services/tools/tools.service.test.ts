@@ -10,6 +10,7 @@ import {
 } from "./tools.service";
 import type { BuildsService } from "@/services/builds";
 import { CREDENTIALS } from "@/services/credentials";
+import type { McpToolSnapshotEntry } from "./types";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -627,6 +628,7 @@ describe("MCP tool presets", () => {
         findUnique: vi.fn().mockResolvedValue({
           agentId: "agent-1",
           repositoryId: "repository-1",
+          workflowRunId: "workflow-run-1",
           mcpToolNamesJson: JSON.stringify([toolName, "removed_tool"]),
         }),
       },
@@ -641,6 +643,7 @@ describe("MCP tool presets", () => {
     await expect(service.mcpRunToolNames("run-1", "agent-1")).resolves.toEqual({
       status: "OK",
       repositoryId: "repository-1",
+      workflowRunId: "workflow-run-1",
       toolNames: [toolName],
     });
   });
@@ -667,4 +670,107 @@ describe("MCP tool presets", () => {
     ).rejects.toThrow("run repository");
     expect(repositoryPreparations).toHaveBeenCalledTimes(1);
   });
+
+  test.each(["legacy", "snapshot"])(
+    "scopes %s run simulator tools to the authenticated agent",
+    async (dispatch) => {
+      const enqueue = vi.fn().mockResolvedValue({
+        id: "job-1",
+        agentId: "studio",
+        status: "QUEUED",
+        timeoutSeconds: 120,
+      });
+      const getJob = vi.fn();
+      const deleteSelected = vi.fn();
+      const service = new ToolsService(
+        {} as never,
+        undefined,
+        { simulators: { enqueue, getJob, deleteSelected } as never },
+        undefined,
+        {
+          execute: async (
+            _context: unknown,
+            operation: () => Promise<unknown>,
+          ) => operation(),
+        } as never,
+      );
+      const context = {
+        runId: "run-1",
+        runAgentId: "studio",
+        workflowRunId: "workflow-run-1",
+        caller: "agent:studio",
+        correlationId: "request-1",
+        source: "MCP" as const,
+      };
+      const call = (name: string, args: Record<string, unknown>) => {
+        if (dispatch === "legacy")
+          return service.callRunBuiltInTool(name, args, null, context);
+        const entry = {
+          reference: { source: "BUILTIN", name },
+        } as McpToolSnapshotEntry;
+        return service.callSnapshotTool(entry, args, context, null);
+      };
+      const simulatorId = "CB8F6525-07C9-439E-B52D-2F7FC98BBF90";
+      await expect(
+        call("inspect_simulator", {
+          agentId: "remote",
+          simulatorId,
+          requestId: "request-1",
+        }),
+      ).rejects.toThrow("run agent");
+      await expect(
+        call("get_simulator_job", { agentId: "remote", jobId: "job-1" }),
+      ).rejects.toThrow("run agent");
+      await expect(
+        call("delete_simulators", {
+          requestId: "request-1",
+          confirm: true,
+          targets: [
+            { agentId: "studio", simulatorId },
+            { agentId: "remote", simulatorId },
+          ],
+        }),
+      ).rejects.toThrow("run agent");
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(getJob).not.toHaveBeenCalled();
+      expect(deleteSelected).not.toHaveBeenCalled();
+
+      await expect(
+        call("inspect_simulator", {
+          agentId: "studio",
+          simulatorId,
+          requestId: "request-1",
+        }),
+      ).resolves.toMatchObject({
+        structuredContent: { jobId: "job-1" },
+      });
+      expect(enqueue).toHaveBeenCalledExactlyOnceWith(
+        "studio",
+        "request-1",
+        "simulators.inspect",
+        { simulatorId },
+        { source: "WORKFLOW", requestScope: ["run", "run-1"] },
+      );
+
+      await service.callTool(
+        {
+          groupId: "builtin:simulators",
+          name: "inspect_simulator",
+          arguments: { agentId: "studio", simulatorId, requestId: "request-2" },
+        },
+        {
+          caller: "workflow:workflow-run-1",
+          correlationId: "attempt-1",
+          source: "WORKFLOW",
+        },
+      );
+      expect(enqueue).toHaveBeenLastCalledWith(
+        "studio",
+        "request-2",
+        "simulators.inspect",
+        { simulatorId },
+        { source: "WORKFLOW" },
+      );
+    },
+  );
 });

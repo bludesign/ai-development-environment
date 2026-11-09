@@ -6,6 +6,11 @@ import {
   BUILD_DATA_DELETE_JOB_KIND,
   parseBuildDataDeleteResult,
 } from "@ai-development-environment/agent-contract/build-data";
+import {
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_RESET_JOB_KIND,
+} from "@ai-development-environment/agent-contract/simulators";
 
 import { DISK_SPACE_POLL_INTERVAL_SECONDS } from "@ai-development-environment/agent-contract/disk-space";
 import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
@@ -32,6 +37,7 @@ import {
 } from "@/services/agent-control";
 import { getPrismaClient } from "@/data/prisma-client";
 import { mergeSessionData } from "@/lib/workflows/session";
+import { SIMULATOR_COMPLETION_STATUSES } from "@/lib/workflows/simulators";
 import {
   diskSpaceSessionData,
   diskSpaceStateCursor,
@@ -50,6 +56,10 @@ import type { PollingService } from "@/services/polling";
 import type { PushNotificationsService } from "@/services/push-notifications";
 import type { SigningAssetsService } from "@/services/signing-assets";
 import type { SkillsService } from "@/services/skills";
+import {
+  isWorkflowSimulatorJob,
+  summarizeSimulatorJob,
+} from "@/services/simulators/simulators.service";
 
 import type { WorkflowEventsService } from "./workflow-events.service";
 import {
@@ -58,6 +68,15 @@ import {
 } from "./domain-event-bridge";
 
 type SessionData = Record<string, unknown>;
+
+const SIMULATOR_COMPLETION_KINDS = new Set<string>([
+  SIMULATOR_ACTION_JOB_KIND,
+  SIMULATOR_CREATE_JOB_KIND,
+  SIMULATOR_RESET_JOB_KIND,
+]);
+const simulatorCompletionStatuses = new Set<string>(
+  SIMULATOR_COMPLETION_STATUSES,
+);
 
 export type WorkflowEventBridgeDomains = DomainWorkflowEventServices & {
   buildData?: Pick<BuildDataService, "getCollection">;
@@ -219,7 +238,32 @@ export class WorkflowEventBridge {
     ccusageCollectionId?: string | null;
     buildDataCollectionId?: string | null;
     resultJson: string | null;
+    payloadJson: string;
+    idempotencyKey: string;
+    timeoutSeconds: number;
   }): Promise<void> {
+    if (
+      SIMULATOR_COMPLETION_KINDS.has(job.kind) &&
+      simulatorCompletionStatuses.has(job.status) &&
+      !isWorkflowSimulatorJob(job)
+    ) {
+      const { simulatorId, operation, error } = summarizeSimulatorJob(job);
+      await this.record(
+        "SIMULATOR_OPERATION_RESULT",
+        job.agentId,
+        `simulator-operation:${job.id}:${job.status}`,
+        {
+          agent: { id: job.agentId },
+          ...(simulatorId ? { simulator: { id: simulatorId } } : {}),
+          simulatorOperation: {
+            jobId: job.id,
+            operation,
+            status: job.status,
+            error,
+          },
+        },
+      );
+    }
     if (
       job.kind === BUILD_DATA_DELETE_JOB_KIND &&
       new Set(["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT", "INVALID"]).has(

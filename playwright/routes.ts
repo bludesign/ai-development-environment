@@ -58,6 +58,8 @@ export type RouteEntry = {
   sessionAgents?: boolean;
   /** Show simulator Edit mode with one agent's eligible devices selected. */
   simulatorSelection?: boolean;
+  /** Show simulator automation entries in the tool catalog or workflow palette. */
+  simulatorAutomation?: "tools" | "workflows";
 };
 
 const simulatorInventoryCapture = {
@@ -590,6 +592,12 @@ export const routes: RouteEntry[] = [
   // Tools
   { name: "tools", path: "/system/tools", readyTexts: ["Core Tools"] },
   {
+    name: "tools-simulators",
+    path: "/system/tools",
+    readyTexts: ["Core Tools"],
+    simulatorAutomation: "tools",
+  },
+  {
     name: "tools-catalog-export",
     path: "/system/tools",
     readyTexts: ["Core Tools"],
@@ -624,6 +632,11 @@ export const routes: RouteEntry[] = [
   {
     name: "workflow-edit",
     path: `/dashboard/workflows/${ids.workflows.prReview}/edit`,
+  },
+  {
+    name: "workflow-simulators",
+    path: `/dashboard/workflows/${ids.workflows.prReview}/edit`,
+    simulatorAutomation: "workflows",
   },
   { name: "workflow-new", path: "/dashboard/workflows/new" },
   {

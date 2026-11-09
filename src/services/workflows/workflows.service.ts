@@ -94,6 +94,10 @@ import {
 } from "@ai-development-environment/agent-contract/workflows";
 import { evaluateWorkflowScript } from "./compute";
 import {
+  SIMULATOR_JOBS_WAIT,
+  WORKFLOW_RUN_CANCELLED,
+} from "./simulator-adapters";
+import {
   WorkflowEventsService,
   type RecordWorkflowEventInput,
 } from "./workflow-events.service";
@@ -622,7 +626,7 @@ export class WorkflowsService {
   private readonly claimedSecretJobs = new Set<string>();
   private readonly waitPollers = new Map<
     string,
-    (externalKey: string) => Promise<WorkflowWaitPollResult>
+    (externalKey: string, timedOut: boolean) => Promise<WorkflowWaitPollResult>
   >();
 
   constructor(
@@ -724,6 +728,63 @@ export class WorkflowsService {
         this.commandsService!.terminateRun(resourceId),
       ),
     );
+  }
+
+  private async linkedSimulatorJobIds(
+    prisma: Prisma.TransactionClient,
+    runId: string,
+  ): Promise<string[]> {
+    if (!this.agentControl) return [];
+    const links = await prisma.workflowRunResourceLink.findMany({
+      where: {
+        runId,
+        kind: "AGENT_JOB",
+        attempt: {
+          waits: {
+            some: { kind: SIMULATOR_JOBS_WAIT, status: { not: "RESOLVED" } },
+          },
+        },
+      },
+      select: { resourceId: true },
+      distinct: ["resourceId"],
+    });
+    return links.map(({ resourceId }) => resourceId);
+  }
+
+  private async cancelSimulatorJobs(jobIds: string[]): Promise<void> {
+    const agentControl = this.agentControl;
+    if (!agentControl) return;
+    const results = await Promise.allSettled(
+      jobIds.map((id) => agentControl.cancelJob(id)),
+    );
+    results.forEach((result, index) => {
+      if (result.status === "rejected") {
+        console.error(
+          `Could not cancel simulator job ${jobIds[index]}:`,
+          result.reason,
+        );
+      }
+    });
+  }
+
+  private async cancelUnparkedSimulatorJobs(
+    runId: string,
+    result: WorkflowExecutionResult,
+  ): Promise<void> {
+    if (result.wait?.kind !== SIMULATOR_JOBS_WAIT || !result.links?.length)
+      return;
+    const prisma = await getPrismaClient();
+    const run = await prisma.workflowRun.findUnique({
+      where: { id: runId },
+      select: { status: true },
+    });
+    if (!run || run.status === "CANCELLED") {
+      await this.cancelSimulatorJobs(
+        result.links
+          .filter(({ kind }) => kind === "AGENT_JOB")
+          .map(({ resourceId }) => resourceId),
+      );
+    }
   }
 
   private async promoteWorktreeAdmissions(
@@ -1080,7 +1141,10 @@ export class WorkflowsService {
 
   registerWaitPoller(
     kind: string,
-    poller: (externalKey: string) => Promise<WorkflowWaitPollResult>,
+    poller: (
+      externalKey: string,
+      timedOut: boolean,
+    ) => Promise<WorkflowWaitPollResult>,
   ): void {
     this.waitPollers.set(kind, poller);
   }
@@ -3236,6 +3300,22 @@ export class WorkflowsService {
       parseObject(json(trigger.configJson), "Trigger configuration"),
       payload,
     ) as Record<string, unknown>;
+    if (trigger.kind === "SIMULATOR_OPERATION_RESULT") {
+      const matchingPaths = {
+        agentId: "agent.id",
+        operation: "simulatorOperation.operation",
+        status: "simulatorOperation.status",
+      };
+      if (
+        Object.entries(matchingPaths).some(
+          ([key, path]) =>
+            config[key] != null &&
+            config[key] !== "" &&
+            config[key] !== getSessionValue(payload, path),
+        )
+      )
+        return false;
+    }
     if (
       trigger.kind === "SIGNING_ASSET_EXPIRING" &&
       config.thresholdPath === undefined
@@ -3622,17 +3702,16 @@ export class WorkflowsService {
       await this.controlLinkedAgentRuns(runId, "CONTINUE");
       await this.appendEvent(runId, null, "RUN_RESUMED", "Workflow resumed");
     } else {
+      if (run.status === "CANCELLED") {
+        await this.cancelSimulatorJobs(
+          await this.linkedSimulatorJobIds(prisma, runId),
+        );
+        return this.run(runId);
+      }
       if (TERMINAL_RUN_STATUSES.has(run.status)) return this.run(runId);
       await this.controlLinkedAgentRuns(runId, "CANCEL");
       await this.cancelWaitingCommandRuns(runId);
-      for (const [attemptId, controller] of this.activeExecutions) {
-        const attempt = await prisma.workflowStepAttempt.findUnique({
-          where: { id: attemptId },
-          select: { runId: true },
-        });
-        if (attempt?.runId === runId) controller.abort();
-      }
-      const cancelled = await prisma.$transaction(async (transaction) => {
+      const simulatorJobIds = await prisma.$transaction(async (transaction) => {
         const updated = await transaction.workflowRun.updateMany({
           where: {
             id: runId,
@@ -3644,7 +3723,7 @@ export class WorkflowsService {
             finishedAt: new Date(),
           },
         });
-        if (!updated.count) return false;
+        if (!updated.count) return null;
         await transaction.workflowStepAttempt.updateMany({
           where: {
             runId,
@@ -3668,9 +3747,17 @@ export class WorkflowsService {
         await transaction.worktreeWorkflowLease.deleteMany({
           where: { workflowRunId: runId },
         });
-        return true;
+        return this.linkedSimulatorJobIds(transaction, runId);
       });
-      if (!cancelled) return this.run(runId);
+      if (!simulatorJobIds) return this.run(runId);
+      for (const [attemptId, controller] of this.activeExecutions) {
+        const attempt = await prisma.workflowStepAttempt.findUnique({
+          where: { id: attemptId },
+          select: { runId: true },
+        });
+        if (attempt?.runId === runId) controller.abort(WORKFLOW_RUN_CANCELLED);
+      }
+      await this.cancelSimulatorJobs(simulatorJobIds);
       await this.appendEvent(
         runId,
         null,
@@ -5010,6 +5097,8 @@ export class WorkflowsService {
     });
     if (!(await this.acquireResourceLease(attempt, node, sessionData))) return;
     try {
+      if (signal.reason === WORKFLOW_RUN_CANCELLED)
+        throw new Error("Workflow step was cancelled");
       const resolvedNode: WorkflowNodeDefinition = {
         ...node,
         config: resolveWorkflowValue(node.config, sessionData) as Record<
@@ -5039,7 +5128,10 @@ export class WorkflowsService {
           signal,
         });
       }
-      if (signal.aborted) throw new Error("Workflow step was cancelled");
+      // Simulator submissions need to persist their job links or cancel their
+      // jobs when run cancellation won the race to close the attempt.
+      if (signal.aborted && result.wait?.kind !== SIMULATOR_JOBS_WAIT)
+        throw new Error("Workflow step was cancelled");
       if (result.wait) {
         await this.parkAttempt(attempt, node, result);
       } else {
@@ -5132,10 +5224,21 @@ export class WorkflowsService {
     }
     for (const completed of attempts) {
       const output = this.attemptOutput(completed) as {
+        value?: unknown;
         sessionPatch?: SessionData;
       };
       if (output.sessionPatch)
         result = mergeSessionData(result, output.sessionPatch);
+      if (
+        completed.kind.startsWith("SIMULATOR_") &&
+        output.value !== undefined
+      ) {
+        result = setSessionValue(
+          result,
+          `steps.${completed.nodeId}.output`,
+          output.value,
+        );
+      }
     }
     return result;
   }
@@ -5610,7 +5713,7 @@ export class WorkflowsService {
     if (!wait) throw new Error("Workflow wait is missing");
     const prisma = await getPrismaClient();
     const waitId = randomUUID();
-    const parked = await prisma.$transaction(async (transaction) => {
+    const parking = prisma.$transaction(async (transaction) => {
       const run = await transaction.workflowRun.findUnique({
         where: { id: attempt.runId },
       });
@@ -5685,7 +5788,14 @@ export class WorkflowsService {
       });
       return true;
     });
-    if (!parked) return;
+    const parked = await parking.catch(async (error) => {
+      await this.cancelUnparkedSimulatorJobs(attempt.runId, result);
+      throw error;
+    });
+    if (!parked) {
+      await this.cancelUnparkedSimulatorJobs(attempt.runId, result);
+      return;
+    }
     await this.appendEvent(
       attempt.runId,
       attempt.id,
@@ -5888,6 +5998,14 @@ export class WorkflowsService {
           status: "FAILED",
           phase: shouldRetry ? "RETRY_SCHEDULED" : "FAILED",
           error: error.message.slice(0, 20_000),
+          ...(result.output !== undefined
+            ? {
+                outputJson: JSON.stringify({
+                  value: result.output,
+                  sessionPatch: result.sessionPatch,
+                }),
+              }
+            : {}),
           finishedAt: new Date(),
           claimOwner: null,
           claimExpiresAt: null,
@@ -5968,11 +6086,12 @@ export class WorkflowsService {
       take: 100,
     });
     for (const wait of waits) {
+      const timedOut = wait.timeoutAt !== null && wait.timeoutAt <= now;
       if (
-        wait.timeoutAt &&
-        wait.timeoutAt <= now &&
+        timedOut &&
         wait.kind !== "RETRY" &&
-        wait.kind !== "DELAY"
+        wait.kind !== "DELAY" &&
+        wait.kind !== SIMULATOR_JOBS_WAIT
       ) {
         const timedOut = await updatePendingWait(wait.id, {
           status: "TIMED_OUT",
@@ -6070,7 +6189,10 @@ export class WorkflowsService {
           });
         }
       } else if (wait.externalKey && this.waitPollers.has(wait.kind)) {
-        const polled = await this.waitPollers.get(wait.kind)!(wait.externalKey);
+        const polled = await this.waitPollers.get(wait.kind)!(
+          wait.externalKey,
+          timedOut,
+        );
         if (wait.kind === "COMMAND_RUN" && !polled.pending) {
           // Command completion is reported only after output upload, but that
           // upload and this poll can still interleave. Scan once more before

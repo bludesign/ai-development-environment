@@ -330,6 +330,11 @@ model AgentJob {
   @@index([worktreeId, status, createdAt])
 }
 
+model SimulatorRequestReceipt {
+  requestKey    String @id
+  payloadDigest String
+}
+
 model TailscaleServeTemplate {
   id                  String                     @id
   name                String

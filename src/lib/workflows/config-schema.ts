@@ -191,7 +191,7 @@ function baseSchema(field: ConfigFieldDescriptor): JsonSchema {
         },
       };
     case "json":
-      return {};
+      return field.jsonSchema ?? {};
     case "model":
       // Handled by `modelFields` — the control spans three sibling keys.
       return { type: "string" };

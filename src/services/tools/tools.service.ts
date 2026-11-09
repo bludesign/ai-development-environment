@@ -36,6 +36,7 @@ import {
 import { McpPresetTransferService } from "./mcp-preset-transfer.service";
 import { compileMcpJsonSchema } from "./mcp-json-schema";
 import { assertMcpToolPermission } from "./mcp-oauth-dispatch";
+import { SIMULATORS_TOOL_GROUP_ID } from "./builtin-tools/simulators";
 
 import type {
   ExternalMcpServerInput,
@@ -726,6 +727,7 @@ export class ToolsService {
         status: "OK";
         toolNames: string[];
         repositoryId: string | null;
+        workflowRunId?: string;
         snapshot?: McpToolSnapshot;
       }
     | { status: "NOT_FOUND" }
@@ -739,10 +741,14 @@ export class ToolsService {
         mcpToolNamesJson: true,
         mcpToolSnapshotJson: true,
         repositoryId: true,
+        workflowRunId: true,
       },
     });
     if (!run) return { status: "NOT_FOUND" };
     if (run.agentId !== agentId) return { status: "FORBIDDEN" };
+    const workflow = run.workflowRunId
+      ? { workflowRunId: run.workflowRunId }
+      : {};
     if (run.mcpToolSnapshotJson) {
       const snapshot = JSON.parse(run.mcpToolSnapshotJson) as McpToolSnapshot;
       if (snapshot.schemaVersion !== 1 || !Array.isArray(snapshot.tools))
@@ -750,6 +756,7 @@ export class ToolsService {
       return {
         status: "OK",
         repositoryId: run.repositoryId,
+        ...workflow,
         toolNames: snapshot.tools.map(({ name }) => name),
         snapshot,
       };
@@ -763,6 +770,7 @@ export class ToolsService {
     return {
       status: "OK",
       repositoryId: run.repositoryId,
+      ...workflow,
       toolNames: this.builtInTools
         .definitions()
         .map(({ name }) => name)
@@ -1220,7 +1228,7 @@ export class ToolsService {
       input.name,
       !this.builtInTools.hasGroup(input.groupId),
     );
-    const operation = () => this.invokeTool(input);
+    const operation = () => this.invokeTool(input, context);
     return context
       ? this.audit.execute(
           {
@@ -1280,7 +1288,7 @@ export class ToolsService {
           "A Session cannot build its own worktree while it is editing files. Pause or finish this Session, then start the build from the app, or build a different worktree.",
         );
     }
-    const operation = () => this.builtInTools.callByName(name, args);
+    const operation = () => this.builtInTools.callByName(name, args, context);
     return context
       ? this.audit.execute(
           { ...context, groupId, toolName: name, arguments: args },
@@ -1295,6 +1303,14 @@ export class ToolsService {
     repositoryId: string | null,
     context?: ToolInvocationContext,
   ): ReturnType<BuiltInToolRegistry["callByName"]> {
+    if (
+      this.builtInTools.groupIdForName(name) === SIMULATORS_TOOL_GROUP_ID &&
+      !context?.runAgentId
+    ) {
+      throw new Error(
+        "Run-scoped MCP requires an authenticated simulator agent",
+      );
+    }
     if (RUN_REPOSITORY_SCOPED_TOOLS.has(name)) {
       const input =
         typeof args === "object" && args !== null && !Array.isArray(args)
@@ -1309,14 +1325,22 @@ export class ToolsService {
     return this.callBuiltInTool(name, args, context);
   }
 
-  private async invokeTool(input: {
-    groupId: string;
-    name: string;
-    arguments: Record<string, unknown>;
-  }): Promise<unknown> {
+  private async invokeTool(
+    input: {
+      groupId: string;
+      name: string;
+      arguments: Record<string, unknown>;
+    },
+    context?: ToolInvocationContext,
+  ): Promise<unknown> {
     if (this.builtInTools.hasGroup(input.groupId)) {
       await this.assertProviderToolConfigured(input.groupId);
-      return this.builtInTools.call(input.groupId, input.name, input.arguments);
+      return this.builtInTools.call(
+        input.groupId,
+        input.name,
+        input.arguments,
+        context,
+      );
     }
     if (!input.groupId.startsWith(EXTERNAL_GROUP_PREFIX)) {
       throw new Error("Unknown tool group");

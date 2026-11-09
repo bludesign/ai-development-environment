@@ -3,6 +3,7 @@ import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { expandSessionPaths } from "@/lib/workflows/session-schema";
 
 import { ConfigFieldsEditor } from "./config-fields-editor";
 
@@ -23,9 +24,11 @@ class ResizeObserverMock {
 function Harness({
   config: initial,
   kind,
+  sessionPaths = [{ path: "pr.labels", description: "Pull request labels" }],
 }: {
   config: Record<string, unknown>;
   kind: string;
+  sessionPaths?: ReturnType<typeof expandSessionPaths>;
 }) {
   const [config, setConfig] = useState(initial);
   return (
@@ -35,9 +38,7 @@ function Harness({
         kind={kind}
         onChange={setConfig}
         scope="step"
-        sessionPaths={[
-          { path: "pr.labels", description: "Pull request labels" },
-        ]}
+        sessionPaths={sessionPaths}
       />
       <pre data-testid="config">{JSON.stringify(config)}</pre>
     </TooltipProvider>
@@ -191,6 +192,41 @@ describe("interactive step configuration", () => {
     fireEvent.click(screen.getByRole("option", { name: "Not set" }));
 
     expect(config().jiraIssueKey).toBeUndefined();
+  });
+
+  test("binds a simulator agent to a prior step's output agent ID", () => {
+    render(
+      <Harness
+        config={{ agentId: { source: "SESSION", path: "agent.id" } }}
+        kind="SIMULATOR_RESET"
+        sessionPaths={expandSessionPaths([
+          "agent.*",
+          "steps.inspect.output.agentId",
+          "steps.inspect.output.simulatorId",
+          "steps.inspect.output.details.agentId",
+        ])}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Session path" }));
+    expect(
+      screen.queryByRole("option", {
+        name: "steps.inspect.output.simulatorId",
+      }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("option", {
+        name: "steps.inspect.output.details.agentId",
+      }),
+    ).toBeNull();
+    fireEvent.click(
+      screen.getByRole("option", { name: "steps.inspect.output.agentId" }),
+    );
+
+    expect(config().agentId).toEqual({
+      source: "SESSION",
+      path: "steps.inspect.output.agentId",
+    });
   });
 
   test("preserves structured terminal credential entries while editing", () => {

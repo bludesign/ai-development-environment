@@ -274,6 +274,12 @@ type CompletionHandler = (job: {
   resultJson: string | null;
   error: string | null;
 }) => Promise<void>;
+type CompletionObserver = (
+  job: Parameters<CompletionHandler>[0] & {
+    idempotencyKey: string;
+    timeoutSeconds: number;
+  },
+) => Promise<void>;
 type ConnectionHandler = (agentId: string) => Promise<void>;
 
 export type RequestIdentity = {
@@ -625,7 +631,7 @@ function publishJob(job: {
 
 export class AgentControlService {
   private readonly completionHandlers = new Map<string, CompletionHandler>();
-  private readonly completionObservers = new Set<CompletionHandler>();
+  private readonly completionObservers = new Set<CompletionObserver>();
   private readonly connectionHandlers = new Set<ConnectionHandler>();
   private readonly buildAdmissionGuards = new Set<
     (worktreeId: string) => Promise<void>
@@ -689,7 +695,7 @@ export class AgentControlService {
     this.completionHandlers.set(kind, handler);
   }
 
-  registerCompletionObserver(handler: CompletionHandler): void {
+  registerCompletionObserver(handler: CompletionObserver): void {
     this.completionObservers.add(handler);
   }
 
@@ -742,7 +748,7 @@ export class AgentControlService {
     });
   }
 
-  private async projectCompletion(job: Parameters<CompletionHandler>[0]) {
+  private async projectCompletion(job: Parameters<CompletionObserver>[0]) {
     await this.completionHandlers.get(job.kind)?.(job);
     await Promise.allSettled(
       [...this.completionObservers].map((observer) => observer(job)),
@@ -1169,6 +1175,13 @@ export class AgentControlService {
   async getJob(id: string) {
     const prisma = await getPrismaClient();
     return prisma.agentJob.findUnique({ where: { id } });
+  }
+
+  async getJobByIdempotencyKey(agentId: string, idempotencyKey: string) {
+    const prisma = await getPrismaClient();
+    return prisma.agentJob.findUnique({
+      where: { agentId_idempotencyKey: { agentId, idempotencyKey } },
+    });
   }
 
   async getJobCommandName(job: {
@@ -1769,34 +1782,42 @@ export class AgentControlService {
 
   async cancelJob(jobId: string) {
     const prisma = await getPrismaClient();
-    const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
-    if (!job) throw new Error("Job not found");
-    if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
-    const commandCancellation =
-      job.kind === COMMAND_RUN_JOB_KIND ||
-      Boolean(
-        job.status !== "QUEUED" &&
-        (job.executionToken || job.codebaseId || job.operationResourcesJson),
-      );
-    const updated = await prisma.agentJob.update({
-      where: { id: jobId },
-      data: commandCancellation
-        ? { status: "CANCELLING" }
-        : { status: "CANCELLED", finishedAt: new Date() },
-    });
-    if (updated.status === "CANCELLED") {
-      await releaseOperation(
-        "AGENT_JOB",
-        jobId,
-        job.executionToken ?? `legacy:${jobId}`,
-      );
-      await this.projectCompletion(updated);
+    while (true) {
+      const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
+      if (!job) throw new Error("Job not found");
+      if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
+      const needsAcknowledgement =
+        job.kind === COMMAND_RUN_JOB_KIND ||
+        Boolean(
+          job.status !== "QUEUED" &&
+          (job.executionToken || job.codebaseId || job.operationResourcesJson),
+        );
+      const updated = await prisma.$transaction(async (transaction) => {
+        const [cancelled] = await transaction.agentJob.updateManyAndReturn({
+          where: { id: jobId, status: job.status },
+          data: needsAcknowledgement
+            ? { status: "CANCELLING" }
+            : { status: "CANCELLED", finishedAt: new Date() },
+        });
+        if (cancelled?.status === "CANCELLED") {
+          await releaseOperation(
+            "AGENT_JOB",
+            jobId,
+            cancelled.executionToken ?? `legacy:${jobId}`,
+            transaction,
+          );
+        }
+        return cancelled;
+      });
+      // A claim or completion can change whether cancellation needs an agent acknowledgement.
+      if (!updated) continue;
+      if (updated.status === "CANCELLED") await this.projectCompletion(updated);
+      publishJob(updated);
+      agentEventBus.publish(agentEventsTopic(updated.agentId), {
+        agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
+      });
+      return updated;
     }
-    publishJob(updated);
-    agentEventBus.publish(agentEventsTopic(job.agentId), {
-      agentEvents: { type: "JOB_CANCEL_REQUESTED", job: updated },
-    });
-    return updated;
   }
 
   async timeoutCollectionJobs(collectionId: string) {
