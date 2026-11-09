@@ -815,6 +815,8 @@ input CustomBuildConfigurationInput {
   scheme: String!
   "Xcode build configuration."
   buildConfiguration: String!
+  "Shared export settings inherited by platform overrides."
+  exportSettings: JSON
   "Ordered platform overrides for this submission."
   platformConfigurations: [BuildPlatformConfigurationInput!]
 }
@@ -1023,6 +1025,8 @@ enum ProvisioningProfileType {
   ENTERPRISE
   "Represents the App Store option."
   APP_STORE
+  "Represents the Developer ID option."
+  DEVELOPER_ID
 }
 
 "Represents a signing team in the GraphQL API."

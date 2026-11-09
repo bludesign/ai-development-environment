@@ -746,6 +746,7 @@ describe("complete repository settings", () => {
         sourceKind: "WORKSPACE",
         sourcePath: "TV/Television.xcworkspace",
         advancedSettings: { collectDsyms: true },
+        exportSettings: { teamId: "TVTEAM1234" },
       },
       { platform: "IOS" },
     ];
@@ -768,8 +769,16 @@ describe("complete repository settings", () => {
             name: "Debug",
             scheme: "Mobile",
             buildConfiguration: "Debug",
-            defaultAction: "BUILD",
+            defaultAction: "ARCHIVE",
             advancedSettingsJson: "{}",
+            autoExport: true,
+            exportSettingsJson: JSON.stringify({
+              method: "DEBUGGING",
+              signingStyle: "AUTOMATIC",
+              uploadSymbols: true,
+              manageAppVersionAndBuildNumber: true,
+              testFlightInternalTestingOnly: false,
+            }),
             platformConfigurationsJson: JSON.stringify([
               {
                 ...platforms[0],

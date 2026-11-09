@@ -96,6 +96,7 @@ import {
   isMacBuildPlatform,
   parsePlatformConfigurations,
   requireBuildPlatform,
+  resolvePlatformExportSettings,
   storedBuildPlatform,
   storedPlatformConfigurations,
   type BuildPlatformConfigurationInput,
@@ -552,6 +553,7 @@ export type CustomBuildConfigurationInput = {
   sourcePath: string;
   scheme: string;
   buildConfiguration: string;
+  exportSettings?: unknown;
   platformConfigurations?: BuildPlatformConfigurationInput[] | null;
 };
 
@@ -642,7 +644,17 @@ function platformConfiguration<
     exportSettingsJson:
       profile.exportSettings == null
         ? configuration.exportSettingsJson
-        : JSON.stringify(profile.exportSettings),
+        : JSON.stringify(
+            resolvePlatformExportSettings(
+              platform,
+              configuration.exportSettingsJson
+                ? parseBuildExportSettings(
+                    parseJson(configuration.exportSettingsJson, null),
+                  )
+                : null,
+              profile.exportSettings,
+            ),
+          ),
   };
 }
 
@@ -860,6 +872,10 @@ export class BuildsService {
         kind: custom.sourceKind,
         relativePath: custom.sourcePath,
       });
+      const exportSettings =
+        custom.exportSettings == null
+          ? null
+          : parseBuildExportSettings(custom.exportSettings);
       const configuration = {
         id: null,
         sourceId: null,
@@ -875,13 +891,18 @@ export class BuildsService {
         defaultAction: "BUILD",
         advancedSettingsJson: "{}",
         autoExport: false,
-        exportSettingsJson: null,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       };
       if (useCaptured) return configuration;
       return platformConfiguration(
         configuration,
         custom.platformConfigurations
-          ? parsePlatformConfigurations(custom.platformConfigurations)
+          ? parsePlatformConfigurations(
+              custom.platformConfigurations,
+              exportSettings,
+            )
           : storedPlatformConfigurations(),
         platform,
       );
@@ -1092,7 +1113,10 @@ export class BuildsService {
     const platformConfigurations =
       input.platformConfigurations == null
         ? null
-        : parsePlatformConfigurations(input.platformConfigurations);
+        : parsePlatformConfigurations(
+            input.platformConfigurations,
+            exportSettings,
+          );
     const sharedSettings = {
       source,
       sourceId: existing?.sourceId ?? null,
@@ -1975,6 +1999,7 @@ export class BuildsService {
       );
     }
     const results = [];
+    let unconfirmed: Error | undefined;
     for (const { platform, ...selection } of selections) {
       const childRequestId = `platform:${stableDigest([requestId, platform])}`;
       try {
@@ -2004,14 +2029,34 @@ export class BuildsService {
           where: { requestKey: `${context.worktreeId}:${childRequestId}` },
           include: buildInclude,
         });
+        if (build && build.errorCode !== "QUEUE_FAILED") {
+          // A job can already be running even if saving its ID failed. Let the
+          // client replay the original batch so it can recover the same job.
+          unconfirmed ??=
+            error instanceof Error ? error : new Error(String(error));
+          continue;
+        }
         results.push({
           platform,
-          build: build?.errorCode === "QUEUE_FAILED" ? build : null,
+          build,
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
+    if (unconfirmed) throw unconfirmed;
     return results;
+  }
+
+  async wasBuildSubmissionRejected({
+    worktreeId,
+    requestId,
+  }: Pick<StartBuildContext, "worktreeId" | "requestId">) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { requestKey: `${worktreeId}:${requestId.trim()}` },
+      select: { errorCode: true, jobId: true },
+    });
+    return !build || (!build.jobId && build.errorCode === "QUEUE_FAILED");
   }
 
   async startBuild(
@@ -2062,13 +2107,17 @@ export class BuildsService {
     );
     requirePlatformAgent(worktree.codebase.agent, platform);
     await this.diskSpace?.assertWorktreeCanStart(worktree.id);
-    if (
-      input.worktreeCoverage &&
-      !capabilities(worktree.codebase.agent).includes(
-        IOS_COVERAGE_REPORT_JOB_KIND,
-      )
-    ) {
-      throw new Error("Build agent must be updated for worktree coverage");
+    if (input.worktreeCoverage) {
+      if (!(worktree.baseBranchOverride ?? worktree.codebase.defaultBranch)) {
+        throw new Error("A base branch is required for worktree coverage");
+      }
+      if (
+        !capabilities(worktree.codebase.agent).includes(
+          IOS_COVERAGE_REPORT_JOB_KIND,
+        )
+      ) {
+        throw new Error("Build agent must be updated for worktree coverage");
+      }
     }
     const resolvedConfiguration = await this.resolveConfiguration(
       input,
@@ -2636,9 +2685,14 @@ export class BuildsService {
       snapshot.configuration ?? {},
       "build configuration snapshot",
     );
-    const capturedSource = snapshot.platform
-      ? parseBuildSource(snapshotConfiguration.source)
-      : null;
+    const { source, scheme, buildConfiguration } = snapshotConfiguration;
+    const capturedSource =
+      snapshot.platform ||
+      (source != null &&
+        typeof scheme === "string" &&
+        typeof buildConfiguration === "string")
+        ? parseBuildSource(source)
+        : null;
     const snapshotScripts = Array.isArray(snapshot.scripts)
       ? snapshot.scripts
       : [];
@@ -2680,13 +2734,9 @@ export class BuildsService {
       ...(capturedSource && {
         capturedPlatformConfiguration: {
           source: capturedSource,
-          scheme: cleanName(
-            String(snapshotConfiguration.scheme ?? ""),
-            "Scheme",
-            256,
-          ),
+          scheme: cleanName(String(scheme ?? ""), "Scheme", 256),
           buildConfiguration: cleanName(
-            String(snapshotConfiguration.buildConfiguration ?? ""),
+            String(buildConfiguration ?? ""),
             "Xcode configuration",
             256,
           ),
@@ -2725,23 +2775,6 @@ export class BuildsService {
     serverUrlKind?: ServerUrlKind | null;
     telemetryRequestOrigin?: string | null;
   }) {
-    const prisma = await getPrismaClient();
-    const coverageWorktree = await prisma.worktree.findUnique({
-      where: { id: input.worktreeId },
-      select: {
-        baseBranchOverride: true,
-        codebase: { select: { defaultBranch: true } },
-      },
-    });
-    if (
-      !coverageWorktree ||
-      !(
-        coverageWorktree.baseBranchOverride ??
-        coverageWorktree.codebase.defaultBranch
-      )
-    ) {
-      throw new Error("A base branch is required for worktree coverage");
-    }
     const advanced = objectValue(
       input.advancedSettings ?? {},
       "coverage advanced settings",

@@ -415,6 +415,31 @@ describe("BuildsService", () => {
     expect(createJob).not.toHaveBeenCalled();
   });
 
+  test("replays accepted coverage before checking the current base branch", async () => {
+    const accepted = { id: "build-1", status: "RUNNING" };
+    const findWorktree = vi.fn().mockResolvedValue({
+      ...worktree(),
+      baseBranchOverride: null,
+      codebase: { ...worktree().codebase, defaultBranch: null },
+    });
+    getPrismaClient.mockResolvedValue({
+      build: { findUnique: vi.fn().mockResolvedValue(accepted) },
+      worktree: { findUnique: findWorktree },
+    });
+    const createJob = vi.fn();
+
+    await expect(
+      new BuildsService(control(createJob)).startWorktreeCoverage({
+        worktreeId: "worktree-1",
+        configurationId: "configuration-1",
+        destination,
+        requestId: "coverage-1",
+      }),
+    ).resolves.toBe(accepted);
+    expect(findWorktree).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+  });
+
   test("bounds worktree coverage history and excludes report payloads", async () => {
     const findMany = vi.fn().mockResolvedValue([]);
     getPrismaClient.mockResolvedValue({ buildReport: { findMany } });
@@ -494,6 +519,56 @@ describe("BuildsService", () => {
       exportWhenComplete: false,
       requestId: "rebuild-request",
       serverUrlKind: "PROXY",
+    });
+  });
+
+  test("rebuilds a legacy iOS snapshot after its preset becomes tvOS-only", async () => {
+    const captured = {
+      source: { kind: "PROJECT", relativePath: "Original.xcodeproj" },
+      scheme: "Original",
+      buildConfiguration: "Release",
+    };
+    const createJob = vi.fn().mockResolvedValue({ id: "rebuilt-job" });
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn(({ where }) =>
+          where.id === "original-build"
+            ? {
+                worktreeId: "worktree-1",
+                configurationId: "configuration-1",
+                destinationJson: JSON.stringify(destination),
+                action: "BUILD",
+                snapshotJson: JSON.stringify({ configuration: captured }),
+              }
+            : null,
+        ),
+        create: vi.fn(),
+        update: vi.fn(),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "rebuilt" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(worktree()) },
+      buildConfiguration: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...configuration(),
+          platformConfigurationsJson: JSON.stringify([{ platform: "TVOS" }]),
+        }),
+      },
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+
+    await expect(
+      new BuildsService(control(createJob)).rebuildBuild(
+        "original-build",
+        "rebuild-request",
+      ),
+    ).resolves.toEqual({ id: "rebuilt" });
+    expect(createJob.mock.calls[0]?.[0].payload).toMatchObject({
+      source: captured.source,
+      scheme: captured.scheme,
+      configuration: captured.buildConfiguration,
+      destination,
     });
   });
 
@@ -930,6 +1005,106 @@ describe("BuildsService", () => {
         }),
       }),
     );
+  });
+
+  test("inherits shared export settings for saved and Custom platform overrides", async () => {
+    const customConfiguration = {
+      sourceKind: "WORKSPACE" as const,
+      sourcePath: "App.xcworkspace",
+      scheme: "App",
+      buildConfiguration: "Debug",
+    };
+    const exportSettings = {
+      method: "DEBUGGING",
+      signingStyle: "AUTOMATIC",
+      teamId: "SHAREDTEAM",
+      uploadSymbols: true,
+      manageAppVersionAndBuildNumber: true,
+      testFlightInternalTestingOnly: false,
+    };
+    const platformConfigurations = [
+      { platform: "TVOS" as const, exportSettings: { teamId: "TVTEAM1234" } },
+    ];
+    const buildWorktree = worktree();
+    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+      IOS_BUILD_JOB_KIND,
+      XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+    ]);
+    const project = { id: "project-1", repositoryId: "repository-1" };
+    const save = vi.fn(({ create }) => ({ ...configuration(), ...create }));
+    const findConfiguration = vi.fn();
+    const create = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create,
+        update: vi.fn(),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "archive-build" }),
+      },
+      codebase: { findUnique: vi.fn().mockResolvedValue(project) },
+      codebaseProject: {
+        findUnique: vi.fn().mockResolvedValue(project),
+        upsert: vi.fn().mockResolvedValue(project),
+      },
+      buildConfiguration: { findUnique: findConfiguration, upsert: save },
+      buildSource: {
+        upsert: vi.fn().mockResolvedValue(configuration().source),
+      },
+      buildSourceObservation: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildsService(control());
+    const saved = await service.saveConfiguration({
+      ...customConfiguration,
+      codebaseId: "codebase-1",
+      name: "Archive",
+      defaultAction: "ARCHIVE",
+      autoExport: true,
+      exportSettings,
+      platformConfigurations,
+    });
+    expect(JSON.parse(saved.platformConfigurationsJson)).toEqual(
+      platformConfigurations,
+    );
+    findConfiguration.mockResolvedValue(saved);
+    const archive = {
+      worktreeId: "worktree-1",
+      destination: {
+        type: "PHYSICAL_DEVICE",
+        id: "generic-tvos",
+        name: "Any Physical tvOS Device",
+        platform: "tvOS",
+        osVersion: null,
+        state: null,
+        generic: true,
+      },
+      action: "ARCHIVE" as const,
+    };
+    await service.startBuild({
+      ...archive,
+      configurationId: saved.id,
+      requestId: "saved-archive",
+    });
+    await service.startBuild({
+      ...archive,
+      customConfiguration: {
+        ...customConfiguration,
+        exportSettings,
+        platformConfigurations,
+      },
+      exportWhenComplete: true,
+      requestId: "custom-archive",
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    for (const [{ data }] of create.mock.calls) {
+      expect(JSON.parse(data.snapshotJson).configuration).toMatchObject({
+        autoExport: true,
+        exportSettings: { ...exportSettings, teamId: "TVTEAM1234" },
+      });
+    }
   });
 
   test("queues one automatic export from the immutable build snapshot", async () => {
@@ -1435,12 +1610,19 @@ describe("BuildsService", () => {
       IOS_BUILD_JOB_KIND,
       XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
     ]);
+    build.update.mockRejectedValueOnce(new Error("Could not attach the job"));
+    await expect(service.startBuilds(request)).rejects.toThrow(
+      "Could not attach the job",
+    );
+    expect(createJob).toHaveBeenCalledTimes(2);
+
     const resumed = await service.startBuilds(request);
     expect(resumed[0]?.build?.id).toBe(first[0]?.build?.id);
     expect(resumed[1]?.build?.commandSummary).toContain(
       "platform=tvOS Simulator,id=TV-1",
     );
-    expect(createJob).toHaveBeenCalledTimes(2);
+    expect(createJob).toHaveBeenCalledTimes(3);
+    expect(createJob.mock.calls[2]).toEqual(createJob.mock.calls[1]);
     expect(createJob.mock.calls[1]?.[0].payload).toMatchObject({
       scheme: "TV",
       configuration: "Release",
@@ -1448,7 +1630,7 @@ describe("BuildsService", () => {
       advancedSettings: { developmentTeam: "TELEVISION" },
     });
     await service.startBuilds(request);
-    expect(createJob).toHaveBeenCalledTimes(2);
+    expect(createJob).toHaveBeenCalledTimes(3);
     await expect(
       service.startBuilds({ ...request, scriptIds: ["other"] }),
     ).rejects.toThrow("already used with different settings");

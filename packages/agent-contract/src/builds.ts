@@ -1489,11 +1489,12 @@ export const PROVISIONING_PROFILE_TYPES = [
   "AD_HOC",
   "ENTERPRISE",
   "APP_STORE",
+  "DEVELOPER_ID",
 ] as const;
 export type ProvisioningProfileType =
   (typeof PROVISIONING_PROFILE_TYPES)[number];
 
-/** The profile type each distribution method requires. */
+/** The profile type each distribution method supports, when applicable. */
 export const EXPORT_METHOD_PROFILE_TYPES: Record<
   BuildExportMethod,
   ProvisioningProfileType | null
@@ -1503,7 +1504,7 @@ export const EXPORT_METHOD_PROFILE_TYPES: Record<
   ENTERPRISE: "ENTERPRISE",
   APP_STORE_CONNECT: "APP_STORE",
   MAC_APPLICATION: null,
-  DEVELOPER_ID: null,
+  DEVELOPER_ID: "DEVELOPER_ID",
 };
 
 /**
@@ -1511,14 +1512,17 @@ export const EXPORT_METHOD_PROFILE_TYPES: Record<
  *
  * `get-task-allow` is what separates a development profile from a distribution
  * one, and the device list separates ad hoc from store distribution. Enterprise
- * profiles carry no device list but claim every device instead.
+ * and Developer ID profiles claim every device instead. The signing
+ * certificate identifies the Developer ID profile.
  */
 export function provisioningProfileType(profile: {
   getTaskAllow: boolean;
   hasProvisionedDevices: boolean;
   provisionsAllDevices: boolean;
+  hasDeveloperIdCertificate?: boolean;
 }): ProvisioningProfileType {
   if (profile.getTaskAllow) return "DEVELOPMENT";
+  if (profile.hasDeveloperIdCertificate) return "DEVELOPER_ID";
   if (profile.provisionsAllDevices) return "ENTERPRISE";
   return profile.hasProvisionedDevices ? "AD_HOC" : "APP_STORE";
 }

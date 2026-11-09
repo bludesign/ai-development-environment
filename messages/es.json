@@ -4763,6 +4763,7 @@
     "noSigningRequirements": "No se encontraron destinos de app o extensión que requieran firma.",
     "selectSigningSourceFirst": "Selecciona primero una fuente de Xcode, un esquema y una configuración.",
     "selectProfile": "Seleccione un perfil",
+    "defaultProvisioningProfile": "Usar el valor predeterminado de Xcode",
     "profileMayNotMatch": "Puede no coincidir con este identificador",
     "manualBundleIdentifier": "Identificador de paquete para añadir",
     "manualBundleIdentifierPlaceholder": "com.ejemplo.app.extension",

@@ -154,7 +154,12 @@ export function settingsForPlatform(
       ...entry.exportSettings,
     },
     observation:
-      entry.scheme || entry.sourcePath ? null : configuration.observation,
+      entry.sourceKind ||
+      entry.sourcePath ||
+      entry.scheme ||
+      entry.buildConfiguration
+        ? null
+        : configuration.observation,
   };
 }
 

@@ -1,3 +1,4 @@
+import { GraphQLError } from "graphql";
 import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
 import { jobBlockedReason } from "@/services/operation-locks/operation-locks.service";
 import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
@@ -31,6 +32,27 @@ function requireControlPlane(context: GraphQLContext): void {
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
   return context.agentId;
+}
+
+async function resolveBuildSubmission<T>(
+  service: BuildsService,
+  input: Parameters<BuildsService["wasBuildSubmissionRejected"]>[0],
+  submit: () => Promise<T>,
+) {
+  try {
+    return await submit();
+  } catch (error) {
+    const rejected = await service
+      .wasBuildSubmissionRejected(input)
+      .catch(() => false);
+    if (rejected) {
+      throw new GraphQLError(
+        error instanceof Error ? error.message : String(error),
+        { extensions: { code: "BUILD_SUBMISSION_REJECTED" } },
+      );
+    }
+    throw error;
+  }
 }
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
@@ -481,10 +503,12 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startBuild({
-        ...input,
-        telemetryRequestOrigin: context.requestOrigin,
-      });
+      return resolveBuildSubmission(service, input, () =>
+        service.startBuild({
+          ...input,
+          telemetryRequestOrigin: context.requestOrigin,
+        }),
+      );
     },
     startBuilds: (
       _root: unknown,
@@ -569,10 +593,12 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startWorktreeCoverage({
-        ...input,
-        telemetryRequestOrigin: context.requestOrigin,
-      });
+      return resolveBuildSubmission(service, input, () =>
+        service.startWorktreeCoverage({
+          ...input,
+          telemetryRequestOrigin: context.requestOrigin,
+        }),
+      );
     },
     reportBuildDeploymentLaunched: (
       _root: unknown,

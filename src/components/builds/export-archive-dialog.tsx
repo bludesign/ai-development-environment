@@ -55,6 +55,7 @@ const SIGNING_OPTIONS_QUERY = `query BuildSigningOptions($buildId: ID!) {
     bundles { bundleId name relativePath embeddedProfileUuid embeddedProfileName }
   }
 }`;
+const XCODE_DEFAULT_PROFILE = "__XCODE_DEFAULT__";
 
 function coversPlatform(
   profile: SigningProfile,
@@ -202,6 +203,7 @@ export function ExportArchiveDialog({
   }
 
   const manual = signingStyle === "MANUAL";
+  const profilesOptional = method === "DEVELOPER_ID";
 
   const profiles = Object.fromEntries(
     (options?.bundles ?? []).flatMap((bundle) => {
@@ -215,7 +217,9 @@ export function ExportArchiveDialog({
       const chosen =
         profileOverrides[bundle.bundleId] ??
         bestProfile(candidates, bundle)?.uuid;
-      return chosen ? [[bundle.bundleId, chosen] as const] : [];
+      return chosen && chosen !== XCODE_DEFAULT_PROFILE
+        ? [[bundle.bundleId, chosen] as const]
+        : [];
     }),
   );
 
@@ -288,6 +292,7 @@ export function ExportArchiveDialog({
 
   const missingProfiles =
     manual &&
+    !profilesOptional &&
     EXPORT_METHOD_PROFILE_TYPES[method] !== null &&
     (options?.bundles ?? []).some((bundle) => !profiles[bundle.bundleId]);
 
@@ -450,12 +455,20 @@ export function ExportArchiveDialog({
                               [bundle.bundleId]: value,
                             }))
                           }
-                          value={profiles[bundle.bundleId] ?? ""}
+                          value={
+                            profiles[bundle.bundleId] ??
+                            (profilesOptional ? XCODE_DEFAULT_PROFILE : "")
+                          }
                         >
                           <SelectTrigger className="w-full min-w-0">
                             <SelectValue placeholder={t("selectProfile")} />
                           </SelectTrigger>
                           <SelectContent>
+                            {profilesOptional && (
+                              <SelectItem value={XCODE_DEFAULT_PROFILE}>
+                                {t("defaultProvisioningProfile")}
+                              </SelectItem>
+                            )}
                             {listed.map((profile) => (
                               <SelectItem
                                 key={profile.uuid}
@@ -469,7 +482,7 @@ export function ExportArchiveDialog({
                             ))}
                           </SelectContent>
                         </Select>
-                        {!matching.length && (
+                        {!profilesOptional && !matching.length && (
                           <p className="mt-1 text-xs text-destructive">
                             {t("noMatchingProfiles")}
                           </p>

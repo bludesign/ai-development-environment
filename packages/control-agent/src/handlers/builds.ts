@@ -3528,12 +3528,14 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         );
       }
       if (preflightResult.exitCode === 0 && input.destination.platformId) {
-        const entries = parseBuildSettings(preflightResult.stdout || "[]");
+        // Xcode can return no build settings for a valid Swift package scheme.
+        const reportedPlatforms = parseBuildSettings(
+          preflightResult.stdout || "[]",
+        ).filter(({ buildSettings }) => buildSettings.PLATFORM_NAME);
         if (
-          !entries.some(
-            ({ buildSettings }) =>
-              buildSettings.PLATFORM_NAME &&
-              matchesDestinationSDK(buildSettings, input.destination),
+          reportedPlatforms.length > 0 &&
+          !reportedPlatforms.some(({ buildSettings }) =>
+            matchesDestinationSDK(buildSettings, input.destination),
           )
         ) {
           failBuild = true;

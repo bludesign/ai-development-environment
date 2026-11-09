@@ -1451,6 +1451,72 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
   });
 
   test.each([
+    { scenario: "no settings", settings: [], errorCode: null },
+    {
+      scenario: "settings without a platform name",
+      settings: [{ buildSettings: { PRODUCT_NAME: "App" } }],
+      errorCode: null,
+    },
+    {
+      scenario: "a different SDK",
+      settings: [{ buildSettings: { PLATFORM_NAME: "macosx" } }],
+      errorCode: "DESTINATION_UNAVAILABLE",
+    },
+  ])(
+    "handles Swift package preflight with $scenario",
+    async ({ settings, errorCode }) => {
+      const root = await mkdtemp(join(tmpdir(), "aide-package-preflight-"));
+      temporaryDirectories.push(root);
+      const folder = join(root, "repository");
+      const bin = join(root, "bin");
+      await mkdir(bin);
+      await execute("git", ["init", "-b", "main", folder]);
+      await execute("git", [
+        "-C",
+        folder,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/example/app.git",
+      ]);
+      await writeFile(join(folder, "Package.swift"), "// Test package\n");
+      await writeFile(
+        join(bin, "xcrun"),
+        `#!/bin/sh
+case " $* " in
+  *" -showBuildSettings "*) printf '%s' '${JSON.stringify(settings)}' ;;
+  *) touch build-started ;;
+esac
+`,
+        { mode: 0o755 },
+      );
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${bin}:${originalPath ?? ""}`;
+      try {
+        const result = await runIosBuild(
+          payload({
+            folder,
+            gitDirectory: await realpath(join(folder, ".git")),
+            artifactDirectory: join(root, "builds", "build-1"),
+            source: { kind: "PACKAGE", relativePath: "Package.swift" },
+            destination: { ...payload().destination, platformId: "IOS" },
+          }),
+          30_000,
+          new AbortController().signal,
+          async () => undefined,
+        );
+        expect(result).toMatchObject({
+          exitCode: errorCode ? 1 : 0,
+          errorCode,
+        });
+        expect(existsSync(join(folder, "build-started"))).toBe(!errorCode);
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    },
+  );
+
+  test.each([
     {
       scenario: "continued failure",
       failureBehavior: "CONTINUE",

@@ -17,6 +17,7 @@ import {
 import {
   buildPlatformExportSettings,
   parsePlatformConfigurations,
+  resolvePlatformExportSettings,
   storedPlatformConfigurations,
   type BuildPlatformConfigurationInput,
 } from "@/services/builds/build-platforms";
@@ -1842,6 +1843,7 @@ export class RepositoryTransferService {
         )
           ? parsePlatformConfigurations(
               platformConfigurationsSchema.parse(f.platformConfigurations),
+              exportSettings,
             )
           : undefined;
         for (const entry of platformConfigurations ?? []) {
@@ -1853,8 +1855,12 @@ export class RepositoryTransferService {
             { platform: "IOS" },
           ];
         for (const entry of effectivePlatforms) {
+          const settings = resolvePlatformExportSettings(
+            entry.platform,
+            exportSettings,
+            entry.exportSettings,
+          );
           if (!(entry.autoExport ?? autoExport)) continue;
-          const settings = entry.exportSettings ?? exportSettings;
           if (
             (entry.defaultAction ?? f.defaultAction) !== "ARCHIVE" ||
             !settings

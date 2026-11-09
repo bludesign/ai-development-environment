@@ -121,6 +121,11 @@ type PlatformBuildDraft = {
   priorBuildId: string | null;
 };
 
+type BuildSubmission = {
+  kind: "batch" | "startBuild" | "startWorktreeCoverage";
+  input: Record<string, unknown>;
+};
+
 const DESTINATION_CACHE_TTL_MS = 15_000;
 
 const PROJECT_FIELDS = `
@@ -344,10 +349,8 @@ function StartBuildDialog({
   const [completedPlatforms, setCompletedPlatforms] = useState<BuildPlatform[]>(
     [],
   );
-  const [submissionId, setSubmissionId] = useState(createClientId);
-  const [retryBatch, setRetryBatch] = useState<Record<string, unknown> | null>(
-    null,
-  );
+  const [retrySubmission, setRetrySubmission] =
+    useState<BuildSubmission | null>(null);
   const selectionInput = (entry: BuildConfiguration) =>
     entry.id === "__custom__"
       ? {
@@ -360,6 +363,10 @@ function StartBuildDialog({
               (item) => item.platform !== "IOS" || Object.keys(item).length > 1,
             )
               ? { platformConfigurations: entry.platformConfigurations }
+              : {}),
+            ...(entry.exportSettings &&
+            entry.platformConfigurations?.some((item) => item.exportSettings)
+              ? { exportSettings: entry.exportSettings }
               : {}),
           },
         }
@@ -696,7 +703,13 @@ function StartBuildDialog({
       let nextObservation: BuildSourceObservation;
       if (
         baseConfiguration &&
-        configurationPlatforms(baseConfiguration)[0]?.platform !== platform
+        (platform !== "IOS" ||
+          availablePlatforms[0]?.platform !== platform ||
+          selected.source.kind !== baseConfiguration.source.kind ||
+          selected.source.relativePath !==
+            baseConfiguration.source.relativePath ||
+          selected.scheme !== baseConfiguration.scheme ||
+          selected.buildConfiguration !== baseConfiguration.buildConfiguration)
       ) {
         const data = await controlPlaneRequest<{
           inspectBuildSource: Pick<
@@ -885,7 +898,6 @@ function StartBuildDialog({
     setSelectedPlatforms([first]);
     setPlatformDrafts({});
     setCompletedPlatforms([]);
-    setSubmissionId(createClientId());
     editPlatform(first, entry, false);
   };
 
@@ -922,7 +934,6 @@ function StartBuildDialog({
     });
 
   const submitBatch = async (input: Record<string, unknown>) => {
-    setRetryBatch(input);
     const data = await controlPlaneRequest<{
       startBuilds: Array<{
         platform: BuildPlatform;
@@ -941,14 +952,13 @@ function StartBuildDialog({
     const errors = data.startBuilds.filter(
       (result) => result.error || !result.build,
     );
-    setRetryBatch(null);
+    setRetrySubmission(null);
     setCompletedPlatforms((current) => [
       ...current,
       ...accepted.map((result) => result.platform),
     ]);
     if (accepted[0]?.build) onStarted(accepted[0].build.id);
     if (errors.length || !accepted.length) {
-      setSubmissionId(createClientId());
       setError(
         errors
           .map(
@@ -962,13 +972,44 @@ function StartBuildDialog({
     onOpenChange(false);
   };
 
+  const submit = async (submission: BuildSubmission) => {
+    setRetrySubmission(submission);
+    if (submission.kind === "batch") {
+      await submitBatch(submission.input);
+      return;
+    }
+    const field = submission.kind;
+    const data = await controlPlaneRequest<
+      Partial<
+        Record<
+          typeof field,
+          { id: string; errorCode: string | null; error: string | null }
+        >
+      >
+    >(
+      `mutation StartIosBuild($input: StartBuildInput!) {
+        ${field}(input: $input) { id errorCode error }
+      }`,
+      { input: submission.input },
+    );
+    const started = data[field];
+    if (!started) throw new Error(t("startBuildFailed"));
+    setRetrySubmission(null);
+    if (started.errorCode === "QUEUE_FAILED") {
+      setError(started.error ?? t("startBuildFailed"));
+      return;
+    }
+    onOpenChange(false);
+    onStarted(started.id);
+  };
+
   const start = async () => {
     if (starting) return;
     setStarting(true);
     setError(null);
     try {
-      if (retryBatch) {
-        await submitBatch(retryBatch);
+      if (retrySubmission) {
+        await submit(retrySubmission);
         return;
       }
       if (!baseConfiguration || !serverUrls || !canStart) return;
@@ -1020,7 +1061,7 @@ function StartBuildDialog({
         worktreeId,
         ...selectionInput(baseConfiguration),
         scriptIds: [...scriptIds],
-        requestId: submissionId,
+        requestId: createClientId(),
       };
       if (
         !coverageMode &&
@@ -1028,7 +1069,10 @@ function StartBuildDialog({
           selections[0]?.platform !== "IOS" ||
           agent?.capabilities?.includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY))
       ) {
-        await submitBatch(structuredClone({ ...commonInput, selections }));
+        await submit({
+          kind: "batch",
+          input: structuredClone({ ...commonInput, selections }),
+        });
         return;
       }
       const {
@@ -1036,29 +1080,25 @@ function StartBuildDialog({
         destination: selectedDestination,
         ...selection
       } = selections[0]!;
-      const data = await controlPlaneRequest<{
-        startBuild?: { id: string };
-        startWorktreeCoverage?: { id: string };
-      }>(
-        `mutation StartIosBuild($input: StartBuildInput!) {
-          ${coverageMode ? "startWorktreeCoverage" : "startBuild"}(input: $input) { id }
-        }`,
-        {
-          input: {
-            ...commonInput,
-            ...selection,
-            destination:
-              selectedPlatform === "IOS"
-                ? selectedDestination
-                : { ...selectedDestination, platformId: selectedPlatform },
-          },
-        },
-      );
-      onOpenChange(false);
-      const started = data.startBuild ?? data.startWorktreeCoverage;
-      if (!started) throw new Error(t("startBuildFailed"));
-      onStarted(started.id);
+      await submit({
+        kind: coverageMode ? "startWorktreeCoverage" : "startBuild",
+        input: structuredClone({
+          ...commonInput,
+          ...selection,
+          destination:
+            selectedPlatform === "IOS"
+              ? selectedDestination
+              : { ...selectedDestination, platformId: selectedPlatform },
+        }),
+      });
     } catch (value) {
+      if (
+        value instanceof Error &&
+        "code" in value &&
+        value.code === "BUILD_SUBMISSION_REJECTED"
+      ) {
+        setRetrySubmission(null);
+      }
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setStarting(false);
@@ -1098,7 +1138,7 @@ function StartBuildDialog({
               <AlertDescription>{destinationWarning}</AlertDescription>
             </Alert>
           )}
-          {retryBatch && !starting && (
+          {retrySubmission && !starting && (
             <Alert>
               <AlertDescription>
                 {t("buildSubmissionUnconfirmed")}
@@ -1114,7 +1154,10 @@ function StartBuildDialog({
               <AlertDescription>{t("noConfigurations")}</AlertDescription>
             </Alert>
           ) : (
-            <div className="space-y-5" inert={starting || Boolean(retryBatch)}>
+            <div
+              className="space-y-5"
+              inert={starting || Boolean(retrySubmission)}
+            >
               <section className="space-y-2">
                 <Label>{t("configuration")}</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -1713,7 +1756,10 @@ function StartBuildDialog({
               )}
             </div>
           )}
-          <div className="space-y-2" inert={starting || Boolean(retryBatch)}>
+          <div
+            className="space-y-2"
+            inert={starting || Boolean(retrySubmission)}
+          >
             {serverUrls ? (
               <ServerUrlSelect
                 settings={serverUrls}
@@ -1744,14 +1790,14 @@ function StartBuildDialog({
             <Button
               disabled={
                 starting ||
-                (!retryBatch &&
+                (!retrySubmission &&
                   (loading || customOpen || !baseConfiguration || !canStart))
               }
               onClick={() => void start()}
               type="button"
             >
               {starting && <Spinner />}{" "}
-              {retryBatch && !starting
+              {retrySubmission && !starting
                 ? t("retryBuildSubmission")
                 : pendingPlatforms.length > 1
                   ? t("startPlatformBuilds", { count: pendingPlatforms.length })

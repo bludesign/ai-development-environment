@@ -4763,6 +4763,7 @@
     "noSigningRequirements": "No signable app or extension targets were found.",
     "selectSigningSourceFirst": "Select an Xcode source, scheme, and configuration first.",
     "selectProfile": "Select a profile",
+    "defaultProvisioningProfile": "Use Xcode’s default",
     "profileMayNotMatch": "May not match this bundle",
     "manualBundleIdentifier": "Bundle identifier to add",
     "manualBundleIdentifierPlaceholder": "com.example.app.extension",

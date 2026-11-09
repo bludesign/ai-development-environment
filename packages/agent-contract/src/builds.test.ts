@@ -472,13 +472,24 @@ describe("provisioning profile classification", () => {
     ).toBe("ENTERPRISE");
   });
 
-  test("maps distribution methods that require a profile to a profile type", () => {
+  test("identifies Developer ID profiles by their signing certificate", () => {
+    expect(
+      provisioningProfileType({
+        getTaskAllow: false,
+        hasProvisionedDevices: false,
+        provisionsAllDevices: true,
+        hasDeveloperIdCertificate: true,
+      }),
+    ).toBe("DEVELOPER_ID");
+  });
+
+  test("maps distribution methods that support a profile to a profile type", () => {
     for (const method of BUILD_EXPORT_METHODS) {
       const type = EXPORT_METHOD_PROFILE_TYPES[method];
-      if (method === "MAC_APPLICATION" || method === "DEVELOPER_ID")
-        expect(type).toBeNull();
+      if (method === "MAC_APPLICATION") expect(type).toBeNull();
       else expect(PROVISIONING_PROFILE_TYPES).toContain(type);
     }
+    expect(EXPORT_METHOD_PROFILE_TYPES.DEVELOPER_ID).toBe("DEVELOPER_ID");
   });
 });
 

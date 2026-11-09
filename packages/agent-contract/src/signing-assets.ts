@@ -1,3 +1,8 @@
+import {
+  PROVISIONING_PROFILE_TYPES,
+  type ProvisioningProfileType,
+} from "./builds.js";
+
 export const SIGNING_ASSETS_SCAN_JOB_KIND = "ios.signing.assets.scan";
 export const SIGNING_PROFILE_READ_JOB_KIND = "ios.signing.profile.read";
 export const SIGNING_PROFILE_INSTALL_JOB_KIND = "ios.signing.profile.install";
@@ -18,7 +23,7 @@ export type SigningProfileAssetSnapshot = {
   uuid: string;
   contentHash: string;
   name: string;
-  profileType: "DEVELOPMENT" | "AD_HOC" | "ENTERPRISE" | "APP_STORE";
+  profileType: ProvisioningProfileType;
   bundleId: string;
   teamId: string | null;
   teamName: string | null;
@@ -164,9 +169,7 @@ export function parseSigningAssetsScanResult(
       `signing profiles[${index}].profileType`,
     );
     if (
-      !["DEVELOPMENT", "AD_HOC", "ENTERPRISE", "APP_STORE"].includes(
-        profileType,
-      )
+      !(PROVISIONING_PROFILE_TYPES as readonly string[]).includes(profileType)
     ) {
       throw new Error(`signing profiles[${index}].profileType is invalid`);
     }

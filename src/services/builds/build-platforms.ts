@@ -6,6 +6,7 @@ import {
   parseBuildExportSettings,
   parseBuildSource,
   type BuildAction,
+  type BuildExportSettings,
   type BuildPlatform,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
@@ -75,6 +76,18 @@ export function buildPlatformExportSettings(
   return settings;
 }
 
+export function resolvePlatformExportSettings(
+  platform: BuildPlatform,
+  shared: BuildExportSettings | null,
+  override: unknown,
+) {
+  if (override == null) return shared;
+  if (typeof override !== "object" || Array.isArray(override)) {
+    throw new Error("Platform export settings must be an object");
+  }
+  return buildPlatformExportSettings(platform, { ...shared, ...override });
+}
+
 function optionalLabel(value: string | null | undefined, label: string) {
   if (value == null) return undefined;
   const trimmed = value.trim();
@@ -86,6 +99,7 @@ function optionalLabel(value: string | null | undefined, label: string) {
 
 export function parsePlatformConfigurations(
   entries: readonly BuildPlatformConfigurationInput[],
+  sharedExportSettings: BuildExportSettings | null,
 ) {
   if (
     !entries.length ||
@@ -123,6 +137,11 @@ export function parsePlatformConfigurations(
           Object.hasOwn(entry.advancedSettings as object, key),
         ),
       );
+    const effectiveExportSettings = resolvePlatformExportSettings(
+      platform,
+      sharedExportSettings,
+      entry.exportSettings,
+    );
     return {
       platform,
       sourceKind: source?.kind,
@@ -136,9 +155,13 @@ export function parsePlatformConfigurations(
       advancedSettings,
       autoExport: entry.autoExport ?? undefined,
       exportSettings:
-        entry.exportSettings == null
-          ? undefined
-          : buildPlatformExportSettings(platform, entry.exportSettings),
+        entry.exportSettings != null && effectiveExportSettings
+          ? Object.fromEntries(
+              Object.entries(effectiveExportSettings).filter(([key]) =>
+                Object.hasOwn(entry.exportSettings as object, key),
+              ),
+            )
+          : undefined,
     };
   });
 }

@@ -11,6 +11,39 @@ import { createBuildResolvers } from "./builds";
 const context = (agentId: string | null) => ({ agentId }) as GraphQLContext;
 
 describe("build resolver authorization", () => {
+  test.each(["startBuild", "startWorktreeCoverage"] as const)(
+    "%s marks only confirmed rejections as safe to resubmit",
+    async (mutation) => {
+      const failure = new Error("Could not submit the build");
+      const wasBuildSubmissionRejected = vi.fn().mockResolvedValueOnce(true);
+      const service = {
+        [mutation]: vi.fn().mockRejectedValue(failure),
+        wasBuildSubmissionRejected,
+      } as unknown as BuildsService;
+      const submit = () =>
+        createBuildResolvers(service).Mutation[mutation](
+          {},
+          {
+            input: {
+              worktreeId: "worktree-1",
+              requestId: "request-1",
+              destination: {},
+            },
+          },
+          context(null),
+        );
+
+      await expect(submit()).rejects.toMatchObject({
+        message: failure.message,
+        extensions: { code: "BUILD_SUBMISSION_REJECTED" },
+      });
+      wasBuildSubmissionRejected.mockResolvedValueOnce(false);
+      await expect(submit()).rejects.toBe(failure);
+      wasBuildSubmissionRejected.mockRejectedValueOnce(new Error("DB offline"));
+      await expect(submit()).rejects.toBe(failure);
+    },
+  );
+
   test("updates iOS project defaults only on the control plane", async () => {
     const service = {
       updateProject: vi.fn().mockResolvedValue({
