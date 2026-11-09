@@ -335,6 +335,11 @@ model SimulatorRequestReceipt {
   payloadDigest String
 }
 
+model BuildBatchRequestReceipt {
+  requestKey    String @id
+  payloadDigest String
+}
+
 model TailscaleServeTemplate {
   id                  String                     @id
   name                String
@@ -1679,22 +1684,23 @@ model BuildSourceObservation {
 }
 
 model BuildConfiguration {
-  id                   String          @id
-  projectId            String
-  sourceId             String
-  name                 String
-  iconKey              String?
-  scheme               String
-  buildConfiguration   String
-  defaultAction        String          @default("BUILD")
-  advancedSettingsJson String          @default("{}")
-  autoExport           Boolean         @default(false)
-  exportSettingsJson   String?
-  createdAt            DateTime        @default(now())
-  updatedAt            DateTime        @updatedAt
-  project              CodebaseProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  source               BuildSource     @relation(fields: [sourceId], references: [id], onDelete: Restrict)
-  builds               Build[]
+  id                         String          @id
+  projectId                  String
+  sourceId                   String
+  name                       String
+  iconKey                    String?
+  scheme                     String
+  buildConfiguration         String
+  defaultAction              String          @default("BUILD")
+  advancedSettingsJson       String          @default("{}")
+  autoExport                 Boolean         @default(false)
+  exportSettingsJson         String?
+  platformConfigurationsJson String          @default("[]")
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+  project                    CodebaseProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  source                     BuildSource     @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  builds                     Build[]
 
   @@unique([projectId, name])
   @@index([projectId])
@@ -1741,6 +1747,7 @@ model Build {
   repositoryId      String?
   configurationId   String?
   jobId             String?
+  queuePayloadJson  String?
   status            String                 @default("QUEUED")
   action            String
   destinationType   String

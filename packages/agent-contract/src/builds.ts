@@ -15,6 +15,8 @@ export const IOS_EXPORT_JOB_KIND = "ios.archive.export";
 export const IOS_TEST_RESULTS_JOB_KIND = "ios.test-results.parse";
 export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
 export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
+export const XCODE_MULTIPLATFORM_BUILD_CAPABILITY =
+  "xcode.build.multiplatform.v1";
 
 export type BuildLogChunk = {
   scope: string;
@@ -112,8 +114,21 @@ export type BuildConfigurationIconKey =
 export const BUILD_DESTINATION_TYPES = [
   "SIMULATOR",
   "PHYSICAL_DEVICE",
+  "LOCAL_MAC",
 ] as const;
 export type BuildDestinationType = (typeof BUILD_DESTINATION_TYPES)[number];
+
+export const BUILD_PLATFORMS = [
+  "IOS",
+  "TVOS",
+  "WATCHOS",
+  "VISIONOS",
+  "MACOS",
+  "MAC_CATALYST",
+  "MACOS_DESIGNED_FOR_IPAD",
+  "VISIONOS_DESIGNED_FOR_IPAD",
+] as const;
+export type BuildPlatform = (typeof BUILD_PLATFORMS)[number];
 
 export const BUILD_SCRIPT_FAILURE_BEHAVIORS = [
   "FAIL_BUILD",
@@ -155,38 +170,150 @@ export type BuildDestination = {
   id: string;
   name: string;
   platform: string;
+  platformId?: BuildPlatform;
+  architecture?: string | null;
+  variant?: string | null;
+  xcodeId?: string | null;
+  unavailableReason?: string | null;
   osVersion: string | null;
   state: string | null;
   generic?: boolean;
   available?: boolean;
 };
 
+const xcodePlatforms: Record<BuildPlatform, string> = {
+  IOS: "iOS",
+  TVOS: "tvOS",
+  WATCHOS: "watchOS",
+  VISIONOS: "visionOS",
+  MACOS: "macOS",
+  MAC_CATALYST: "macOS",
+  MACOS_DESIGNED_FOR_IPAD: "macOS",
+  VISIONOS_DESIGNED_FOR_IPAD: "visionOS",
+};
+
+export function buildPlatformForXcode(
+  platform: string,
+  variant?: string | null,
+): BuildPlatform | null {
+  const name = platform.toLowerCase().replace(/ simulator$/, "");
+  const designedForIOS = variant?.toLowerCase().startsWith("designed for ");
+  switch (name) {
+    case "ios":
+    case "ipados":
+      return "IOS";
+    case "tvos":
+      return "TVOS";
+    case "watchos":
+      return "WATCHOS";
+    case "xros":
+    case "visionos":
+      return designedForIOS ? "VISIONOS_DESIGNED_FOR_IPAD" : "VISIONOS";
+    case "macos":
+      if (designedForIOS) return "MACOS_DESIGNED_FOR_IPAD";
+      return variant?.toLowerCase() === "mac catalyst"
+        ? "MAC_CATALYST"
+        : "MACOS";
+    default:
+      return null;
+  }
+}
+
+export function buildDestinationPlatform(
+  destination: BuildDestination,
+): BuildPlatform {
+  return (
+    destination.platformId ??
+    buildPlatformForXcode(destination.platform, destination.variant) ??
+    "IOS"
+  );
+}
+
+export function buildXcodePlatform(
+  platform: BuildPlatform,
+  type: BuildDestinationType,
+): string {
+  const name = xcodePlatforms[platform];
+  return type === "SIMULATOR" ? `${name} Simulator` : name;
+}
+
+export function buildDestinationSpecifier(
+  destination: BuildDestination,
+): string {
+  const platform = buildDestinationPlatform(destination);
+  const specifier = [
+    `platform=${buildXcodePlatform(platform, destination.type)}`,
+  ];
+  if (platform === "MAC_CATALYST") specifier.push("variant=Mac Catalyst");
+  if (platform.endsWith("_DESIGNED_FOR_IPAD")) {
+    // Xcode's display label contains a comma, which is a destination delimiter.
+    specifier.push("variant=Designed for iPad");
+  }
+  if (!destination.generic) {
+    const id = destination.xcodeId ?? destination.id;
+    if (!/^[a-zA-Z0-9._:-]+$/.test(id))
+      throw new Error("Invalid Xcode destination ID");
+    specifier.push(`id=${id}`);
+    if (destination.architecture) {
+      if (!/^[a-zA-Z0-9_]+$/.test(destination.architecture))
+        throw new Error("Invalid Xcode destination architecture");
+      specifier.push(`arch=${destination.architecture}`);
+    }
+  }
+  return `${destination.generic ? "generic/" : ""}${specifier.join(",")}`;
+}
+
+export function isArchiveBuildDestination(
+  destination: BuildDestination,
+): boolean {
+  return (
+    destination.generic === true &&
+    destination.type !== "SIMULATOR" &&
+    !buildDestinationPlatform(destination).endsWith("_DESIGNED_FOR_IPAD")
+  );
+}
+
 export function genericBuildDestinations(
   action: BuildAction,
+  platforms?: readonly BuildPlatform[],
 ): BuildDestination[] {
   if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
-  const physical: BuildDestination = {
-    type: "PHYSICAL_DEVICE",
-    id: "generic-ios",
-    name: "Any Physical iOS Device",
-    platform: "iOS",
-    osVersion: null,
-    state: null,
-    generic: true,
-  };
-  if (action === "ARCHIVE") return [physical];
-  return [
-    {
-      type: "SIMULATOR",
-      id: "generic-ios-simulator",
-      name: "Any iOS Simulator",
-      platform: "iOS Simulator",
+  return (platforms ?? ["IOS"]).flatMap((platformId): BuildDestination[] => {
+    if (platformId.endsWith("_DESIGNED_FOR_IPAD")) return [];
+    const platform = xcodePlatforms[platformId];
+    const id = `generic-${platformId.toLowerCase().replaceAll("_", "-")}`;
+    const mac = platformId === "MACOS" || platformId === "MAC_CATALYST";
+    const variant = platformId === "MAC_CATALYST" ? "Mac Catalyst" : null;
+    const physical: BuildDestination = {
+      type: mac ? "LOCAL_MAC" : "PHYSICAL_DEVICE",
+      id,
+      name: mac
+        ? variant
+          ? `Any Mac (${variant})`
+          : "Any Mac"
+        : `Any Physical ${platform} Device`,
+      platform,
+      ...(platforms ? { platformId } : {}),
+      ...(variant ? { variant } : {}),
       osVersion: null,
       state: null,
       generic: true,
-    },
-    physical,
-  ];
+    };
+    if (action === "ARCHIVE" || mac) return [physical];
+    return [
+      {
+        type: "SIMULATOR",
+        id: `${id}-simulator`,
+        name: `Any ${platform} Simulator`,
+        platform: `${platform} Simulator`,
+        ...(platforms ? { platformId } : {}),
+        osVersion: null,
+        state: null,
+        generic: true,
+      },
+      physical,
+    ];
+  });
 }
 
 export type BuildAdvancedSettings = {
@@ -312,19 +439,25 @@ export type BuildSourceParsePayload = BuildWorktreeIdentity & {
   source: BuildSourceSnapshot;
   scheme: string | null;
   configuration: string | null;
+  platform?: BuildPlatform;
 };
 export type BuildDestinationsPayload = BuildWorktreeIdentity & {
   source: BuildSourceSnapshot;
   scheme: string;
   configuration: string;
   action: BuildAction;
+  platform?: BuildPlatform;
 };
 export type BuildRunDestinationsPayload = BuildWorktreeIdentity & {
   destinationType: BuildDestinationType;
+  platform?: BuildPlatform;
+  platforms?: BuildPlatform[];
 };
 
 export type BuildAgentRunDestinationsPayload = {
   destinationType: BuildDestinationType;
+  platform?: BuildPlatform;
+  platforms?: BuildPlatform[];
 };
 
 export type BuildJobPayload = BuildWorktreeIdentity & {
@@ -388,7 +521,7 @@ export type BuildRemoteDeploymentPayload = {
 };
 
 export type BuildExportSettings = {
-  method: "DEBUGGING" | "RELEASE_TESTING" | "ENTERPRISE" | "APP_STORE_CONNECT";
+  method: BuildExportMethod;
   signingStyle: "AUTOMATIC" | "MANUAL";
   teamId: string | null;
   signingCertificate: string | null;
@@ -416,6 +549,7 @@ export type BuildExportPayload = BuildWorktreeIdentity & {
   artifactDirectory: string;
   archiveRelativePath: string;
   settings: BuildExportSettings;
+  platform?: BuildPlatform;
 };
 
 type JsonObject = Record<string, unknown>;
@@ -518,12 +652,24 @@ export function parseBuildSource(value: unknown): BuildSourceSnapshot {
 
 export function parseBuildDestination(value: unknown): BuildDestination {
   const destination = objectValue(value, "build destination");
+  const type = enumValue(
+    destination.type,
+    BUILD_DESTINATION_TYPES,
+    "build destination.type",
+  );
+  const platform = optionalPlatform(
+    destination.platformId,
+    "build destination.platformId",
+    "platformId",
+  );
+  if (
+    platform.platformId &&
+    (type === "LOCAL_MAC") !== (xcodePlatforms[platform.platformId] === "macOS")
+  ) {
+    throw new Error("Destination type does not match its platform");
+  }
   return {
-    type: enumValue(
-      destination.type,
-      BUILD_DESTINATION_TYPES,
-      "build destination.type",
-    ),
+    type,
     ...(destination.deviceType === undefined
       ? {}
       : {
@@ -535,6 +681,15 @@ export function parseBuildDestination(value: unknown): BuildDestination {
     id: stringValue(destination.id, "build destination.id"),
     name: stringValue(destination.name, "build destination.name"),
     platform: stringValue(destination.platform, "build destination.platform"),
+    ...platform,
+    ...Object.fromEntries(
+      (["architecture", "variant", "xcodeId", "unavailableReason"] as const)
+        .filter((key) => destination[key] !== undefined)
+        .map((key) => [
+          key,
+          nullableString(destination[key], `build destination.${key}`),
+        ]),
+    ),
     osVersion: nullableString(
       destination.osVersion,
       "build destination.osVersion",
@@ -556,6 +711,47 @@ export function parseBuildDestination(value: unknown): BuildDestination {
             "build destination.available",
           ),
         }),
+  };
+}
+
+function optionalPlatform<Key extends string>(
+  value: unknown,
+  name: string,
+  key: Key,
+): Partial<Record<Key, BuildPlatform>> {
+  return value == null
+    ? {}
+    : ({ [key]: enumValue(value, BUILD_PLATFORMS, name) } as Record<
+        Key,
+        BuildPlatform
+      >);
+}
+
+function runDestinationPlatforms(input: JsonObject) {
+  const platform = optionalPlatform(
+    input.platform,
+    "run destinations payload.platform",
+    "platform",
+  );
+  if (input.platforms == null) return platform;
+  if (!Array.isArray(input.platforms) || !input.platforms.length) {
+    throw new Error(
+      "run destinations payload.platforms must be a non-empty array",
+    );
+  }
+  return {
+    ...platform,
+    platforms: [
+      ...new Set(
+        input.platforms.map((value) =>
+          enumValue(
+            value,
+            BUILD_PLATFORMS,
+            "run destinations payload.platforms",
+          ),
+        ),
+      ),
+    ],
   };
 }
 
@@ -845,6 +1041,11 @@ export function parseBuildSourceParsePayload(
       input.configuration,
       "source parse payload.configuration",
     ),
+    ...optionalPlatform(
+      input.platform,
+      "source parse payload.platform",
+      "platform",
+    ),
   };
 }
 
@@ -865,6 +1066,11 @@ export function parseBuildDestinationsPayload(
       BUILD_ACTIONS,
       "destinations payload.action",
     ),
+    ...optionalPlatform(
+      input.platform,
+      "destinations payload.platform",
+      "platform",
+    ),
   };
 }
 
@@ -879,6 +1085,7 @@ export function parseBuildRunDestinationsPayload(
       BUILD_DESTINATION_TYPES,
       "run destinations payload.destinationType",
     ),
+    ...runDestinationPlatforms(input),
   };
 }
 
@@ -898,11 +1105,10 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
   );
   const destination = parseBuildDestination(input.destination);
   const advancedSettings = parseBuildAdvancedSettings(input.advancedSettings);
-  if (
-    action === "ARCHIVE" &&
-    (destination.type !== "PHYSICAL_DEVICE" || destination.generic !== true)
-  ) {
-    throw new Error("Archive builds require a generic physical destination");
+  if (action === "ARCHIVE" && !isArchiveBuildDestination(destination)) {
+    throw new Error(
+      "Archive builds require a generic physical destination or Mac",
+    );
   }
   if (
     destination.generic &&
@@ -1054,6 +1260,7 @@ export function parseBuildAgentRunDestinationsPayload(
       BUILD_DESTINATION_TYPES,
       "agent run destinations payload.destinationType",
     ),
+    ...runDestinationPlatforms(input),
   };
 }
 
@@ -1065,9 +1272,12 @@ function parseDeployments(
   }
   const deployments = input.deployments.map((value, index) => {
     const deployment = objectValue(value, `deployments[${index}]`);
+    const destination = parseBuildDestination(deployment.destination);
+    if (destination.generic)
+      throw new Error("Run requires a concrete destination");
     return {
       id: stringValue(deployment.id, `deployments[${index}].id`),
-      destination: parseBuildDestination(deployment.destination),
+      destination,
     };
   });
   if (new Set(deployments.map(({ id }) => id)).size !== deployments.length) {
@@ -1076,16 +1286,12 @@ function parseDeployments(
   if (
     new Set(
       deployments.map(
-        ({ destination }) => `${destination.type}:${destination.id}`,
+        ({ destination }) =>
+          `${buildDestinationPlatform(destination)}:${destination.type}:${destination.id}`,
       ),
     ).size !== deployments.length
   ) {
     throw new Error("deployment destinations must be unique");
-  }
-  if (
-    new Set(deployments.map(({ destination }) => destination.type)).size > 1
-  ) {
-    throw new Error("deployment destinations must use one destination type");
   }
   return deployments;
 }
@@ -1118,6 +1324,9 @@ export function parseBuildRemoteDeploymentPayload(
   value: unknown,
 ): BuildRemoteDeploymentPayload {
   const input = objectValue(value, "remote build deployment payload");
+  const deployments = parseDeployments(input);
+  if (deployments.some(({ destination }) => destination.type === "LOCAL_MAC"))
+    throw new Error("Mac apps can only run on the build agent");
   return {
     transferId: stringValue(
       input.transferId,
@@ -1131,7 +1340,7 @@ export function parseBuildRemoteDeploymentPayload(
       input.bundleIdentifier,
       "remote build deployment payload.bundleIdentifier",
     ),
-    deployments: parseDeployments(input),
+    deployments,
   };
 }
 
@@ -1144,12 +1353,7 @@ export function parseBuildExportSettings(value: unknown): BuildExportSettings {
   return {
     method: enumValue(
       input.method,
-      [
-        "DEBUGGING",
-        "RELEASE_TESTING",
-        "ENTERPRISE",
-        "APP_STORE_CONNECT",
-      ] as const,
+      BUILD_EXPORT_METHODS,
       "export settings.method",
     ),
     signingStyle: enumValue(
@@ -1211,6 +1415,11 @@ export function parseBuildExportPayload(value: unknown): BuildExportPayload {
   const input = objectValue(value, "build export payload");
   return {
     ...worktreeIdentity(input),
+    ...optionalPlatform(
+      input.platform,
+      "build export payload.platform",
+      "platform",
+    ),
     buildId: stringValue(input.buildId, "build export payload.buildId"),
     exportId: stringValue(input.exportId, "build export payload.exportId"),
     artifactDirectory: stringValue(
@@ -1270,6 +1479,8 @@ export const BUILD_EXPORT_METHODS = [
   "RELEASE_TESTING",
   "ENTERPRISE",
   "APP_STORE_CONNECT",
+  "MAC_APPLICATION",
+  "DEVELOPER_ID",
 ] as const;
 export type BuildExportMethod = (typeof BUILD_EXPORT_METHODS)[number];
 
@@ -1278,19 +1489,22 @@ export const PROVISIONING_PROFILE_TYPES = [
   "AD_HOC",
   "ENTERPRISE",
   "APP_STORE",
+  "DEVELOPER_ID",
 ] as const;
 export type ProvisioningProfileType =
   (typeof PROVISIONING_PROFILE_TYPES)[number];
 
-/** The profile type each distribution method requires. */
+/** The profile type each distribution method supports, when applicable. */
 export const EXPORT_METHOD_PROFILE_TYPES: Record<
   BuildExportMethod,
-  ProvisioningProfileType
+  ProvisioningProfileType | null
 > = {
   DEBUGGING: "DEVELOPMENT",
   RELEASE_TESTING: "AD_HOC",
   ENTERPRISE: "ENTERPRISE",
   APP_STORE_CONNECT: "APP_STORE",
+  MAC_APPLICATION: null,
+  DEVELOPER_ID: "DEVELOPER_ID",
 };
 
 /**
@@ -1298,14 +1512,17 @@ export const EXPORT_METHOD_PROFILE_TYPES: Record<
  *
  * `get-task-allow` is what separates a development profile from a distribution
  * one, and the device list separates ad hoc from store distribution. Enterprise
- * profiles carry no device list but claim every device instead.
+ * and Developer ID profiles claim every device instead. The signing
+ * certificate identifies the Developer ID profile.
  */
 export function provisioningProfileType(profile: {
   getTaskAllow: boolean;
   hasProvisionedDevices: boolean;
   provisionsAllDevices: boolean;
+  hasDeveloperIdCertificate?: boolean;
 }): ProvisioningProfileType {
   if (profile.getTaskAllow) return "DEVELOPMENT";
+  if (profile.hasDeveloperIdCertificate) return "DEVELOPER_ID";
   if (profile.provisionsAllDevices) return "ENTERPRISE";
   return profile.hasProvisionedDevices ? "AD_HOC" : "APP_STORE";
 }

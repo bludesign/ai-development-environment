@@ -28,10 +28,17 @@ import type { PublicOrigin } from "@/lib/public-origin";
 import { ConfigurationIcon } from "./configuration-icon";
 import { BuildConfigurationDialog } from "./ios-project-section";
 import { BuildsPage } from "./builds-page";
-import type { BuildConfiguration } from "./types";
+import {
+  configurationPlatforms,
+  platformLabel,
+  settingsForPlatform,
+  type BuildConfiguration,
+} from "./types";
+import { BUILD_PLATFORM_CONFIGURATION_FIELDS } from "./graphql-fields";
 
 const FIELDS = `id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
   source { id kind relativePath }
+  platformConfigurations { ${BUILD_PLATFORM_CONFIGURATION_FIELDS} }
   repository { id name }`;
 type Configuration = BuildConfiguration & {
   repository: { id: string; name: string };
@@ -92,6 +99,11 @@ export function BuildConfigurations() {
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
                 <p>{item.repository.name}</p>
+                <p className="text-muted-foreground">
+                  {configurationPlatforms(item)
+                    .map(({ platform }) => platformLabel(platform))
+                    .join(" · ")}
+                </p>
                 <p className="text-muted-foreground">
                   {item.scheme} · {item.buildConfiguration} ·{" "}
                   {t(`actions.${item.defaultAction}`)}
@@ -284,6 +296,29 @@ export function BuildConfigurationDetail({
                 ) : (
                   t("checkoutUnavailable")
                 )}
+              </div>
+              <div className="space-y-2 sm:col-span-2">
+                <p className="text-sm text-muted-foreground">
+                  {t("buildPlatforms")}
+                </p>
+                {configurationPlatforms(configuration).map(({ platform }) => {
+                  const settings = settingsForPlatform(configuration, platform);
+                  return (
+                    <div
+                      className="rounded-lg border p-3 text-sm"
+                      key={platform}
+                    >
+                      <p className="font-medium">{platformLabel(platform)}</p>
+                      <p>
+                        {settings.scheme} · {settings.buildConfiguration} ·{" "}
+                        {t(`actions.${settings.defaultAction}`)}
+                      </p>
+                      <p className="break-all font-mono text-xs text-muted-foreground">
+                        {settings.source.relativePath}
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
               <details className="sm:col-span-2">
                 <summary>{t("advancedSettings")}</summary>

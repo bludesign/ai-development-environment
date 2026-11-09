@@ -341,6 +341,15 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
       scheme: "AcmeApp",
       buildConfiguration: "Release",
       defaultAction: "ARCHIVE",
+      platformConfigurationsJson: JSON.stringify([
+        { platform: "IOS" },
+        {
+          platform: "TVOS",
+          scheme: "AcmeTV",
+          defaultAction: "BUILD",
+          autoExport: false,
+        },
+      ]),
       autoExport: true,
       exportSettingsJson: JSON.stringify({ method: "APP_STORE_CONNECT" }),
       createdAt: daysAgo(60),
@@ -431,6 +440,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
               architectures: ["arm64"],
               minimumOSVersion: "17.0",
               sdkName: "iphoneos26.0",
+              compatiblePlatforms: ["IOS", "VISIONOS_DESIGNED_FOR_IPAD"],
             }),
             createdAt: hoursAgo(3),
           },

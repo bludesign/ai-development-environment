@@ -4,6 +4,7 @@ import {
   BUILD_EXPORT_METHODS,
   EXPORT_METHOD_PROFILE_TYPES,
   profileCoversBundle,
+  type BuildExportMethod,
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
 import { Plus, RefreshCw, ScanSearch, Trash2 } from "lucide-react";
@@ -28,9 +29,10 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
+import type { BuildPlatform } from "./types";
 
 export type ExportSettingsValue = {
-  method: "DEBUGGING" | "RELEASE_TESTING" | "ENTERPRISE" | "APP_STORE_CONNECT";
+  method: BuildExportMethod;
   signingStyle: "AUTOMATIC" | "MANUAL";
   teamId: string | null;
   signingCertificate: string | null;
@@ -43,6 +45,35 @@ export type ExportSettingsValue = {
   iCloudContainerEnvironment: "Development" | "Production" | null;
   distributionBundleIdentifier: string | null;
 };
+
+export function buildExportMethods(platform?: BuildPlatform) {
+  const mac = platform === "MACOS" || platform === "MAC_CATALYST";
+  return BUILD_EXPORT_METHODS.filter(
+    (method) =>
+      method === "APP_STORE_CONNECT" ||
+      mac === (method === "MAC_APPLICATION" || method === "DEVELOPER_ID"),
+  );
+}
+
+export function exportSettingsForPlatform(
+  platform: BuildPlatform,
+  settings?: Record<string, unknown> | null,
+): ExportSettingsValue {
+  const value = {
+    ...DEFAULT_EXPORT_SETTINGS,
+    ...settings,
+  } as ExportSettingsValue;
+  const mac = platform === "MACOS" || platform === "MAC_CATALYST";
+  return {
+    ...value,
+    method: buildExportMethods(platform).includes(value.method)
+      ? value.method
+      : mac
+        ? "MAC_APPLICATION"
+        : "DEBUGGING",
+    thinning: mac ? null : value.thinning,
+  };
+}
 
 export const DEFAULT_EXPORT_SETTINGS: ExportSettingsValue = {
   method: "DEBUGGING",
@@ -115,11 +146,13 @@ export function ExportSettingsForm({
   value,
   onChange,
   onParseSigningRequirements,
+  platform,
   disabled = false,
 }: {
   value: ExportSettingsValue;
   onChange: (value: ExportSettingsValue) => void;
   onParseSigningRequirements?: () => Promise<BuildSigningRequirement[]>;
+  platform?: BuildPlatform;
   disabled?: boolean;
 }) {
   const t = useTranslations("builds");
@@ -514,13 +547,17 @@ export function ExportSettingsForm({
             onValueChange={(next) =>
               update("method", next as ExportSettingsValue["method"])
             }
-            value={value.method}
+            value={
+              buildExportMethods(platform).includes(value.method)
+                ? value.method
+                : ""
+            }
           >
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue placeholder={t("distributionMethod")} />
             </SelectTrigger>
             <SelectContent>
-              {BUILD_EXPORT_METHODS.map((method) => (
+              {buildExportMethods(platform).map((method) => (
                 <SelectItem key={method} value={method}>
                   {t(`exportMethod.${method}`)}
                 </SelectItem>
@@ -844,15 +881,17 @@ export function ExportSettingsForm({
           })}
         </div>
       )}
-      <div className="space-y-2">
-        <Label>{t("thinning")}</Label>
-        <Input
-          disabled={disabled}
-          onChange={(event) => update("thinning", event.target.value || null)}
-          placeholder="<none> / <thin-for-all-variants>"
-          value={value.thinning ?? ""}
-        />
-      </div>
+      {platform !== "MACOS" && platform !== "MAC_CATALYST" && (
+        <div className="space-y-2">
+          <Label>{t("thinning")}</Label>
+          <Input
+            disabled={disabled}
+            onChange={(event) => update("thinning", event.target.value || null)}
+            placeholder="<none> / <thin-for-all-variants>"
+            value={value.thinning ?? ""}
+          />
+        </div>
+      )}
       <div className="space-y-2">
         <Label>{t("iCloudEnvironment")}</Label>
         <Select

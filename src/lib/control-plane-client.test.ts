@@ -76,6 +76,29 @@ describe("control-plane HTTP requests", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  test("preserves the error code on a GraphQL rejection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          errors: [
+            {
+              message: "Build agent is unavailable",
+              extensions: { code: "BUILD_SUBMISSION_REJECTED" },
+            },
+          ],
+        }),
+      ),
+    );
+
+    await expect(
+      controlPlaneRequest("mutation StartBuild { startBuild }"),
+    ).rejects.toMatchObject({
+      message: "Build agent is unavailable",
+      code: "BUILD_SUBMISSION_REJECTED",
+    });
+  });
+
   test("limits the number of simultaneous GraphQL requests", async () => {
     const resolvers: Array<(response: Response) => void> = [];
     const fetch = vi.fn(

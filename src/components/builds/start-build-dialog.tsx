@@ -12,7 +12,9 @@ import {
 } from "@/components/server-urls/server-url-controls";
 
 import {
+  buildDestinationSpecifier,
   genericBuildDestinations,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
   type BuildSigningRequirement,
 } from "@ai-development-environment/agent-contract/builds";
 import {
@@ -66,15 +68,24 @@ import type {
   BuildAction,
   BuildConfiguration,
   BuildDestination,
+  BuildPlatform,
   BuildSourceObservation,
   IosAppProject,
 } from "./types";
+import {
+  configurationPlatforms,
+  destinationPlatform,
+  platformLabel,
+  settingsForPlatform,
+} from "./types";
+import { BUILD_PLATFORM_CONFIGURATION_FIELDS } from "./graphql-fields";
 import { BuildDestinationPicker } from "./destination-picker";
 import { CollectDsymsSelect } from "./collect-dsyms-select";
 import { ConfigurationIcon } from "./configuration-icon";
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
+  exportSettingsForPlatform,
   type ExportSettingsValue,
 } from "./export-settings-form";
 
@@ -82,6 +93,7 @@ type PriorBuildForTesting = {
   id: string;
   action: BuildAction;
   destinationType: BuildDestination["type"];
+  platform?: BuildPlatform | null;
   snapshot: Record<string, unknown>;
   createdAt: string;
 };
@@ -90,11 +102,28 @@ type BuildAgent = {
   id: string;
   name: string;
   hostname: string;
+  capabilities?: string[];
 };
 
 type DestinationCacheEntry = {
   destinations: BuildDestination[];
   expiresAt: number;
+};
+
+type PlatformBuildDraft = {
+  action: BuildAction;
+  destination?: BuildDestination;
+  advanced: Record<string, unknown>;
+  overrides: string;
+  exportWhenComplete: boolean;
+  exportSettings: ExportSettingsValue;
+  serverUrlKindOverride: ServerUrlKind | null;
+  priorBuildId: string | null;
+};
+
+type BuildSubmission = {
+  kind: "batch" | "startBuild" | "startWorktreeCoverage";
+  input: Record<string, unknown>;
 };
 
 const DESTINATION_CACHE_TTL_MS = 15_000;
@@ -104,6 +133,7 @@ const PROJECT_FIELDS = `
   configurations {
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
+    platformConfigurations { ${BUILD_PLATFORM_CONFIGURATION_FIELDS} }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
   allowedScripts {
@@ -309,6 +339,18 @@ function StartBuildDialog({
   const [customConfiguration, setCustomConfiguration] =
     useState<BuildConfiguration | null>(null);
   const [customOpen, setCustomOpen] = useState(false);
+  const [platform, setPlatform] = useState<BuildPlatform>("IOS");
+  const [selectedPlatforms, setSelectedPlatforms] = useState<BuildPlatform[]>([
+    "IOS",
+  ]);
+  const [platformDrafts, setPlatformDrafts] = useState<
+    Partial<Record<BuildPlatform, PlatformBuildDraft>>
+  >({});
+  const [completedPlatforms, setCompletedPlatforms] = useState<BuildPlatform[]>(
+    [],
+  );
+  const [retrySubmission, setRetrySubmission] =
+    useState<BuildSubmission | null>(null);
   const selectionInput = (entry: BuildConfiguration) =>
     entry.id === "__custom__"
       ? {
@@ -317,6 +359,15 @@ function StartBuildDialog({
             sourcePath: entry.source.relativePath,
             scheme: entry.scheme,
             buildConfiguration: entry.buildConfiguration,
+            ...(entry.platformConfigurations?.some(
+              (item) => item.platform !== "IOS" || Object.keys(item).length > 1,
+            )
+              ? { platformConfigurations: entry.platformConfigurations }
+              : {}),
+            ...(entry.exportSettings &&
+            entry.platformConfigurations?.some((item) => item.exportSettings)
+              ? { exportSettings: entry.exportSettings }
+              : {}),
           },
         }
       : { configurationId: entry.id };
@@ -348,13 +399,20 @@ function StartBuildDialog({
   const destinationIdRef = useRef("");
   const priorBuildsLoaded = useRef(false);
 
-  const configuration =
+  const baseConfiguration =
     configurationId === "__custom__"
       ? customConfiguration
       : project?.configurations.find((entry) => entry.id === configurationId);
+  const availablePlatforms = baseConfiguration
+    ? configurationPlatforms(baseConfiguration)
+    : [];
+  const configuration = baseConfiguration
+    ? settingsForPlatform(baseConfiguration, platform)
+    : null;
   const selectedConfigurationId = customOpen ? "__custom__" : configurationId;
   const observation = configuration
-    ? (observations[configuration.id] ?? configuration.observation)
+    ? (observations[`${configuration.id}:${platform}`] ??
+      configuration.observation)
     : null;
 
   useEffect(() => {
@@ -365,7 +423,7 @@ function StartBuildDialog({
     }>(
       `query StartBuildProject($codebaseId: ID!) {
         iosAppProject(codebaseId: $codebaseId) { ${PROJECT_FIELDS} }
-        codebase(id: $codebaseId) { agent { id name hostname } }
+        codebase(id: $codebaseId) { agent { id name hostname capabilities } }
       }`,
       { codebaseId },
     )
@@ -387,22 +445,27 @@ function StartBuildDialog({
         }
         if (first) {
           setConfigurationId(first.id);
-          setAction(coverageMode ? "TEST" : first.defaultAction);
-          setAdvanced(first.advancedSettings ?? {});
+          const firstPlatform = configurationPlatforms(first)[0]!.platform;
+          const settings = settingsForPlatform(first, firstPlatform);
+          setPlatform(firstPlatform);
+          setSelectedPlatforms([firstPlatform]);
+          setAction(coverageMode ? "TEST" : settings.defaultAction);
+          setAdvanced(settings.advancedSettings ?? {});
           setOverrides(
-            JSON.stringify(first.advancedSettings?.buildSettingOverrides ?? {}),
+            JSON.stringify(
+              settings.advancedSettings?.buildSettingOverrides ?? {},
+            ),
           );
           setExportWhenComplete(
             Boolean(
               !coverageMode &&
-              first.defaultAction === "ARCHIVE" &&
-              first.autoExport,
+              settings.defaultAction === "ARCHIVE" &&
+              settings.autoExport,
             ),
           );
-          setExportSettings({
-            ...DEFAULT_EXPORT_SETTINGS,
-            ...(first.exportSettings ?? {}),
-          } as ExportSettingsValue);
+          setExportSettings(
+            exportSettingsForPlatform(firstPlatform, settings.exportSettings),
+          );
           setScriptIds(
             new Set(
               data
@@ -434,7 +497,7 @@ function StartBuildDialog({
     void controlPlaneRequest<{ builds: { items: PriorBuildForTesting[] } }>(
       `query StartBuildPriorBuilds($worktreeId: ID!) {
         builds(first: 50, status: SUCCEEDED, worktreeId: $worktreeId) {
-          items { id action destinationType snapshot createdAt }
+          items { id action platform destinationType snapshot createdAt }
         }
       }`,
       { worktreeId },
@@ -452,6 +515,7 @@ function StartBuildDialog({
       priorBuilds.filter((build) => {
         if (build.action !== "BUILD_FOR_TESTING") return false;
         if (build.destinationType !== destinationType) return false;
+        if ((build.platform ?? "IOS") !== platform) return false;
         const snapshotConfiguration = build.snapshot.configuration as
           | {
               id?: string;
@@ -469,12 +533,12 @@ function StartBuildDialog({
           (configurationId === "__custom__"
             ? snapshotConfiguration?.kind === "CUSTOM" &&
               snapshotConfiguration.source?.kind ===
-                customConfiguration?.source.kind &&
+                configuration?.source.kind &&
               snapshotConfiguration.source?.relativePath ===
-                customConfiguration?.source.relativePath &&
-              snapshotConfiguration.scheme === customConfiguration?.scheme &&
+                configuration?.source.relativePath &&
+              snapshotConfiguration.scheme === configuration?.scheme &&
               snapshotConfiguration.buildConfiguration ===
-                customConfiguration?.buildConfiguration
+                configuration?.buildConfiguration
             : snapshotConfiguration?.id === configurationId) &&
           (!currentTestPlan ||
             !priorTestPlan ||
@@ -484,8 +548,9 @@ function StartBuildDialog({
     [
       advanced.testPlan,
       configurationId,
-      customConfiguration,
+      configuration,
       destinationType,
+      platform,
       priorBuilds,
     ],
   );
@@ -507,7 +572,8 @@ function StartBuildDialog({
     const preferredType = project?.defaultDestinationType ?? "SIMULATOR";
     const defaultType: BuildDestination["type"] =
       selectedAction === "ARCHIVE"
-        ? "PHYSICAL_DEVICE"
+        ? (selectable.find((destination) => destination.generic)?.type ??
+          destinationTypeRef.current)
         : selectable.some((destination) => destination.type === preferredType)
           ? preferredType
           : (selectable[0]?.type ?? destinationTypeRef.current);
@@ -541,7 +607,11 @@ function StartBuildDialog({
   ) => {
     const request = ++destinationRequest.current;
     setDestinationsLoading(true);
-    const cacheKey = `${worktreeId}:${JSON.stringify(selectionInput(selected))}:${selectedAction}`;
+    const input = selectionInput(selected);
+    const legacyIos =
+      platform === "IOS" &&
+      !agent?.capabilities?.includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY);
+    const cacheKey = `${worktreeId}:${JSON.stringify(input)}:${platform}:${selectedAction}`;
     const cached = destinationCache.get(cacheKey);
     if (cached && cached.expiresAt <= Date.now()) {
       destinationCache.delete(cacheKey);
@@ -549,10 +619,21 @@ function StartBuildDialog({
     const initialDestinations =
       cached && cached.expiresAt > Date.now()
         ? cached.destinations
-        : (genericBuildDestinations(selectedAction) as BuildDestination[]);
+        : legacyIos
+          ? genericBuildDestinations(selectedAction)
+          : [];
     setError(null);
     setDestinationWarning(null);
-    applyDestinations(initialDestinations, selectedAction, false);
+    if (initialDestinations.length) {
+      applyDestinations(
+        initialDestinations,
+        selectedAction,
+        Boolean(destinationIdRef.current),
+      );
+    } else {
+      setDestinations([]);
+      setDestinationId("");
+    }
     try {
       const data = await controlPlaneRequest<{
         inspectBuildDestinations: BuildDestination[];
@@ -563,30 +644,35 @@ function StartBuildDialog({
         {
           input: {
             worktreeId,
-            ...selectionInput(selected),
+            ...input,
             action: selectedAction,
+            ...(platform !== "IOS" ? { platform } : {}),
             requestId: createClientId(),
           },
         },
       );
       if (request !== destinationRequest.current) return;
-      const generic = genericBuildDestinations(
-        selectedAction,
-      ) as BuildDestination[];
-      const refreshed =
-        selectedAction === "ARCHIVE"
-          ? generic
-          : [
-              ...generic,
-              ...data.inspectBuildDestinations.filter(
-                (destination) =>
-                  !generic.some(
-                    (entry) =>
-                      entry.type === destination.type &&
-                      entry.id === destination.id,
-                  ),
-              ),
-            ];
+      const live = data.inspectBuildDestinations.filter(
+        (destination) =>
+          destinationPlatform(destination) === platform &&
+          (selectedAction !== "ARCHIVE" || destination.generic),
+      );
+      const generic =
+        legacyIos &&
+        live.length > 0 &&
+        live.every((destination) => !destination.platformId)
+          ? genericBuildDestinations(selectedAction)
+          : [];
+      const refreshed = [
+        ...generic,
+        ...live.filter(
+          (destination) =>
+            !generic.some(
+              (entry) =>
+                entry.type === destination.type && entry.id === destination.id,
+            ),
+        ),
+      ];
       destinationCache.set(cacheKey, {
         destinations: refreshed,
         expiresAt: Date.now() + DESTINATION_CACHE_TTL_MS,
@@ -610,34 +696,91 @@ function StartBuildDialog({
   };
 
   const reparse = async (selected: BuildConfiguration) => {
+    const currentRequest = destinationRequest.current;
     setReparsing(true);
     setError(null);
     try {
-      const parsed = await controlPlaneRequest<{
-        reparseBuildConfiguration: BuildSourceObservation;
-      }>(
-        `mutation ReparseStartBuild($configurationId: ID!, $worktreeId: ID!, $requestId: ID!) {
+      let nextObservation: BuildSourceObservation;
+      if (
+        baseConfiguration &&
+        (platform !== "IOS" ||
+          availablePlatforms[0]?.platform !== platform ||
+          selected.source.kind !== baseConfiguration.source.kind ||
+          selected.source.relativePath !==
+            baseConfiguration.source.relativePath ||
+          selected.scheme !== baseConfiguration.scheme ||
+          selected.buildConfiguration !== baseConfiguration.buildConfiguration)
+      ) {
+        const data = await controlPlaneRequest<{
+          inspectBuildSource: Pick<
+            BuildSourceObservation,
+            | "schemes"
+            | "configurations"
+            | "testPlans"
+            | "headSha"
+            | "xcodeVersion"
+          > & { platforms: BuildPlatform[] | null };
+        }>(
+          `mutation InspectStartBuildPlatformSource($input: InspectBuildSourceInput!) {
+          inspectBuildSource(input: $input) { schemes configurations testPlans headSha xcodeVersion platforms }
+        }`,
+          {
+            input: {
+              worktreeId,
+              sourceKind: selected.source.kind,
+              sourcePath: selected.source.relativePath,
+              scheme: selected.scheme,
+              configuration: selected.buildConfiguration,
+              platform,
+              requestId: createClientId(),
+            },
+          },
+        );
+        const parsed = data.inspectBuildSource;
+        const supported =
+          parsed.schemes.includes(selected.scheme) &&
+          parsed.configurations.includes(selected.buildConfiguration) &&
+          (!parsed.platforms || parsed.platforms.includes(platform));
+        const inspectedAt = new Date().toISOString();
+        nextObservation = {
+          ...parsed,
+          id: "",
+          scopeKey: `worktree:${worktreeId}`,
+          status: supported ? "VALID" : "INVALID",
+          error: supported ? null : t("configurationInvalid"),
+          stale: false,
+          lastParseAttemptAt: inspectedAt,
+          lastParsedAt: inspectedAt,
+        };
+      } else {
+        const parsed = await controlPlaneRequest<{
+          reparseBuildConfiguration: BuildSourceObservation;
+        }>(
+          `mutation ReparseStartBuild($configurationId: ID!, $worktreeId: ID!, $requestId: ID!) {
           reparseBuildConfiguration(configurationId: $configurationId, worktreeId: $worktreeId, requestId: $requestId) {
             ${OBSERVATION_FIELDS}
           }
         }`,
-        {
-          configurationId: selected.id,
-          worktreeId,
-          requestId: createClientId(),
-        },
-      );
-      const nextObservation = parsed.reparseBuildConfiguration;
+          {
+            configurationId: selected.id,
+            worktreeId,
+            requestId: createClientId(),
+          },
+        );
+        nextObservation = parsed.reparseBuildConfiguration;
+      }
       setObservations((current) => ({
         ...current,
-        [selected.id]: nextObservation,
+        [`${selected.id}:${platform}`]: nextObservation,
       }));
       if (nextObservation.status !== "VALID") {
         throw new Error(nextObservation.error || t("configurationInvalid"));
       }
-      void prepare(selected, action);
+      if (destinationRequest.current === currentRequest)
+        void prepare(baseConfiguration ?? selected, action);
     } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
+      if (destinationRequest.current === currentRequest)
+        setError(value instanceof Error ? value.message : String(value));
     } finally {
       setReparsing(false);
     }
@@ -664,6 +807,7 @@ function StartBuildDialog({
           sourcePath: configuration.source.relativePath,
           scheme: configuration.scheme,
           configuration: configuration.buildConfiguration,
+          ...(platform !== "IOS" ? { platform } : {}),
           requestId: createClientId(),
         },
       },
@@ -672,9 +816,9 @@ function StartBuildDialog({
   };
 
   useEffect(() => {
-    if (!configuration || loading) return;
+    if (!baseConfiguration || loading) return;
     const timer = window.setTimeout(
-      () => void prepare(configuration, action),
+      () => void prepare(baseConfiguration, action),
       0,
     );
     return () => {
@@ -683,7 +827,7 @@ function StartBuildDialog({
     };
     // Prepare only when the selected configuration/action changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configurationId, customConfiguration, action, loading]);
+  }, [configurationId, customConfiguration, action, loading, platform]);
 
   const filteredDestinations = useMemo(
     () =>
@@ -695,76 +839,266 @@ function StartBuildDialog({
   const destination = destinations.find(
     (entry) => entry.id === destinationId && entry.type === destinationType,
   );
+  const currentDraft: PlatformBuildDraft = {
+    action,
+    destination,
+    advanced,
+    overrides,
+    exportWhenComplete,
+    exportSettings,
+    serverUrlKindOverride,
+    priorBuildId: selectedPriorBuildId,
+  };
+  const draftFor = (entry: BuildPlatform) =>
+    entry === platform ? currentDraft : platformDrafts[entry];
+
+  const editPlatform = (
+    entry: BuildPlatform,
+    base: BuildConfiguration,
+    preserve: boolean,
+  ) => {
+    const settings = settingsForPlatform(base, entry);
+    const existing = preserve ? platformDrafts[entry] : undefined;
+    const nextAction = coverageMode
+      ? "TEST"
+      : (existing?.action ?? settings.defaultAction);
+    destinationRequest.current += 1;
+    destinationIdRef.current = existing?.destination?.id ?? "";
+    destinationTypeRef.current =
+      existing?.destination?.type ??
+      project?.defaultDestinationType ??
+      "SIMULATOR";
+    setPlatform(entry);
+    setAction(nextAction);
+    setAdvanced(existing?.advanced ?? settings.advancedSettings);
+    setOverrides(
+      existing?.overrides ??
+        JSON.stringify(settings.advancedSettings?.buildSettingOverrides ?? {}),
+    );
+    setExportWhenComplete(
+      !coverageMode &&
+        (existing?.exportWhenComplete ?? Boolean(settings.autoExport)),
+    );
+    setExportSettings(
+      existing?.exportSettings ??
+        exportSettingsForPlatform(entry, settings.exportSettings),
+    );
+    setServerUrlKindOverride(existing?.serverUrlKindOverride ?? null);
+    setDestinationWarning(null);
+    setError(null);
+    setDestinations([]);
+    setDestinationType(destinationTypeRef.current);
+    setDestinationId("");
+    setDestinationsLoading(true);
+  };
+
+  const selectConfiguration = (entry: BuildConfiguration) => {
+    const first = configurationPlatforms(entry)[0]!.platform;
+    setConfigurationId(entry.id);
+    setSelectedPlatforms([first]);
+    setPlatformDrafts({});
+    setCompletedPlatforms([]);
+    editPlatform(first, entry, false);
+  };
+
+  const focusPlatform = (entry: BuildPlatform) => {
+    if (!baseConfiguration || entry === platform) return;
+    setPlatformDrafts((current) => ({ ...current, [platform]: currentDraft }));
+    editPlatform(entry, baseConfiguration, true);
+  };
   const preview = configuration
-    ? `xcrun xcodebuild ${configuration.source.kind === "PROJECT" ? `-project ${configuration.source.relativePath}` : configuration.source.kind === "WORKSPACE" ? `-workspace ${configuration.source.relativePath}` : ""} -scheme ${JSON.stringify(configuration.scheme)} -configuration ${JSON.stringify(configuration.buildConfiguration)} -destination ${JSON.stringify(destination?.name ?? "<destination>")} -hideShellScriptEnvironment ${action.toLowerCase().replaceAll("_", "-")}${action === "TEST_WITHOUT_BUILDING" && selectedPriorBuildId ? ` · ${t("priorBuildSummary", { id: selectedPriorBuildId })}` : ""}`
+    ? `xcrun xcodebuild ${configuration.source.kind === "PROJECT" ? `-project ${configuration.source.relativePath}` : configuration.source.kind === "WORKSPACE" ? `-workspace ${configuration.source.relativePath}` : ""} -scheme ${JSON.stringify(configuration.scheme)} -configuration ${JSON.stringify(configuration.buildConfiguration)} -destination ${JSON.stringify(destination ? buildDestinationSpecifier(destination) : "<destination>")} -hideShellScriptEnvironment ${action.toLowerCase().replaceAll("_", "-")}${action === "TEST_WITHOUT_BUILDING" && selectedPriorBuildId ? ` · ${t("priorBuildSummary", { id: selectedPriorBuildId })}` : ""}`
     : "";
 
-  const start = async () => {
-    if (
-      !configuration ||
-      !destination ||
-      destination.available === false ||
-      !serverUrls
-    )
+  const pendingPlatforms = selectedPlatforms.filter(
+    (entry) => !completedPlatforms.includes(entry),
+  );
+  const availableServerUrls = serverUrls ? serverUrlOptions(serverUrls) : [];
+  const canStart =
+    serverUrls &&
+    pendingPlatforms.length > 0 &&
+    pendingPlatforms.every((entry) => {
+      const draft = draftFor(entry);
+      if (!draft?.destination || draft.destination.available === false)
+        return false;
+      if (draft.action === "ARCHIVE" && !draft.destination.generic)
+        return false;
+      if (draft.action === "TEST_WITHOUT_BUILDING" && !draft.priorBuildId)
+        return false;
+      return availableServerUrls.some(
+        ({ kind }) =>
+          kind ===
+          (draft.serverUrlKindOverride ??
+            defaultServerUrlKind(serverUrls, draft.destination?.type)),
+      );
+    });
+
+  const submitBatch = async (input: Record<string, unknown>) => {
+    const data = await controlPlaneRequest<{
+      startBuilds: Array<{
+        platform: BuildPlatform;
+        build: { id: string } | null;
+        error: string | null;
+      }>;
+    }>(
+      `mutation StartPlatformBuilds($input: StartBuildsInput!) {
+        startBuilds(input: $input) { platform build { id } error }
+      }`,
+      { input },
+    );
+    const accepted = data.startBuilds.filter(
+      (result) => result.build && !result.error,
+    );
+    const errors = data.startBuilds.filter(
+      (result) => result.error || !result.build,
+    );
+    setRetrySubmission(null);
+    setCompletedPlatforms((current) => [
+      ...current,
+      ...accepted.map((result) => result.platform),
+    ]);
+    if (accepted[0]?.build) onStarted(accepted[0].build.id);
+    if (errors.length || !accepted.length) {
+      setError(
+        errors
+          .map(
+            ({ platform, error }) =>
+              `${platformLabel(platform)}: ${error ?? t("startBuildFailed")}`,
+          )
+          .join("\n") || t("startBuildFailed"),
+      );
       return;
+    }
+    onOpenChange(false);
+  };
+
+  const submit = async (submission: BuildSubmission) => {
+    setRetrySubmission(submission);
+    if (submission.kind === "batch") {
+      await submitBatch(submission.input);
+      return;
+    }
+    const field = submission.kind;
+    const data = await controlPlaneRequest<
+      Partial<
+        Record<
+          typeof field,
+          { id: string; errorCode: string | null; error: string | null }
+        >
+      >
+    >(
+      `mutation StartIosBuild($input: StartBuildInput!) {
+        ${field}(input: $input) { id errorCode error }
+      }`,
+      { input: submission.input },
+    );
+    const started = data[field];
+    if (!started) throw new Error(t("startBuildFailed"));
+    setRetrySubmission(null);
+    if (started.errorCode === "QUEUE_FAILED") {
+      setError(started.error ?? t("startBuildFailed"));
+      return;
+    }
+    onOpenChange(false);
+    onStarted(started.id);
+  };
+
+  const start = async () => {
+    if (starting) return;
     setStarting(true);
     setError(null);
     try {
-      let buildSettingOverrides: Record<string, string> = {};
-      try {
-        const parsed: unknown = JSON.parse(overrides);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error();
-        }
-        buildSettingOverrides = parsed as Record<string, string>;
-      } catch {
-        throw new Error(t("overridesInvalid"));
+      if (retrySubmission) {
+        await submit(retrySubmission);
+        return;
       }
-      const data = await controlPlaneRequest<{
-        startBuild?: { id: string };
-        startWorktreeCoverage?: { id: string };
-      }>(
-        `mutation StartIosBuild($input: StartBuildInput!) {
-          ${coverageMode ? "startWorktreeCoverage" : "startBuild"}(input: $input) { id }
-        }`,
-        {
-          input: {
-            worktreeId,
-            serverUrlKind:
-              serverUrlKindOverride ??
-              (serverUrls
-                ? defaultServerUrlKind(serverUrls, destinationType)
-                : null),
-            ...selectionInput(configuration),
-            destination,
-            scriptIds: [...scriptIds],
-            action,
-            advancedSettings: {
-              ...advanced,
-              buildSettingOverrides,
-              ...(coverageMode
-                ? { codeCoverage: true, parseTestResults: true }
-                : {}),
-              ...(action === "TEST_WITHOUT_BUILDING"
-                ? {
-                    priorBuildForTestingId: selectedPriorBuildId,
-                    priorTestProductsPath: null,
-                    priorXctestrunPath: null,
-                  }
-                : {}),
-            },
-            exportWhenComplete:
-              !coverageMode && action === "ARCHIVE" && exportWhenComplete,
-            exportSettings: action === "ARCHIVE" ? exportSettings : null,
-            requestId: createClientId(),
+      if (!baseConfiguration || !serverUrls || !canStart) return;
+      const selectionsError = (entry: BuildPlatform) =>
+        pendingPlatforms.length > 1
+          ? `${platformLabel(entry)}: ${t("overridesInvalid")}`
+          : t("overridesInvalid");
+      const selections = pendingPlatforms.map((entry) => {
+        const draft = draftFor(entry)!;
+        let buildSettingOverrides: Record<string, string>;
+        try {
+          const parsed: unknown = JSON.parse(draft.overrides);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+            throw new Error();
+          buildSettingOverrides = parsed as Record<string, string>;
+        } catch {
+          throw new Error(selectionsError(entry));
+        }
+        return {
+          platform: entry,
+          destination: draft.destination!,
+          action: draft.action,
+          advancedSettings: {
+            ...draft.advanced,
+            buildSettingOverrides,
+            ...(coverageMode
+              ? { codeCoverage: true, parseTestResults: true }
+              : {}),
+            ...(draft.action === "TEST_WITHOUT_BUILDING"
+              ? {
+                  priorBuildForTestingId: draft.priorBuildId,
+                  priorTestProductsPath: null,
+                  priorXctestrunPath: null,
+                }
+              : {}),
           },
-        },
-      );
-      onOpenChange(false);
-      const started = data.startBuild ?? data.startWorktreeCoverage;
-      if (!started) throw new Error(t("startBuildFailed"));
-      onStarted(started.id);
+          exportWhenComplete:
+            !coverageMode &&
+            draft.action === "ARCHIVE" &&
+            draft.exportWhenComplete,
+          exportSettings:
+            draft.action === "ARCHIVE" ? draft.exportSettings : null,
+          serverUrlKind:
+            draft.serverUrlKindOverride ??
+            defaultServerUrlKind(serverUrls, draft.destination!.type),
+        };
+      });
+      const commonInput = {
+        worktreeId,
+        ...selectionInput(baseConfiguration),
+        scriptIds: [...scriptIds],
+        requestId: createClientId(),
+      };
+      if (
+        !coverageMode &&
+        (availablePlatforms.length > 1 ||
+          selections[0]?.platform !== "IOS" ||
+          agent?.capabilities?.includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY))
+      ) {
+        await submit({
+          kind: "batch",
+          input: structuredClone({ ...commonInput, selections }),
+        });
+        return;
+      }
+      const {
+        platform: selectedPlatform,
+        destination: selectedDestination,
+        ...selection
+      } = selections[0]!;
+      await submit({
+        kind: coverageMode ? "startWorktreeCoverage" : "startBuild",
+        input: structuredClone({
+          ...commonInput,
+          ...selection,
+          destination:
+            selectedPlatform === "IOS"
+              ? selectedDestination
+              : { ...selectedDestination, platformId: selectedPlatform },
+        }),
+      });
     } catch (value) {
+      if (
+        value instanceof Error &&
+        "code" in value &&
+        value.code === "BUILD_SUBMISSION_REJECTED"
+      ) {
+        setRetrySubmission(null);
+      }
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setStarting(false);
@@ -773,7 +1107,12 @@ function StartBuildDialog({
 
   return (
     <>
-      <Dialog onOpenChange={onOpenChange} open={open}>
+      <Dialog
+        onOpenChange={(next) => {
+          if (!starting) onOpenChange(next);
+        }}
+        open={open}
+      >
         <DialogContent className="max-h-[90vh] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>
@@ -789,12 +1128,21 @@ function StartBuildDialog({
           </DialogHeader>
           {error && (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription className="whitespace-pre-line">
+                {error}
+              </AlertDescription>
             </Alert>
           )}
           {destinationWarning && (
             <Alert>
               <AlertDescription>{destinationWarning}</AlertDescription>
+            </Alert>
+          )}
+          {retrySubmission && !starting && (
+            <Alert>
+              <AlertDescription>
+                {t("buildSubmissionUnconfirmed")}
+              </AlertDescription>
             </Alert>
           )}
           {loading ? (
@@ -806,7 +1154,10 @@ function StartBuildDialog({
               <AlertDescription>{t("noConfigurations")}</AlertDescription>
             </Alert>
           ) : (
-            <div className="space-y-5">
+            <div
+              className="space-y-5"
+              inert={starting || Boolean(retrySubmission)}
+            >
               <section className="space-y-2">
                 <Label>{t("configuration")}</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -815,30 +1166,11 @@ function StartBuildDialog({
                       className={`rounded-xl border p-3 text-left transition-colors ${entry.id === selectedConfigurationId ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
                       key={entry.id}
                       aria-pressed={entry.id === selectedConfigurationId}
+                      disabled={starting}
                       onClick={() => {
-                        if (entry.id !== configurationId) {
-                          destinationRequest.current += 1;
-                        }
                         setCustomOpen(false);
-                        setConfigurationId(entry.id);
-                        setAction(coverageMode ? "TEST" : entry.defaultAction);
-                        setAdvanced(entry.advancedSettings ?? {});
-                        setOverrides(
-                          JSON.stringify(
-                            entry.advancedSettings?.buildSettingOverrides ?? {},
-                          ),
-                        );
-                        setExportWhenComplete(
-                          Boolean(
-                            !coverageMode &&
-                            entry.defaultAction === "ARCHIVE" &&
-                            entry.autoExport,
-                          ),
-                        );
-                        setExportSettings({
-                          ...DEFAULT_EXPORT_SETTINGS,
-                          ...(entry.exportSettings ?? {}),
-                        } as ExportSettingsValue);
+                        if (entry.id !== configurationId)
+                          selectConfiguration(entry);
                       }}
                       type="button"
                     >
@@ -849,25 +1181,34 @@ function StartBuildDialog({
                         </span>
                         <Badge
                           variant={
-                            (observations[entry.id] ?? entry.observation)
-                              ?.status === "VALID"
+                            (
+                              observations[
+                                `${entry.id}:${configurationPlatforms(entry)[0]!.platform}`
+                              ] ?? entry.observation
+                            )?.status === "VALID"
                               ? "success"
                               : "outline"
                           }
                         >
                           {t(
-                            `parseStatuses.${(observations[entry.id] ?? entry.observation)?.status ?? "UNPARSED"}`,
+                            `parseStatuses.${(observations[`${entry.id}:${configurationPlatforms(entry)[0]!.platform}`] ?? entry.observation)?.status ?? "UNPARSED"}`,
                           )}
                         </Badge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
                         {entry.scheme} · {entry.buildConfiguration}
                       </p>
+                      <p className="text-xs text-muted-foreground">
+                        {configurationPlatforms(entry)
+                          .map(({ platform }) => platformLabel(platform))
+                          .join(" · ")}
+                      </p>
                     </button>
                   ))}
                   <button
                     type="button"
                     aria-pressed={selectedConfigurationId === "__custom__"}
+                    disabled={starting}
                     className={`rounded-xl border p-3 text-left ${selectedConfigurationId === "__custom__" ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}
                     onClick={() => setCustomOpen(true)}
                   >
@@ -890,25 +1231,93 @@ function StartBuildDialog({
                   onSaved={async () => {}}
                   onCustom={(value) => {
                     setCustomConfiguration(value);
-                    setConfigurationId("__custom__");
-                    setAction(coverageMode ? "TEST" : value.defaultAction);
-                    setAdvanced(value.advancedSettings);
-                    setOverrides(
-                      JSON.stringify(
-                        value.advancedSettings.buildSettingOverrides ?? {},
-                      ),
-                    );
-                    setExportWhenComplete(Boolean(value.autoExport));
-                    setExportSettings({
-                      ...DEFAULT_EXPORT_SETTINGS,
-                      ...value.exportSettings,
-                    } as ExportSettingsValue);
+                    selectConfiguration(value);
                   }}
                 />
               )}
 
               {!customOpen && (
                 <>
+                  {baseConfiguration && (
+                    <fieldset className="space-y-2">
+                      <legend className="text-sm font-medium">
+                        {t("buildPlatforms")}
+                      </legend>
+                      {!coverageMode && availablePlatforms.length > 1 && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("startPlatformsDescription")}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {availablePlatforms.map(({ platform: entry }) => {
+                          const selected = selectedPlatforms.includes(entry);
+                          const completed = completedPlatforms.includes(entry);
+                          return (
+                            <div
+                              className="flex items-center gap-2 rounded-lg border px-2 py-1"
+                              key={entry}
+                            >
+                              {!coverageMode &&
+                                availablePlatforms.length > 1 && (
+                                  <Checkbox
+                                    aria-label={platformLabel(entry)}
+                                    checked={selected}
+                                    disabled={
+                                      starting ||
+                                      completed ||
+                                      (selected &&
+                                        selectedPlatforms.length === 1)
+                                    }
+                                    onCheckedChange={(checked) => {
+                                      if (checked) {
+                                        setSelectedPlatforms((current) => [
+                                          ...current,
+                                          entry,
+                                        ]);
+                                        focusPlatform(entry);
+                                      } else {
+                                        const remaining =
+                                          selectedPlatforms.filter(
+                                            (item) => item !== entry,
+                                          );
+                                        setSelectedPlatforms(remaining);
+                                        if (entry === platform && remaining[0])
+                                          focusPlatform(remaining[0]);
+                                      }
+                                    }}
+                                  />
+                                )}
+                              <Button
+                                aria-pressed={entry === platform}
+                                disabled={
+                                  starting ||
+                                  completed ||
+                                  (!coverageMode && !selected)
+                                }
+                                onClick={() => {
+                                  if (coverageMode)
+                                    setSelectedPlatforms([entry]);
+                                  focusPlatform(entry);
+                                }}
+                                size="sm"
+                                type="button"
+                                variant={
+                                  entry === platform ? "secondary" : "ghost"
+                                }
+                              >
+                                {platformLabel(entry)}{" "}
+                                {completed && (
+                                  <Badge variant="success">
+                                    {t("platformBuildQueued")}
+                                  </Badge>
+                                )}
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </fieldset>
+                  )}
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label>{t("destinationType")}</Label>
@@ -929,10 +1338,19 @@ function StartBuildDialog({
                         }}
                       >
                         <TabsList>
-                          <TabsTrigger value="PHYSICAL_DEVICE">
-                            <Smartphone />
-                            {t("physicalDevice")}
-                          </TabsTrigger>
+                          {platform === "MACOS" ||
+                          platform === "MAC_CATALYST" ? (
+                            <TabsTrigger value="LOCAL_MAC">
+                              <Monitor /> {t("localMac")}
+                            </TabsTrigger>
+                          ) : (
+                            <>
+                              <TabsTrigger value="PHYSICAL_DEVICE">
+                                <Smartphone />
+                                {t("physicalDevice")}
+                              </TabsTrigger>
+                            </>
+                          )}
                           <TabsTrigger
                             value="SIMULATOR"
                             disabled={action === "ARCHIVE"}
@@ -963,6 +1381,11 @@ function StartBuildDialog({
                           setDestinationId(value);
                         }}
                       />
+                      {!destinationsLoading && !destinations.length && (
+                        <p className="text-xs text-muted-foreground">
+                          {t("noCompatibleDevices")}
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1099,11 +1522,12 @@ function StartBuildDialog({
                           </label>
                           {exportWhenComplete && (
                             <ExportSettingsForm
-                              key={configurationId}
+                              key={`${configurationId}:${platform}`}
                               onChange={setExportSettings}
                               onParseSigningRequirements={
                                 parseSigningRequirements
                               }
+                              platform={platform}
                               value={exportSettings}
                             />
                           )}
@@ -1332,7 +1756,10 @@ function StartBuildDialog({
               )}
             </div>
           )}
-          <div className="space-y-2">
+          <div
+            className="space-y-2"
+            inert={starting || Boolean(retrySubmission)}
+          >
             {serverUrls ? (
               <ServerUrlSelect
                 settings={serverUrls}
@@ -1353,6 +1780,7 @@ function StartBuildDialog({
           </div>
           <DialogFooter>
             <Button
+              disabled={starting}
               onClick={() => onOpenChange(false)}
               type="button"
               variant="outline"
@@ -1361,25 +1789,19 @@ function StartBuildDialog({
             </Button>
             <Button
               disabled={
-                loading ||
                 starting ||
-                customOpen ||
-                !configuration ||
-                !serverUrls ||
-                !serverUrlOptions(serverUrls).some(
-                  (option) =>
-                    option.kind ===
-                    (serverUrlKindOverride ??
-                      defaultServerUrlKind(serverUrls, destinationType)),
-                ) ||
-                !destination ||
-                destination.available === false ||
-                (action === "TEST_WITHOUT_BUILDING" && !selectedPriorBuildId)
+                (!retrySubmission &&
+                  (loading || customOpen || !baseConfiguration || !canStart))
               }
               onClick={() => void start()}
               type="button"
             >
-              {starting && <Spinner />} {t("startBuild")}
+              {starting && <Spinner />}{" "}
+              {retrySubmission && !starting
+                ? t("retryBuildSubmission")
+                : pendingPlatforms.length > 1
+                  ? t("startPlatformBuilds", { count: pendingPlatforms.length })
+                  : t("startBuild")}
             </Button>
           </DialogFooter>
         </DialogContent>

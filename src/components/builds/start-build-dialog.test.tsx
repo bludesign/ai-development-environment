@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import { StartBuildButton } from "./start-build-dialog";
+import { StartBuildButton, WorktreeCoverageButton } from "./start-build-dialog";
 import type { BuildDestination, IosAppProject } from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
@@ -557,6 +557,15 @@ describe("StartBuildDialog", () => {
         screen.queryByRole("status", { name: "Loading devices…" }),
       ).toBeNull();
       expect(device.getAttribute("aria-busy")).toBe("false");
+      if (!destinations.length) {
+        expect(device.hasAttribute("disabled")).toBe(true);
+        expect(
+          screen
+            .getByRole("button", { name: "Start Build" })
+            .hasAttribute("disabled"),
+        ).toBe(true);
+        return;
+      }
       expect(device.textContent).toContain("Any iOS Simulator");
       fireEvent.pointerDown(device, {
         button: 0,
@@ -1118,6 +1127,300 @@ describe("StartBuildDialog", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Test" }));
     const testPlanLabel = await screen.findByText("Test plan");
     expect(testPlanLabel.closest("details")).not.toBeNull();
+  });
+
+  test("replays the original batch after a transport failure and retries only rejected platforms after a response", async () => {
+    const fallback = request.getMockImplementation()!;
+    let submissions = 0;
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query StartBuildProject")) {
+        const data = (await fallback(query, variables)) as {
+          iosAppProject: IosAppProject;
+        };
+        data.iosAppProject.configurations[0]!.platformConfigurations = [
+          { platform: "IOS" },
+          { platform: "TVOS", scheme: "TVApp", defaultAction: "ARCHIVE" },
+        ];
+        return data as never;
+      }
+      if (operation.includes("mutation StartPlatformBuilds")) {
+        if (++submissions === 1) throw new TypeError("Network disconnected");
+        const input = variables?.input as { selections: unknown[] };
+        return {
+          startBuilds:
+            input.selections.length === 2
+              ? [
+                  { platform: "IOS", build: { id: "ios-build" }, error: null },
+                  {
+                    platform: "TVOS",
+                    build: { id: "rejected-tv-build" },
+                    error: "Build agent is busy",
+                  },
+                ]
+              : [{ platform: "TVOS", build: { id: "tv-build" }, error: null }],
+        } as never;
+      }
+      if (
+        operation.includes("mutation InspectStartBuildDestinations") &&
+        (variables?.input as { platform?: string })?.platform === "TVOS"
+      ) {
+        return {
+          inspectBuildDestinations: [
+            {
+              platformId: "TVOS",
+              platform: "tvOS",
+              type: "PHYSICAL_DEVICE",
+              id: "generic-tvos",
+              name: "Any Physical tvOS Device",
+              osVersion: null,
+              state: null,
+              generic: true,
+            },
+          ],
+        } as never;
+      }
+      return fallback(query, variables);
+    });
+    const started = vi.fn();
+    render(
+      <StartBuildButton
+        codebaseId="codebase-1"
+        worktreeId="worktree-1"
+        onStarted={started}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("combobox", { name: "Device" });
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Start Build" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "tvOS" }));
+    const startBoth = await screen.findByRole("button", {
+      name: "Start 2 Builds",
+    });
+    await waitFor(() => expect(startBoth.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(startBoth);
+    const retry = await screen.findByRole("button", {
+      name: "Retry submission",
+    });
+    expect(started).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("checkbox", { name: "tvOS" }).closest("[inert]"),
+    ).not.toBeNull();
+    fireEvent.click(retry);
+    expect(await screen.findByText("tvOS: Build agent is busy")).toBeDefined();
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(started).toHaveBeenCalledWith("ios-build");
+    expect(
+      screen.getByRole("checkbox", { name: "iOS" }).hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
+    await waitFor(() => expect(started).toHaveBeenLastCalledWith("tv-build"));
+    const inputs = request.mock.calls.flatMap(([query, variables]) =>
+      String(query).includes("mutation StartPlatformBuilds")
+        ? [variables?.input]
+        : [],
+    ) as Array<{ requestId: string; selections: unknown[] }>;
+    expect(inputs[0]?.selections).toEqual([
+      expect.objectContaining({
+        platform: "IOS",
+        action: "BUILD",
+        destination: expect.objectContaining({ type: "SIMULATOR" }),
+      }),
+      expect.objectContaining({
+        platform: "TVOS",
+        action: "ARCHIVE",
+        destination: expect.objectContaining({
+          platformId: "TVOS",
+          type: "PHYSICAL_DEVICE",
+          generic: true,
+        }),
+      }),
+    ]);
+    expect(inputs[1]).toEqual(inputs[0]);
+    expect(inputs[2]?.selections).toEqual([inputs[0]?.selections[1]]);
+    expect(inputs[2]?.requestId).not.toBe(inputs[0]?.requestId);
+  });
+
+  test.each([
+    { button: StartBuildButton, label: "Build", field: "startBuild" },
+    {
+      button: WorktreeCoverageButton,
+      label: "Generate code coverage",
+      field: "startWorktreeCoverage",
+    },
+  ])(
+    "replays an unconfirmed $field submission with its original input",
+    async ({ button: OpenDialog, label, field }) => {
+      const fallback = request.getMockImplementation()!;
+      const inputs: unknown[] = [];
+      request.mockImplementation(async (query, variables) => {
+        if (!String(query).includes("mutation StartIosBuild"))
+          return fallback(query, variables);
+        expect(String(query)).toContain(`${field}(input: $input)`);
+        inputs.push(variables?.input);
+        if (inputs.length === 1) throw new TypeError("Network disconnected");
+        return { [field]: { id: "build-1" } } as never;
+      });
+      const started = vi.fn();
+      render(
+        <OpenDialog
+          codebaseId="codebase-1"
+          onStarted={started}
+          worktreeId="worktree-1"
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      const device = await screen.findByRole("combobox", { name: "Device" });
+      const start = screen.getByRole("button", { name: "Start Build" });
+      await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+      fireEvent.click(start);
+      const retry = await screen.findByRole("button", {
+        name: "Retry submission",
+      });
+      expect(device.closest("[inert]")).not.toBeNull();
+      expect(started).not.toHaveBeenCalled();
+      fireEvent.click(retry);
+      await waitFor(() => expect(started).toHaveBeenCalledWith("build-1"));
+      expect(inputs).toHaveLength(2);
+      expect(inputs[1]).toEqual(inputs[0]);
+    },
+  );
+
+  test.each(["GraphQL error", "queue failure"] as const)(
+    "allows an edited submission after a confirmed %s",
+    async (failure) => {
+      const fallback = request.getMockImplementation()!;
+      const inputs: Array<{
+        requestId: string;
+        destination: BuildDestination;
+      }> = [];
+      request.mockImplementation(async (query, variables) => {
+        if (!String(query).includes("mutation StartIosBuild"))
+          return fallback(query, variables);
+        inputs.push(variables?.input as (typeof inputs)[number]);
+        if (inputs.length === 1) {
+          if (failure === "GraphQL error") {
+            throw Object.assign(new Error("Build agent is unavailable"), {
+              code: "BUILD_SUBMISSION_REJECTED",
+            });
+          }
+          return {
+            startBuild: {
+              id: "failed-build",
+              errorCode: "QUEUE_FAILED",
+              error: "Build agent is unavailable",
+            },
+          } as never;
+        }
+        return fallback(query, variables);
+      });
+      const started = vi.fn();
+      render(
+        <StartBuildButton
+          codebaseId="codebase-1"
+          onStarted={started}
+          worktreeId="worktree-1"
+        />,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Build" }));
+      const device = await screen.findByRole("combobox", { name: "Device" });
+      const start = screen.getByRole("button", { name: "Start Build" });
+      await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+      fireEvent.click(start);
+      expect(
+        await screen.findByText("Build agent is unavailable"),
+      ).toBeDefined();
+      expect(device.closest("[inert]")).toBeNull();
+      expect(started).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
+      await waitFor(() => expect(started).toHaveBeenCalledWith("build-1"));
+      expect(inputs[1]?.requestId).not.toBe(inputs[0]?.requestId);
+      expect(inputs[1]?.destination.type).toBe("PHYSICAL_DEVICE");
+    },
+  );
+
+  test("reparses the overridden source and scheme of the default platform", async () => {
+    const fallback = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query StartBuildProject")) {
+        const data = (await fallback(query, variables)) as {
+          iosAppProject: IosAppProject;
+        };
+        data.iosAppProject.configurations[0]!.platformConfigurations = [
+          {
+            platform: "MACOS",
+            sourceKind: "PROJECT",
+            sourcePath: "Mac.xcodeproj",
+            scheme: "MacApp",
+            buildConfiguration: "Release",
+          },
+          { platform: "IOS" },
+        ];
+        return data as never;
+      }
+      if (operation.includes("mutation InspectStartBuildPlatformSource")) {
+        return {
+          inspectBuildSource: {
+            ...observation,
+            schemes: ["MacApp"],
+            configurations: ["Release"],
+            platforms: ["MACOS"],
+          },
+        } as never;
+      }
+      return fallback(query, variables);
+    });
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    fireEvent.click(await screen.findByText("Details"));
+    fireEvent.click(screen.getByRole("button", { name: "Reparse" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation InspectStartBuildPlatformSource"),
+        {
+          input: expect.objectContaining({
+            platform: "MACOS",
+            sourceKind: "PROJECT",
+            sourcePath: "Mac.xcodeproj",
+            scheme: "MacApp",
+            configuration: "Release",
+          }),
+        },
+      ),
+    );
+    expect(request).not.toHaveBeenCalledWith(
+      expect.stringContaining("mutation ReparseStartBuild"),
+      expect.anything(),
+    );
+  });
+
+  test("persists the reparse of a shared iOS source", async () => {
+    render(
+      <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    fireEvent.click(await screen.findByText("Details"));
+    fireEvent.click(screen.getByRole("button", { name: "Reparse" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation ReparseStartBuild"),
+        {
+          configurationId: "configuration-1",
+          worktreeId: "worktree-1",
+          requestId: expect.any(String),
+        },
+      ),
+    );
   });
 
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {

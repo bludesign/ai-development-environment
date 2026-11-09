@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readlink,
   realpath,
   rm,
   stat,
@@ -39,6 +40,9 @@ import {
   generateIosBuildReport,
   genericBuildDestinations,
   physicalDestinations,
+  parseXcodeDestinations,
+  prepareMacCompatibilityApplication,
+  runnablePlatformMetadata,
   runIosBuild,
   simulatorAppArguments,
   archiveApplicationProperties,
@@ -457,6 +461,114 @@ describe("iOS destination and error parsing", () => {
     ).toContain("generic/platform=iOS Simulator");
   });
 
+  test("parses Xcode destination eligibility and compatibility variants", () => {
+    expect(
+      parseXcodeDestinations(`
+      Destinations compatible with the "App" scheme:
+        { platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:HOST, name:My Mac }
+        { platform:macOS, arch:arm64, variant:Mac Catalyst, id:HOST, name:My Mac }
+        { platform:tvOS, id:dvtdevice-TV-placeholder:placeholder, name:Any tvOS Device }
+      Destinations incompatible with the "App" scheme:
+        { platform:visionOS Simulator, arch:arm64, id:VISION, OS:27.2, name:Vision, error:Unavailable, update Xcode }
+    `),
+    ).toEqual([
+      expect.objectContaining({
+        platformId: "MACOS_DESIGNED_FOR_IPAD",
+        type: "LOCAL_MAC",
+        id: "HOST",
+        available: true,
+      }),
+      expect.objectContaining({
+        platformId: "MAC_CATALYST",
+        type: "LOCAL_MAC",
+        id: "HOST",
+        available: true,
+      }),
+      expect.objectContaining({
+        platformId: "TVOS",
+        type: "PHYSICAL_DEVICE",
+        generic: true,
+        available: true,
+      }),
+      expect.objectContaining({
+        platformId: "VISIONOS",
+        type: "SIMULATOR",
+        osVersion: "27.2",
+        available: false,
+        unavailableReason: "Unavailable, update Xcode",
+      }),
+    ]);
+  });
+
+  test("keeps SDK compatibility separate from the destination label", () => {
+    const physical = {
+      ...payload().destination,
+      type: "PHYSICAL_DEVICE" as const,
+      platform: "iOS",
+      platformId: "IOS" as const,
+    };
+    const settings = {
+      PLATFORM_NAME: "iphoneos",
+      SDK_NAME: "iphoneos27.2",
+      ARCHS: "arm64",
+      TARGETED_DEVICE_FAMILY: "1,2",
+      IPHONEOS_DEPLOYMENT_TARGET: "18.0",
+      SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: "YES",
+      SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD: "YES",
+    };
+    expect(runnablePlatformMetadata(physical, settings)).toMatchObject({
+      compatiblePlatforms: [
+        "IOS",
+        "MACOS_DESIGNED_FOR_IPAD",
+        "VISIONOS_DESIGNED_FOR_IPAD",
+      ],
+      sdkName: "iphoneos27.2",
+      minimumOSVersion: "18.0",
+    });
+    expect(
+      runnablePlatformMetadata(payload().destination, settings)
+        .compatiblePlatforms,
+    ).toEqual(["IOS", "VISIONOS_DESIGNED_FOR_IPAD"]);
+    expect(
+      runnablePlatformMetadata(
+        {
+          ...payload().destination,
+          platform: "tvOS Simulator",
+          platformId: "TVOS",
+        },
+        { TVOS_DEPLOYMENT_TARGET: "26.0" },
+      ),
+    ).toMatchObject({
+      compatiblePlatforms: ["TVOS"],
+      minimumOSVersion: "26.0",
+    });
+  });
+
+  test("wraps an existing iOS app for Mac launch with durable relative symlinks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aide-mac-compat-fixture-"));
+    temporaryDirectories.push(root);
+    const app = join(root, "source", "App.app");
+    await mkdir(app, { recursive: true });
+    await writeFile(join(app, "Executable"), "original content", {
+      mode: 0o755,
+    });
+    await symlink("Executable", join(app, "ExecutableLink"));
+    const [wrapped, concurrent] = await Promise.all([
+      prepareMacCompatibilityApplication(root, app),
+      prepareMacCompatibilityApplication(root, app),
+    ]);
+    expect(wrapped).toBe(concurrent);
+    expect(await readlink(join(wrapped, "WrappedBundle"))).toBe(
+      "Wrapper/App.app",
+    );
+    expect(
+      await readlink(join(wrapped, "Wrapper", "App.app", "ExecutableLink")),
+    ).toBe("Executable");
+    expect(
+      await readFile(join(wrapped, "WrappedBundle", "Executable"), "utf8"),
+    ).toBe("original content");
+  });
+
   test("reads only contained projects referenced by a workspace", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-workspace-fixture-"));
     temporaryDirectories.push(root);
@@ -701,6 +813,8 @@ describe("iOS destination and error parsing", () => {
           id: "CORE-DEVICE-ID",
           name: "Test iPhone",
           platform: "iOS",
+          platformId: "IOS",
+          xcodeId: "HARDWARE-UDID",
           osVersion: "27.0",
           available,
           state,
@@ -754,9 +868,7 @@ describe("iOS destination and error parsing", () => {
     { properties: { state: { visibilityClass: "simulators" } } },
     { properties: { connection: { transportType: "sameMachine" } } },
     { connectionProperties: { transportType: "sameMachine" } },
-    ...["macOS", "tvOS", "watchOS", "visionOS"].map((platform) => ({
-      properties: { hardware: { platform } },
-    })),
+    { properties: { hardware: { platform: "macOS" } } },
   ])("excludes simulated devices and other platforms: %j", (device) => {
     expect(
       physicalDestinations(
@@ -766,6 +878,33 @@ describe("iOS destination and error parsing", () => {
         true,
       ),
     ).toEqual([]);
+  });
+
+  test("matches physical device platform and separately preserves its Xcode hardware ID", () => {
+    const device = {
+      identifier: "CORE-TV",
+      hardwareProperties: {
+        platform: "tvOS",
+        udid: "XCODE-TV",
+        reality: "physical",
+      },
+      connectionProperties: { tunnelState: "connected" },
+      capabilities: [
+        { featureIdentifier: "com.apple.coredevice.feature.installapp" },
+      ],
+    };
+    const inventory = { result: { devices: [device] } };
+    expect(physicalDestinations(inventory, true, true)).toEqual([
+      expect.objectContaining({
+        platformId: "TVOS",
+        id: "CORE-TV",
+        xcodeId: "XCODE-TV",
+        available: false,
+      }),
+    ]);
+    expect(physicalDestinations(inventory)).toEqual([
+      expect.objectContaining({ platformId: "TVOS", available: true }),
+    ]);
   });
 
   test("opens the selected simulator UI without using a shell command", () => {
@@ -806,6 +945,67 @@ describe("iOS destination and error parsing", () => {
 });
 
 describe("iOS build hooks and logs", () => {
+  test("uses the hardware UDID for Xcode when a legacy physical destination stores the CoreDevice ID", async () => {
+    const root = await mkdtemp(join(tmpdir(), "aide-legacy-device-"));
+    temporaryDirectories.push(root);
+    const folder = join(root, "repository");
+    const bin = join(root, "bin");
+    const invocations = join(root, "xcode-invocations");
+    await mkdir(join(folder, "App.xcworkspace"), { recursive: true });
+    await mkdir(bin);
+    await execute("git", ["init", "-b", "main", folder]);
+    await execute("git", [
+      "-C",
+      folder,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    const xcrun = join(bin, "xcrun");
+    await writeFile(
+      xcrun,
+      `#!/bin/sh
+if [ "$1" = devicectl ]; then
+  for argument do output="$argument"; done
+  printf '%s' '{"result":{"devices":[{"identifier":"CORE-DEVICE","hardwareProperties":{"udid":"HARDWARE-UDID","platform":"iOS","reality":"physical"}}]}}' > "$output"
+elif [ "$1" = xcodebuild ]; then
+  printf '%s\\n' "$@" >> '${invocations}'
+  printf '%s' '[{"buildSettings":{"PLATFORM_NAME":"iphoneos"}}]'
+fi
+`,
+      { mode: 0o755 },
+    );
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    try {
+      const destination = {
+        ...payload().destination,
+        type: "PHYSICAL_DEVICE" as const,
+        platform: "iOS",
+        id: "CORE-DEVICE",
+      };
+      const result = await runIosBuild(
+        payload({
+          folder,
+          gitDirectory: await realpath(join(folder, ".git")),
+          artifactDirectory: join(root, "build-1"),
+          destination,
+        }),
+        20_000,
+        new AbortController().signal,
+        async () => undefined,
+      );
+      expect(result.exitCode).toBe(0);
+      const argumentsPassed = await readFile(invocations, "utf8");
+      expect(argumentsPassed).toContain("platform=iOS,id=HARDWARE-UDID");
+      expect(argumentsPassed).not.toContain("platform=iOS,id=CORE-DEVICE");
+      expect(destination.id).toBe("CORE-DEVICE");
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
+
   test("rejects a queued build after its branch or commit changes, before hooks or Xcode run", async () => {
     const root = await mkdtemp(join(tmpdir(), "ios-build-stale-source-"));
     temporaryDirectories.push(root);
@@ -1249,6 +1449,72 @@ export default async function hook() { await writeFile(${JSON.stringify(hookMark
       process.env.PATH = originalPath;
     }
   });
+
+  test.each([
+    { scenario: "no settings", settings: [], errorCode: null },
+    {
+      scenario: "settings without a platform name",
+      settings: [{ buildSettings: { PRODUCT_NAME: "App" } }],
+      errorCode: null,
+    },
+    {
+      scenario: "a different SDK",
+      settings: [{ buildSettings: { PLATFORM_NAME: "macosx" } }],
+      errorCode: "DESTINATION_UNAVAILABLE",
+    },
+  ])(
+    "handles Swift package preflight with $scenario",
+    async ({ settings, errorCode }) => {
+      const root = await mkdtemp(join(tmpdir(), "aide-package-preflight-"));
+      temporaryDirectories.push(root);
+      const folder = join(root, "repository");
+      const bin = join(root, "bin");
+      await mkdir(bin);
+      await execute("git", ["init", "-b", "main", folder]);
+      await execute("git", [
+        "-C",
+        folder,
+        "remote",
+        "add",
+        "origin",
+        "https://github.com/example/app.git",
+      ]);
+      await writeFile(join(folder, "Package.swift"), "// Test package\n");
+      await writeFile(
+        join(bin, "xcrun"),
+        `#!/bin/sh
+case " $* " in
+  *" -showBuildSettings "*) printf '%s' '${JSON.stringify(settings)}' ;;
+  *) touch build-started ;;
+esac
+`,
+        { mode: 0o755 },
+      );
+      const originalPath = process.env.PATH;
+      process.env.PATH = `${bin}:${originalPath ?? ""}`;
+      try {
+        const result = await runIosBuild(
+          payload({
+            folder,
+            gitDirectory: await realpath(join(folder, ".git")),
+            artifactDirectory: join(root, "builds", "build-1"),
+            source: { kind: "PACKAGE", relativePath: "Package.swift" },
+            destination: { ...payload().destination, platformId: "IOS" },
+          }),
+          30_000,
+          new AbortController().signal,
+          async () => undefined,
+        );
+        expect(result).toMatchObject({
+          exitCode: errorCode ? 1 : 0,
+          errorCode,
+        });
+        expect(existsSync(join(folder, "build-started"))).toBe(!errorCode);
+      } finally {
+        process.env.PATH = originalPath;
+      }
+    },
+  );
 
   test.each([
     {
@@ -1991,4 +2257,28 @@ test("simulator destinations retain renamed devices and resolve their model sepa
   expect(simulatorDestinations({ devices })[0]).not.toHaveProperty(
     "deviceType",
   );
+});
+
+test("uses the runtime metadata for Vision Pro and device-specific iOS runtimes", () => {
+  const vision = "com.apple.CoreSimulator.SimRuntime.xrOS-27-2";
+  const phone = "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4";
+  expect(
+    simulatorDestinations({
+      devices: {
+        [vision]: [{ udid: "VISION", isAvailable: true }],
+        [phone]: [{ udid: "PHONE", isAvailable: true }],
+      },
+      runtimes: [
+        { identifier: vision, platform: "xrOS", version: "27.2" },
+        { identifier: phone, platform: "iOS", version: "27.2" },
+      ],
+    }),
+  ).toEqual([
+    expect.objectContaining({
+      platformId: "VISIONOS",
+      platform: "visionOS Simulator",
+      osVersion: "27.2",
+    }),
+    expect.objectContaining({ platformId: "IOS", osVersion: "27.2" }),
+  ]);
 });

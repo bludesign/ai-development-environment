@@ -30,7 +30,11 @@ import { BUILD_LIST_FIELDS } from "@/components/builds/graphql-fields";
 import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
-import type { BuildRecord, BuildReport } from "@/components/builds/types";
+import {
+  platformLabel,
+  type BuildRecord,
+  type BuildReport,
+} from "@/components/builds/types";
 import { useBuildTimeTicker } from "@/components/builds/use-build-time-ticker";
 import { CoverageValue } from "@/components/common/coverage-value";
 import { WorktreePipelinesCard } from "@/components/github/worktree-pipelines-card";
@@ -1194,7 +1198,14 @@ export function WorktreeBuildTable({
                       {t(`actions.${build.action}`)}
                     </Badge>
                   </TableCell>
-                  <TableCell>{build.destination.name}</TableCell>
+                  <TableCell>
+                    {build.destination.name}
+                    {build.platform && build.platform !== "IOS" && (
+                      <p className="text-xs text-muted-foreground">
+                        {platformLabel(build.platform)}
+                      </p>
+                    )}
+                  </TableCell>
                   <TableCell className="text-muted-foreground">
                     <div className="flex flex-col gap-0.5">
                       <DateTime kind="relative" value={startedAt} />

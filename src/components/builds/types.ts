@@ -1,22 +1,51 @@
-export type BuildAction =
-  | "BUILD"
-  | "TEST"
-  | "ANALYZE"
-  | "ARCHIVE"
-  | "BUILD_FOR_TESTING"
-  | "TEST_WITHOUT_BUILDING";
+import {
+  buildPlatformForXcode,
+  type BuildAction,
+  type BuildDestination,
+  type BuildPlatform as RunPlatform,
+} from "@ai-development-environment/agent-contract/builds";
 
-export type BuildDestination = {
-  deviceType?: string | null;
-  type: "SIMULATOR" | "PHYSICAL_DEVICE";
-  id: string;
-  name: string;
-  platform: string;
-  osVersion: string | null;
-  state: string | null;
-  generic?: boolean;
-  available?: boolean;
+export type { BuildAction, BuildDestination, RunPlatform };
+
+export const BUILD_PLATFORMS = [
+  "IOS",
+  "TVOS",
+  "VISIONOS",
+  "WATCHOS",
+  "MACOS",
+  "MAC_CATALYST",
+] as const;
+
+export type BuildPlatform = (typeof BUILD_PLATFORMS)[number];
+
+const PLATFORM_LABELS: Record<RunPlatform, string> = {
+  IOS: "iOS",
+  TVOS: "tvOS",
+  VISIONOS: "visionOS",
+  WATCHOS: "watchOS",
+  MACOS: "macOS",
+  MAC_CATALYST: "Mac Catalyst",
+  MACOS_DESIGNED_FOR_IPAD: "Mac (Designed for iPad)",
+  VISIONOS_DESIGNED_FOR_IPAD: "Apple Vision (Designed for iPad)",
 };
+
+export function platformLabel(platform: string): string {
+  return PLATFORM_LABELS[platform as RunPlatform] ?? platform;
+}
+
+export function destinationPlatform(
+  destination: BuildDestination,
+): RunPlatform {
+  return (
+    destination.platformId ??
+    buildPlatformForXcode(destination.platform ?? "", destination.variant) ??
+    "IOS"
+  );
+}
+
+export function destinationKey(destination: BuildDestination): string {
+  return `${destinationPlatform(destination)}:${destination.type}:${destination.id}`;
+}
 
 export type BuildRunAgent = {
   agent: {
@@ -34,6 +63,7 @@ export type BuildRunAgent = {
     | "AGENT_UPDATE_REQUIRED"
     | "BUILD_AGENT_UNAVAILABLE"
     | "INCOMPATIBLE_ARCHITECTURE"
+    | "LOCAL_MAC_ONLY"
     | "NOT_MACOS"
     | null;
 };
@@ -53,6 +83,18 @@ export type BuildSourceObservation = {
   lastParsedAt: string | null;
 };
 
+export type BuildPlatformConfiguration = {
+  platform: BuildPlatform;
+  sourceKind?: BuildConfiguration["source"]["kind"] | null;
+  sourcePath?: string | null;
+  scheme?: string | null;
+  buildConfiguration?: string | null;
+  defaultAction?: BuildAction | null;
+  advancedSettings?: Record<string, unknown> | null;
+  autoExport?: boolean | null;
+  exportSettings?: Record<string, unknown> | null;
+};
+
 export type BuildConfiguration = {
   id: string;
   name: string;
@@ -68,10 +110,58 @@ export type BuildConfiguration = {
   advancedSettings: Record<string, unknown>;
   autoExport?: boolean;
   exportSettings?: Record<string, unknown> | null;
+  platformConfigurations?: BuildPlatformConfiguration[];
   observation: BuildSourceObservation | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export function configurationPlatforms(configuration: BuildConfiguration) {
+  const entries = configuration.platformConfigurations?.filter(({ platform }) =>
+    BUILD_PLATFORMS.includes(platform),
+  );
+  return entries?.length
+    ? entries
+    : [{ platform: "IOS" } satisfies BuildPlatformConfiguration];
+}
+
+export function settingsForPlatform(
+  configuration: BuildConfiguration,
+  platform: BuildPlatform,
+): BuildConfiguration {
+  const entry = configurationPlatforms(configuration).find(
+    (item) => item.platform === platform,
+  );
+  if (!entry) return configuration;
+  return {
+    ...configuration,
+    source: {
+      ...configuration.source,
+      kind: entry.sourceKind ?? configuration.source.kind,
+      relativePath: entry.sourcePath ?? configuration.source.relativePath,
+    },
+    scheme: entry.scheme ?? configuration.scheme,
+    buildConfiguration:
+      entry.buildConfiguration ?? configuration.buildConfiguration,
+    defaultAction: entry.defaultAction ?? configuration.defaultAction,
+    advancedSettings: {
+      ...configuration.advancedSettings,
+      ...entry.advancedSettings,
+    },
+    autoExport: entry.autoExport ?? configuration.autoExport,
+    exportSettings: {
+      ...configuration.exportSettings,
+      ...entry.exportSettings,
+    },
+    observation:
+      entry.sourceKind ||
+      entry.sourcePath ||
+      entry.scheme ||
+      entry.buildConfiguration
+        ? null
+        : configuration.observation,
+  };
+}
 
 export type BuildScript = {
   iconKey?: string | null;
@@ -89,7 +179,7 @@ export type BuildScript = {
 export type IosAppProject = {
   id: string;
   type: "IOS_APP";
-  defaultDestinationType: BuildDestination["type"];
+  defaultDestinationType: "SIMULATOR" | "PHYSICAL_DEVICE";
   configurations: BuildConfiguration[];
   allowedScripts: Array<{ position: number; script: BuildScript }>;
 };
@@ -128,7 +218,8 @@ export type BuildRecord = {
   action: BuildAction;
   // HOST covers records that ran no device build, such as an imported
   // coverage report; no build destination ever carries it.
-  destinationType: "SIMULATOR" | "PHYSICAL_DEVICE" | "HOST";
+  destinationType: BuildDestination["type"] | "HOST";
+  platform?: BuildPlatform | null;
   destination: BuildDestination;
   snapshot: Record<string, unknown>;
   commandSummary: string;

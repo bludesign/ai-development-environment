@@ -216,7 +216,12 @@ function patchFor(path: string, changeType: string): string {
 type GraphQLBody = {
   query?: string;
   variables?: {
-    input?: { path?: string | null; scope?: string };
+    input?: {
+      path?: string | null;
+      scope?: string;
+      platform?: string;
+      action?: string;
+    };
   };
 };
 
@@ -249,7 +254,7 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
       return respond({
         inspectBuildSource: {
           source: { kind: "WORKSPACE", relativePath: "AcmeApp.xcworkspace" },
-          schemes: ["AcmeApp", "AcmeAppTests"],
+          schemes: ["AcmeApp", "AcmeAppTests", "AcmeTV"],
           configurations: ["Debug", "Release"],
           testPlans: ["AcmeApp"],
           signingRequirements: [],
@@ -279,25 +284,68 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
       query.includes("inspectBuildDestinations(") ||
       query.includes("inspectBuildRunDestinations(")
     ) {
-      const key = query.includes("inspectBuildRunDestinations(")
+      const run = query.includes("inspectBuildRunDestinations(");
+      const key = run
         ? "inspectBuildRunDestinations"
         : "inspectBuildDestinations";
+      if (!run && body.variables?.input?.action === "ARCHIVE") {
+        return respond({
+          [key]: [
+            {
+              type: "PHYSICAL_DEVICE",
+              id: "generic-ios",
+              name: "Any Physical iOS Device",
+              platform: "iOS",
+              platformId: "IOS",
+              osVersion: null,
+              state: null,
+              generic: true,
+            },
+          ],
+        });
+      }
+      if (body.variables?.input?.platform === "TVOS") {
+        return respond({
+          [key]: [
+            {
+              type: "SIMULATOR",
+              id: "sim-apple-tv",
+              name: "QA Apple TV",
+              deviceType: "Apple TV 4K",
+              platform: "tvOS Simulator",
+              platformId: "TVOS",
+              osVersion: "27.2",
+              state: "Booted",
+            },
+          ],
+        });
+      }
       return respond({
         [key]: [
           {
-            type:
-              key === "inspectBuildRunDestinations"
-                ? "PHYSICAL_DEVICE"
-                : "SIMULATOR",
+            type: run ? "PHYSICAL_DEVICE" : "SIMULATOR",
             id: "sim-iphone-17",
             name: "QA Phone",
             deviceType: "iPhone 17 Pro",
-            platform:
-              key === "inspectBuildRunDestinations" ? "iOS" : "iOS Simulator",
+            platform: run ? "iOS" : "iOS Simulator",
+            platformId: "IOS",
             osVersion: "26.0",
-            state:
-              key === "inspectBuildRunDestinations" ? "Connected" : "Booted",
+            state: run ? "Connected" : "Booted",
           },
+          ...(run
+            ? [
+                {
+                  type: "PHYSICAL_DEVICE",
+                  id: "device-apple-vision",
+                  name: "QA Apple Vision Pro",
+                  deviceType: "Apple Vision Pro",
+                  platform: "visionOS",
+                  platformId: "VISIONOS_DESIGNED_FOR_IPAD",
+                  osVersion: "27.2",
+                  state: "Connected",
+                },
+              ]
+            : []),
         ],
       });
     }

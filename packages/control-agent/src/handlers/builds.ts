@@ -10,10 +10,11 @@ import {
   rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { createReadStream, createWriteStream } from "node:fs";
-import { tmpdir } from "node:os";
+import { arch, tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { StringDecoder } from "node:string_decoder";
 import {
@@ -42,16 +43,22 @@ import {
   parseBuildSourceDiscoverPayload,
   parseBuildSourceParsePayload,
   genericBuildDestinations,
+  buildDestinationPlatform,
+  buildDestinationSpecifier,
+  buildPlatformForXcode,
+  buildXcodePlatform,
   resolveCollectDsyms,
   DSYMS_ARTIFACT_FILENAME,
   DSYMS_ARTIFACT_KIND,
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
+  type BuildAgentRunDestinationsPayload,
   type BuildExportPayload,
   type BuildExportSettings,
   type BuildJobPayload,
   type BuildLogChunk,
+  type BuildPlatform,
   type BuildProgressReport,
   type BuildReportKind,
   type BuildScriptExecutionProgress,
@@ -728,10 +735,13 @@ async function inspectSigningRequirements(
   folder: string,
   scheme: string | null,
   configuration: string | null,
+  platform: BuildPlatform,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<BuildSigningRequirement[]> {
   if (!scheme || !configuration) return [];
+  const destination = genericBuildDestinations("ARCHIVE", [platform])[0];
+  if (!destination) return [];
   const result = requireSuccess(
     await command(
       "xcrun",
@@ -743,7 +753,7 @@ async function inspectSigningRequirements(
         "-configuration",
         configuration,
         "-destination",
-        "generic/platform=iOS",
+        buildDestinationSpecifier(destination),
         "-showBuildSettings",
         "-json",
       ],
@@ -807,7 +817,7 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
           metadata.configurations.length === 0
         ? await workspaceConfigurations(absolutePath, folder, timeoutMs, signal)
         : metadata.configurations;
-  const [plans, signingRequirements] = await Promise.all([
+  const [plans, destinations] = await Promise.all([
     testPlans(
       input.source,
       absolutePath,
@@ -816,22 +826,54 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
       timeoutMs,
       signal,
     ),
-    inspectSigningRequirements(
-      input.source,
-      absolutePath,
-      folder,
-      input.scheme,
-      input.configuration,
-      timeoutMs,
-      signal,
-    ),
+    input.scheme && input.configuration
+      ? xcodeDestinations(
+          input.source,
+          absolutePath,
+          input.scheme,
+          input.configuration,
+          folder,
+          timeoutMs,
+          signal,
+        )
+      : [],
   ]);
+  const platforms = [
+    ...new Set(
+      destinations
+        .filter((destination) => destination.available)
+        .map(buildDestinationPlatform)
+        .filter((platform) => !platform.endsWith("_DESIGNED_FOR_IPAD")),
+    ),
+  ];
+  const signingPlatform =
+    input.platform ?? (platforms.includes("IOS") ? "IOS" : platforms[0]);
+  const signingRequirements =
+    signingPlatform &&
+    destinations.some(
+      (destination) =>
+        destination.available &&
+        destination.type !== "SIMULATOR" &&
+        buildDestinationPlatform(destination) === signingPlatform,
+    )
+      ? await inspectSigningRequirements(
+          input.source,
+          absolutePath,
+          folder,
+          input.scheme,
+          input.configuration,
+          signingPlatform,
+          timeoutMs,
+          signal,
+        )
+      : [];
   return {
     ...successfulProcess,
     schemes: uniqueSorted(metadata.schemes),
     configurations: uniqueSorted(configurations),
     testPlans: plans,
     signingRequirements,
+    platforms,
     xcodeVersion:
       version.exitCode === 0
         ? version.stdout.trim().replace(/\n+/g, " · ")
@@ -839,6 +881,100 @@ export const parseBuildSourceMetadata: AgentJobHandler = async (
     headSha: input.headSha,
   };
 };
+
+/** Xcode 27 still emits these rows as text when -json is present. */
+export function parseXcodeDestinations(output: string): BuildDestination[] {
+  const destinations: BuildDestination[] = [];
+  let available: boolean | undefined;
+  for (const line of output.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (/^(Available destinations|Destinations compatible)\b/.test(trimmed)) {
+      available = true;
+      continue;
+    }
+    if (
+      /^(Ineligible destinations|Destinations incompatible)\b/.test(trimmed)
+    ) {
+      available = false;
+      continue;
+    }
+    if (
+      available === undefined ||
+      !trimmed.startsWith("{") ||
+      !trimmed.endsWith("}")
+    )
+      continue;
+    const body = trimmed.slice(1, -1).trim();
+    const keys = [
+      ...body.matchAll(
+        /(?:^|,\s+)(platform|arch|variant|id|OS|name|error):\s*/g,
+      ),
+    ];
+    const values = Object.fromEntries(
+      keys.map((match, index) => [
+        match[1],
+        body
+          .slice(match.index + match[0].length, keys[index + 1]?.index)
+          .trim(),
+      ]),
+    );
+    const { platform, id, variant, arch: architecture, error } = values;
+    if (!platform || !id) continue;
+    const platformId = buildPlatformForXcode(platform, variant);
+    if (!platformId) continue;
+    const type = platform.endsWith(" Simulator")
+      ? "SIMULATOR"
+      : platform === "macOS"
+        ? "LOCAL_MAC"
+        : "PHYSICAL_DEVICE";
+    destinations.push({
+      type,
+      id,
+      name: values.name || id,
+      platform,
+      platformId,
+      ...(variant ? { variant } : {}),
+      ...(architecture ? { architecture } : {}),
+      osVersion: values.OS ?? null,
+      state: null,
+      ...(id.endsWith(":placeholder") ? { generic: true } : {}),
+      available: available && !error,
+      ...(error ? { unavailableReason: error } : {}),
+    });
+  }
+  return destinations;
+}
+
+async function xcodeDestinations(
+  source: BuildSourceSnapshot,
+  absolutePath: string,
+  scheme: string,
+  configuration: string,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<BuildDestination[]> {
+  const result = requireSuccess(
+    await command(
+      "xcrun",
+      [
+        "xcodebuild",
+        ...sourceArguments(source, absolutePath),
+        "-scheme",
+        scheme,
+        "-configuration",
+        configuration,
+        "-showdestinations",
+      ],
+      Math.min(timeoutMs, 60_000),
+      signal,
+      folder,
+      xcodeEnvironment(),
+    ),
+    "Could not inspect Xcode destinations",
+  );
+  return parseXcodeDestinations(result.stdout);
+}
 
 export function simulatorDestinations(
   value: unknown,
@@ -849,6 +985,15 @@ export function simulatorDestinations(
   if (!devices || typeof devices !== "object" || Array.isArray(devices))
     return [];
   const rawTypes = (value as Record<string, unknown>).devicetypes;
+  const rawRuntimes = (value as Record<string, unknown>).runtimes;
+  const runtimes = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(rawRuntimes)) {
+    for (const raw of rawRuntimes) {
+      const runtime = jsonObject(raw);
+      if (runtime && typeof runtime.identifier === "string")
+        runtimes.set(runtime.identifier, runtime);
+    }
+  }
   const deviceTypes = new Map<string, string>();
   if (Array.isArray(rawTypes))
     for (const raw of rawTypes) {
@@ -862,10 +1007,19 @@ export function simulatorDestinations(
     }
   const result: BuildDestination[] = [];
   for (const [runtime, entries] of Object.entries(devices)) {
-    if (!runtime.includes("SimRuntime.iOS-") || !Array.isArray(entries))
-      continue;
+    const runtimeParts = /\.SimRuntime\.([A-Za-z]+)-([\d-]+)/.exec(runtime);
+    if (!runtimeParts || !Array.isArray(entries)) continue;
+    const metadata = runtimes.get(runtime);
+    const platformId = buildPlatformForXcode(
+      typeof metadata?.platform === "string"
+        ? metadata.platform
+        : runtimeParts[1]!,
+    );
+    if (!platformId) continue;
     const osVersion =
-      runtime.split("SimRuntime.iOS-")[1]?.replaceAll("-", ".") ?? null;
+      typeof metadata?.version === "string"
+        ? metadata.version
+        : runtimeParts[2]!.replace(/-$/, "").replaceAll("-", ".");
     for (const raw of entries) {
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
       const device = raw as Record<string, unknown>;
@@ -883,7 +1037,8 @@ export function simulatorDestinations(
         type: "SIMULATOR",
         id: device.udid,
         name: typeof device.name === "string" ? device.name : device.udid,
-        platform: "iOS Simulator",
+        platform: buildXcodePlatform(platformId, "SIMULATOR"),
+        platformId,
         osVersion,
         state:
           typeof device.state === "string"
@@ -916,6 +1071,7 @@ function nestedString(value: unknown, paths: string[][]): string | null {
 export function physicalDestinations(
   value: unknown,
   includeUnavailable = false,
+  requireLaunch = false,
 ): BuildDestination[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const result = (value as Record<string, unknown>).result;
@@ -926,22 +1082,22 @@ export function physicalDestinations(
   if (!Array.isArray(devices)) return [];
   return devices.flatMap((raw): BuildDestination[] => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-    const id = nestedString(raw, [
-      ["identifier"],
+    const hardwareId = nestedString(raw, [
       ["properties", "hardware", "udid"],
       ["hardwareProperties", "udid"],
-      ["deviceProperties", "identifier"],
     ]);
+    const id =
+      nestedString(raw, [["identifier"], ["deviceProperties", "identifier"]]) ??
+      hardwareId;
     const platform = nestedString(raw, [
       ["properties", "hardware", "platform"],
       ["hardwareProperties", "platform"],
       ["deviceProperties", "osType"],
     ]);
-    if (
-      !id ||
-      (platform && !["ios", "ipados"].includes(platform.trim().toLowerCase()))
-    )
-      return [];
+    const platformId = platform
+      ? buildPlatformForXcode(platform.trim())
+      : "IOS";
+    if (!id || !platformId || platformId === "MACOS") return [];
     const reality = nestedString(raw, [
       ["properties", "hardware", "reality"],
       ["hardwareProperties", "reality"],
@@ -981,9 +1137,23 @@ export function physicalDestinations(
         .toLowerCase() === "paired";
     // An idle device can have a detected transport without an active tunnel.
     const connected = connectionState === "connected";
-    const available =
+    const connectedOrPaired =
       connected ||
       (paired && (transport === "wired" || transport === "localnetwork"));
+    const rawCapabilities = jsonObject(raw)?.capabilities;
+    const capabilityIds = Array.isArray(rawCapabilities)
+      ? rawCapabilities.map(
+          (capability) => jsonObject(capability)?.featureIdentifier,
+        )
+      : [];
+    const cannotLaunch =
+      requireLaunch &&
+      Array.isArray(rawCapabilities) &&
+      (!capabilityIds.includes("com.apple.coredevice.feature.installapp") ||
+        !capabilityIds.includes(
+          "com.apple.coredevice.feature.launchapplication",
+        ));
+    const available = connectedOrPaired && !cannotLaunch;
     const state = connected
       ? "Connected"
       : available
@@ -1012,7 +1182,9 @@ export function physicalDestinations(
             ["deviceProperties", "name"],
             ["name"],
           ]) ?? id,
-        platform: "iOS",
+        platform: buildXcodePlatform(platformId, "PHYSICAL_DEVICE"),
+        platformId,
+        ...(hardwareId && hardwareId !== id ? { xcodeId: hardwareId } : {}),
         osVersion: nestedString(raw, [
           ["properties", "software", "osVersionNumber", "stringValue"],
           ["properties", "software", "osVersionNumber"],
@@ -1021,6 +1193,12 @@ export function physicalDestinations(
         ]),
         state,
         available,
+        ...(cannotLaunch && connectedOrPaired
+          ? {
+              unavailableReason:
+                "This device does not currently support app installation and launch",
+            }
+          : {}),
       },
     ];
   });
@@ -1030,6 +1208,7 @@ async function listPhysicalDevices(
   timeoutMs: number,
   signal: AbortSignal,
   includeUnavailable = false,
+  requireLaunch = false,
 ): Promise<BuildDestination[]> {
   const directory = await mkdtemp(join(tmpdir(), "ade-devices-"));
   const output = join(directory, "devices.json");
@@ -1042,7 +1221,7 @@ async function listPhysicalDevices(
         "devices",
         "--quiet",
         "--timeout",
-        String(Math.max(1, Math.round(Math.min(timeoutMs, 30_000) / 1_000))),
+        String(Math.max(5, Math.round(Math.min(timeoutMs, 30_000) / 1_000))),
         "--json-output",
         output,
       ],
@@ -1053,10 +1232,40 @@ async function listPhysicalDevices(
     return physicalDestinations(
       JSON.parse(await readFile(output, "utf8")),
       includeUnavailable,
+      requireLaunch,
     );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+async function physicalBuildDestination(
+  destination: BuildDestination,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<BuildDestination> {
+  if (
+    destination.type !== "PHYSICAL_DEVICE" ||
+    destination.generic ||
+    destination.xcodeId
+  )
+    return destination;
+  // Legacy build snapshots and clients only carry the deployment identifier.
+  // Keep that ID and use the hardware UDID only for Xcode's destination flag.
+  const devices = await listPhysicalDevices(
+    Math.min(timeoutMs, 10_000),
+    signal,
+    true,
+  ).catch(() => []);
+  const device = devices.find(
+    (candidate) =>
+      buildDestinationPlatform(candidate) ===
+        buildDestinationPlatform(destination) &&
+      candidate.id.toLowerCase() === destination.id.toLowerCase(),
+  );
+  return device?.xcodeId
+    ? { ...destination, xcodeId: device.xcodeId }
+    : destination;
 }
 
 export const inspectBuildDestinations: AgentJobHandler = async (
@@ -1066,28 +1275,200 @@ export const inspectBuildDestinations: AgentJobHandler = async (
 ) => {
   const input = parseBuildDestinationsPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
-  await validateSource(folder, input.source);
-  const [simulators, physical] = await Promise.all([
-    command(
-      "xcrun",
-      ["simctl", "list", "-j"],
-      Math.min(timeoutMs, 30_000),
-      signal,
+  const absolutePath = await validateSource(folder, input.source);
+  const platform = input.platform ?? "IOS";
+  const [destinations, simulators, physical] = await Promise.all([
+    xcodeDestinations(
+      input.source,
+      absolutePath,
+      input.scheme,
+      input.configuration,
       folder,
+      timeoutMs,
+      signal,
     ),
-    listPhysicalDevices(timeoutMs, signal, true),
+    input.action === "ARCHIVE" ||
+    buildXcodePlatform(platform, "LOCAL_MAC") === "macOS"
+      ? []
+      : listSimulators(folder, timeoutMs, signal),
+    input.action === "ARCHIVE" ||
+    buildXcodePlatform(platform, "LOCAL_MAC") === "macOS"
+      ? []
+      : listPhysicalDevices(timeoutMs, signal, true),
   ]);
+  const matching = destinations.filter(
+    (entry) => buildDestinationPlatform(entry) === platform,
+  );
+  const generic = genericBuildDestinations(input.action, [platform]).flatMap(
+    (entry) => {
+      const placeholder = matching.find(
+        (candidate) => candidate.type === entry.type && candidate.generic,
+      );
+      if (placeholder)
+        return [
+          {
+            ...entry,
+            available: placeholder.available,
+            unavailableReason: placeholder.unavailableReason,
+          },
+        ];
+      return entry.type === "LOCAL_MAC" &&
+        matching.some(
+          (candidate) => candidate.type === "LOCAL_MAC" && candidate.available,
+        )
+        ? [entry]
+        : [];
+    },
+  );
+  if (input.action === "ARCHIVE")
+    return { ...successfulProcess, destinations: generic };
+  const devices = matching
+    .filter((entry) => !entry.generic)
+    .map((entry) => {
+      const inventory = (
+        entry.type === "SIMULATOR" ? simulators : physical
+      ).find((device) => device.id === entry.id || device.xcodeId === entry.id);
+      if (!inventory) return entry;
+      return {
+        ...entry,
+        id: inventory.id,
+        ...(entry.type === "PHYSICAL_DEVICE" ? { xcodeId: entry.id } : {}),
+        deviceType: inventory.deviceType,
+        osVersion: entry.osVersion ?? inventory.osVersion,
+        state: inventory.state,
+        available: entry.available && inventory.available,
+      };
+    });
+  // Xcode can report the same simulator once per runnable architecture.
+  const byId = new Map<string, BuildDestination>();
+  for (const entry of devices) {
+    const key = `${entry.type}:${entry.id}`;
+    const previous = byId.get(key);
+    if (
+      !previous ||
+      (!previous.available && entry.available) ||
+      (previous.available === entry.available &&
+        entry.architecture === (arch() === "x64" ? "x86_64" : arch()))
+    )
+      byId.set(key, entry);
+  }
   return {
     ...successfulProcess,
-    destinations: [
-      ...genericBuildDestinations(input.action),
-      ...(simulators.exitCode === 0
-        ? simulatorDestinations(JSON.parse(simulators.stdout))
-        : []),
-      ...physical,
-    ],
+    destinations: [...generic, ...byId.values()],
   };
 };
+
+async function listSimulators(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  requireInventory = false,
+): Promise<BuildDestination[]> {
+  const result = await command(
+    "xcrun",
+    ["simctl", "list", "-j"],
+    Math.min(timeoutMs, 30_000),
+    signal,
+    folder,
+  );
+  if (requireInventory)
+    requireSuccess(result, "Could not inspect available simulators");
+  return result.exitCode === 0
+    ? simulatorDestinations(JSON.parse(result.stdout), true)
+    : [];
+}
+
+async function localMacDestination(
+  platformId: BuildPlatform,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<BuildDestination> {
+  const [version, console] = await Promise.all([
+    command(
+      "/usr/bin/sw_vers",
+      ["-productVersion"],
+      Math.min(timeoutMs, 5_000),
+      signal,
+    ),
+    stat("/dev/console").catch(() => null),
+  ]);
+  const architecture = arch() === "x64" ? "x86_64" : arch();
+  const designed = platformId === "MACOS_DESIGNED_FOR_IPAD";
+  const available =
+    console !== null &&
+    console.uid !== 0 &&
+    console.uid === process.getuid?.() &&
+    (!designed || architecture === "arm64");
+  return {
+    type: "LOCAL_MAC",
+    id: "local-mac",
+    name: "My Mac",
+    platform: "macOS",
+    platformId,
+    architecture,
+    ...(designed
+      ? { variant: "Designed for iPad" }
+      : platformId === "MAC_CATALYST"
+        ? { variant: "Mac Catalyst" }
+        : {}),
+    osVersion: version.exitCode === 0 ? version.stdout.trim() || null : null,
+    state: available ? "Available" : "Unavailable",
+    available,
+    ...(available
+      ? {}
+      : {
+          unavailableReason:
+            designed && architecture !== "arm64"
+              ? "Designed for iPad requires an Apple silicon Mac"
+              : "Sign in to the Mac with the control agent's account to launch apps",
+        }),
+  };
+}
+
+async function runDestinations(
+  input: BuildAgentRunDestinationsPayload,
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+  allowLocalMac: boolean,
+): Promise<BuildDestination[]> {
+  const platforms = input.platforms ?? [input.platform ?? "IOS"];
+  const type = input.destinationType;
+  const [devices, macs] = await Promise.all([
+    type === "SIMULATOR"
+      ? listSimulators(folder, timeoutMs, signal, true)
+      : type === "PHYSICAL_DEVICE"
+        ? listPhysicalDevices(timeoutMs, signal, true, true)
+        : [],
+    allowLocalMac
+      ? Promise.all(
+          platforms
+            .filter(
+              (platform) =>
+                buildXcodePlatform(platform, "LOCAL_MAC") === "macOS",
+            )
+            .map((platform) =>
+              localMacDestination(platform, timeoutMs, signal),
+            ),
+        )
+      : [],
+  ]);
+  return [
+    ...devices.filter((destination) =>
+      platforms.includes(buildDestinationPlatform(destination)),
+    ),
+    ...(platforms.includes("VISIONOS_DESIGNED_FOR_IPAD")
+      ? devices
+          .filter((destination) => destination.platformId === "VISIONOS")
+          .map((destination) => ({
+            ...destination,
+            platformId: "VISIONOS_DESIGNED_FOR_IPAD" as const,
+            variant: "Designed for iPad",
+          }))
+      : []),
+    ...macs,
+  ];
+}
 
 export const inspectBuildRunDestinations: AgentJobHandler = async (
   payload,
@@ -1096,23 +1477,9 @@ export const inspectBuildRunDestinations: AgentJobHandler = async (
 ) => {
   const input = parseBuildRunDestinationsPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
-  if (input.destinationType === "SIMULATOR") {
-    const simulators = await command(
-      "xcrun",
-      ["simctl", "list", "-j"],
-      Math.min(timeoutMs, 30_000),
-      signal,
-      folder,
-    );
-    requireSuccess(simulators, "Could not inspect available simulators");
-    return {
-      ...successfulProcess,
-      destinations: simulatorDestinations(JSON.parse(simulators.stdout), true),
-    };
-  }
   return {
     ...successfulProcess,
-    destinations: await listPhysicalDevices(timeoutMs, signal, true),
+    destinations: await runDestinations(input, folder, timeoutMs, signal, true),
   };
 };
 
@@ -1122,23 +1489,15 @@ export const inspectAgentBuildRunDestinations: AgentJobHandler = async (
   signal,
 ) => {
   const input = parseBuildAgentRunDestinationsPayload(payload);
-  if (input.destinationType === "SIMULATOR") {
-    const simulators = await command(
-      "xcrun",
-      ["simctl", "list", "-j"],
-      Math.min(timeoutMs, 30_000),
-      signal,
-      process.cwd(),
-    );
-    requireSuccess(simulators, "Could not inspect available simulators");
-    return {
-      ...successfulProcess,
-      destinations: simulatorDestinations(JSON.parse(simulators.stdout), true),
-    };
-  }
   return {
     ...successfulProcess,
-    destinations: await listPhysicalDevices(timeoutMs, signal, true),
+    destinations: await runDestinations(
+      input,
+      process.cwd(),
+      timeoutMs,
+      signal,
+      false,
+    ),
   };
 };
 
@@ -1559,17 +1918,6 @@ function advancedArguments(
   return args;
 }
 
-function destinationArgument(destination: BuildDestination): string {
-  if (destination.generic) {
-    return destination.type === "SIMULATOR"
-      ? "generic/platform=iOS Simulator"
-      : "generic/platform=iOS";
-  }
-  return destination.type === "SIMULATOR"
-    ? `platform=iOS Simulator,id=${destination.id}`
-    : `platform=iOS,id=${destination.id}`;
-}
-
 function actionArgument(action: BuildAction): string {
   return {
     BUILD: "build",
@@ -1597,7 +1945,7 @@ export function xcodeBuildArguments(input: BuildJobPayload): string[] {
           input.configuration,
         ]),
     "-destination",
-    destinationArgument(input.destination),
+    buildDestinationSpecifier(input.destination),
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     resultBundle,
@@ -1655,7 +2003,7 @@ export function xcodeBuildSettingsArguments(
     "-configuration",
     input.configuration,
     "-destination",
-    destinationArgument(input.destination),
+    buildDestinationSpecifier(input.destination),
     ...(input.derivedDataPath
       ? ["-derivedDataPath", input.derivedDataPath]
       : []),
@@ -2528,6 +2876,91 @@ function parseBuildSettings(value: string): BuildSettingEntry[] {
   });
 }
 
+function destinationSDK(destination: BuildDestination) {
+  const simulator = destination.type === "SIMULATOR";
+  switch (buildDestinationPlatform(destination)) {
+    case "IOS":
+    case "MACOS_DESIGNED_FOR_IPAD":
+    case "VISIONOS_DESIGNED_FOR_IPAD":
+      return {
+        name: simulator ? "iphonesimulator" : "iphoneos",
+        minimum: "IPHONEOS_DEPLOYMENT_TARGET",
+      };
+    case "TVOS":
+      return {
+        name: simulator ? "appletvsimulator" : "appletvos",
+        minimum: "TVOS_DEPLOYMENT_TARGET",
+      };
+    case "WATCHOS":
+      return {
+        name: simulator ? "watchsimulator" : "watchos",
+        minimum: "WATCHOS_DEPLOYMENT_TARGET",
+      };
+    case "VISIONOS":
+      return {
+        name: simulator ? "xrsimulator" : "xros",
+        minimum: "XROS_DEPLOYMENT_TARGET",
+      };
+    case "MACOS":
+    case "MAC_CATALYST":
+      return { name: "macosx", minimum: "MACOSX_DEPLOYMENT_TARGET" };
+  }
+}
+
+function matchesDestinationSDK(
+  settings: Record<string, string>,
+  destination: BuildDestination,
+): boolean {
+  const name = settings.PLATFORM_NAME;
+  if (name && name !== destinationSDK(destination).name) return false;
+  if (name !== "macosx") return true;
+  const catalyst =
+    settings.EFFECTIVE_PLATFORM_NAME === "-maccatalyst" ||
+    settings.SDK_VARIANT === "iosmac";
+  return (
+    catalyst === (buildDestinationPlatform(destination) === "MAC_CATALYST")
+  );
+}
+
+export function runnablePlatformMetadata(
+  destination: BuildDestination,
+  settings: Record<string, string>,
+) {
+  const platformId = buildDestinationPlatform(destination);
+  const compatiblePlatforms: BuildPlatform[] = [platformId];
+  const sdk = destinationSDK(destination);
+  const architectures = (settings.ARCHS ?? settings.VALID_ARCHS ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+  const deviceFamilies = settings.TARGETED_DEVICE_FAMILY?.split(/,\s*/) ?? [];
+  const eligibleIOSApp =
+    platformId === "IOS" &&
+    deviceFamilies.some((family) => family === "1" || family === "2");
+  if (
+    eligibleIOSApp &&
+    destination.type === "PHYSICAL_DEVICE" &&
+    settings.SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD === "YES" &&
+    architectures.includes("arm64")
+  ) {
+    compatiblePlatforms.push("MACOS_DESIGNED_FOR_IPAD");
+  }
+  if (
+    eligibleIOSApp &&
+    settings.SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD === "YES"
+  ) {
+    compatiblePlatforms.push("VISIONOS_DESIGNED_FOR_IPAD");
+  }
+  return {
+    platformId,
+    compatiblePlatforms,
+    destinationType: destination.type,
+    variant: destination.variant ?? null,
+    architectures,
+    minimumOSVersion: settings[sdk.minimum] ?? null,
+    sdkName: settings.SDK_NAME ?? null,
+  };
+}
+
 async function findFiles(
   root: string,
   predicate: (name: string) => boolean,
@@ -2721,7 +3154,9 @@ async function captureArtifacts(
   const archivePath = join(input.artifactDirectory, "archive.xcarchive");
   if (await pathExists(archivePath)) {
     artifacts.push(
-      await artifact(input.artifactDirectory, "ARCHIVE", archivePath),
+      await artifact(input.artifactDirectory, "ARCHIVE", archivePath, {
+        platformId: buildDestinationPlatform(input.destination),
+      }),
     );
   }
   const settingsResult = await command(
@@ -2751,8 +3186,9 @@ async function captureArtifacts(
   const apps = entries.filter((entry) => {
     const settings = entry.buildSettings;
     return (
-      settings.WRAPPER_EXTENSION === "app" ||
-      settings.FULL_PRODUCT_NAME?.endsWith(".app")
+      matchesDestinationSDK(settings, input.destination) &&
+      (settings.WRAPPER_EXTENSION === "app" ||
+        settings.FULL_PRODUCT_NAME?.endsWith(".app"))
     );
   });
   if (apps.length === 1) {
@@ -2770,17 +3206,13 @@ async function captureArtifacts(
       await cp(source, destination, {
         recursive: true,
         preserveTimestamps: true,
+        verbatimSymlinks: true,
       });
       artifacts.push(
         await artifact(input.artifactDirectory, "RUNNABLE_APP", destination, {
           bundleIdentifier: settings.PRODUCT_BUNDLE_IDENTIFIER ?? null,
           target: apps[0]!.target,
-          destinationType: input.destination.type,
-          architectures: (settings.ARCHS ?? settings.VALID_ARCHS ?? "")
-            .split(/\s+/)
-            .filter(Boolean),
-          minimumOSVersion: settings.IPHONEOS_DEPLOYMENT_TARGET ?? null,
-          sdkName: settings.SDK_NAME ?? null,
+          ...runnablePlatformMetadata(input.destination, settings),
         }),
       );
     }
@@ -2951,6 +3383,14 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     signal,
   );
   await validateSource(folder, input.source);
+  const xcodeInput = {
+    ...input,
+    destination: await physicalBuildDestination(
+      input.destination,
+      timeoutMs,
+      signal,
+    ),
+  };
   if (input.derivedDataPath) {
     await mkdir(input.derivedDataPath, { recursive: true, mode: 0o700 });
     await writeFile(
@@ -3060,7 +3500,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
       await onLog({
         sequence: 0,
         stream: "SYSTEM",
-        message: "Preparing iOS build",
+        message: "Preparing Apple platform build",
         createdAt: new Date().toISOString(),
       });
     } catch (progressError) {
@@ -3069,7 +3509,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     if (!signal.aborted) {
       preflightResult = await runLoggedCommand({
         command: "xcrun",
-        args: xcodeBuildSettingsArguments(input, folder),
+        args: xcodeBuildSettingsArguments(xcodeInput, folder),
         cwd: folder,
         env: xcodeEnvironment(),
         timeoutMs: Math.min(timeoutMs, 180_000),
@@ -3086,6 +3526,23 @@ const runIosBuildWithPaths: AgentJobHandler = async (
           preflightResult.output ||
             "The saved scheme, configuration, or destination is unavailable",
         );
+      }
+      if (preflightResult.exitCode === 0 && input.destination.platformId) {
+        // Xcode can return no build settings for a valid Swift package scheme.
+        const reportedPlatforms = parseBuildSettings(
+          preflightResult.stdout || "[]",
+        ).filter(({ buildSettings }) => buildSettings.PLATFORM_NAME);
+        if (
+          reportedPlatforms.length > 0 &&
+          !reportedPlatforms.some(({ buildSettings }) =>
+            matchesDestinationSDK(buildSettings, input.destination),
+          )
+        ) {
+          failBuild = true;
+          errorCode = "DESTINATION_UNAVAILABLE";
+          error =
+            "Xcode resolved a different SDK than the selected build platform";
+        }
       }
     }
     if (!failBuild && !signal.aborted) {
@@ -3120,7 +3577,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     ) {
       preflightResult = await runLoggedCommand({
         command: "xcrun",
-        args: xcodeBuildSettingsArguments(input, folder),
+        args: xcodeBuildSettingsArguments(xcodeInput, folder),
         cwd: folder,
         env: xcodeEnvironment(),
         timeoutMs: Math.min(timeoutMs, 180_000),
@@ -3159,7 +3616,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
               logger.emit("COVERAGE", "STDERR", cleanError(coverageError));
             }
           }
-          const args = xcodeBuildArguments(input);
+          const args = xcodeBuildArguments(xcodeInput);
           buildResult = await runLoggedCommand({
             command: "xcrun",
             args,
@@ -3228,7 +3685,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
       let artifacts: Artifact[] = [];
       try {
         artifacts = await captureArtifacts(
-          input,
+          xcodeInput,
           folder,
           new AbortController().signal,
           !failBuild && !signal.aborted && buildResult?.exitCode === 0,
@@ -3303,7 +3760,7 @@ const runIosBuildWithPaths: AgentJobHandler = async (
         : failBuild || !buildResult
           ? 1
           : buildResult.exitCode;
-      const args = xcodeBuildArguments(input);
+      const args = xcodeBuildArguments(xcodeInput);
       const finalSignal = new AbortController().signal;
       const finalStateHash = await withRepositoryMetadata(
         folder,
@@ -3602,8 +4059,93 @@ async function runSimpleLogged(
   });
 }
 
-export function simulatorAppArguments(destinationId: string): string[] {
-  return ["-a", "Simulator", "--args", "-CurrentDeviceUDID", destinationId];
+export function simulatorAppArguments(
+  destinationId: string,
+  application = "Simulator",
+): string[] {
+  return ["-a", application, "--args", "-CurrentDeviceUDID", destinationId];
+}
+
+async function simulatorUIArguments(
+  destinationId: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<string[]> {
+  const result = await command(
+    "xcrun",
+    ["--find", "simctl"],
+    Math.min(timeoutMs, 5_000),
+    signal,
+    undefined,
+    xcodeEnvironment(),
+  );
+  const executable = result.stdout.trim();
+  if (result.exitCode === 0 && isAbsolute(executable)) {
+    const developerDirectory = resolve(executable, "../../..");
+    const deviceHub = join(
+      developerDirectory,
+      "..",
+      "Applications",
+      "DeviceHub.app",
+    );
+    if (await pathExists(deviceHub)) return ["-a", deviceHub];
+    const simulator = join(developerDirectory, "Applications", "Simulator.app");
+    if (await pathExists(simulator))
+      return simulatorAppArguments(destinationId, simulator);
+  }
+  return simulatorAppArguments(destinationId);
+}
+
+export async function prepareMacCompatibilityApplication(
+  artifactDirectory: string,
+  appPath: string,
+): Promise<string> {
+  const root = join(artifactDirectory, "mac-compatibility");
+  const name = basename(appPath);
+  const application = join(root, name);
+  const target = join("Wrapper", name);
+  if (await pathExists(join(application, target))) return application;
+
+  await mkdir(root, { recursive: true, mode: 0o700 });
+  const temporary = await mkdtemp(join(root, ".prepare-"));
+  try {
+    const staged = join(temporary, name);
+    await mkdir(join(staged, "Wrapper"), { recursive: true, mode: 0o700 });
+    await cp(appPath, join(staged, target), {
+      recursive: true,
+      preserveTimestamps: true,
+      verbatimSymlinks: true,
+    });
+    await symlink(target, join(staged, "WrappedBundle"));
+    try {
+      await rename(staged, application);
+    } catch (error) {
+      if (!(await pathExists(join(application, target)))) throw error;
+    }
+    return application;
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function requireCompatibleAppBundle(
+  destination: BuildDestination,
+  appPath: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+): Promise<void> {
+  if (!buildDestinationPlatform(destination).endsWith("_DESIGNED_FOR_IPAD"))
+    return;
+  const supportedPlatform = await plistString(
+    join(appPath, "Info.plist"),
+    "CFBundleSupportedPlatforms.0",
+    timeoutMs,
+    signal,
+  );
+  const expected =
+    destination.type === "SIMULATOR" ? "iPhoneSimulator" : "iPhoneOS";
+  if (supportedPlatform !== expected)
+    throw new Error("Designed for iPad requires a compatible iOS app bundle");
 }
 
 async function deployPreparedIosBuild(
@@ -3644,7 +4186,62 @@ async function deployPreparedIosBuild(
       let failure: string | null = null;
       let launchedAt: string | null = null;
       try {
-        if (deployment.destination.type === "SIMULATOR") {
+        const platform = buildDestinationPlatform(deployment.destination);
+        await requireCompatibleAppBundle(
+          deployment.destination,
+          appPath,
+          timeoutMs,
+          signal,
+        );
+        if (deployment.destination.type === "LOCAL_MAC") {
+          const local = await localMacDestination(platform, timeoutMs, signal);
+          if (!local.available)
+            throw new Error(local.unavailableReason ?? "My Mac is unavailable");
+          if (platform === "MACOS_DESIGNED_FOR_IPAD") {
+            const verify = await runLoggedCommand({
+              command: "/usr/bin/codesign",
+              args: ["--verify", "--deep", "--strict", appPath],
+              cwd: folder,
+              env: xcodeEnvironment(),
+              timeoutMs,
+              signal,
+              logger,
+              phase: "SIGNATURE_VERIFY",
+              scope: "DEPLOYMENT",
+              scopeId: deployment.id,
+              additionalLogPath: logPath,
+            });
+            if (verify.exitCode !== 0)
+              throw new Error(
+                "Designed for iPad requires an iOS app signed for this Mac",
+              );
+          }
+          const application =
+            platform === "MACOS_DESIGNED_FOR_IPAD"
+              ? await prepareMacCompatibilityApplication(
+                  input.artifactDirectory,
+                  appPath,
+                )
+              : appPath;
+          const launch = await runLoggedCommand({
+            command: "/usr/bin/open",
+            args: ["-n", application],
+            cwd: folder,
+            env: xcodeEnvironment(),
+            timeoutMs,
+            signal,
+            logger,
+            phase: "LAUNCH",
+            scope: "DEPLOYMENT",
+            scopeId: deployment.id,
+            additionalLogPath: logPath,
+          });
+          if (launch.exitCode !== 0)
+            failure = cleanError(
+              launch.output || "Could not launch the app on this Mac",
+            );
+          else launchedAt = new Date().toISOString();
+        } else if (deployment.destination.type === "SIMULATOR") {
           if (deployment.destination.state !== "Booted") {
             const boot = await runSimpleLogged(logger, {
               args: ["simctl", "boot", deployment.destination.id],
@@ -3665,7 +4262,11 @@ async function deployPreparedIosBuild(
           if (!failure) {
             const openSimulator = await runLoggedCommand({
               command: "/usr/bin/open",
-              args: simulatorAppArguments(deployment.destination.id),
+              args: await simulatorUIArguments(
+                deployment.destination.id,
+                timeoutMs,
+                signal,
+              ),
               cwd: folder,
               env: xcodeEnvironment(),
               timeoutMs,
@@ -3677,8 +4278,12 @@ async function deployPreparedIosBuild(
               additionalLogPath: logPath,
             });
             if (openSimulator.exitCode !== 0) {
-              failure = cleanError(
-                openSimulator.output || "Could not open Simulator",
+              logger.emit(
+                "SIMULATOR_OPEN",
+                "SYSTEM",
+                "Could not open the simulator interface. Continuing with the app launch.",
+                "DEPLOYMENT",
+                deployment.id,
               );
             }
           }
@@ -3779,7 +4384,7 @@ async function deployPreparedIosBuild(
                 "launch",
                 "--device",
                 deployment.destination.id,
-                "--terminate-existing",
+                ...(platform === "IOS" ? ["--terminate-existing"] : []),
                 input.bundleIdentifier,
               ],
               cwd: folder,
@@ -3969,13 +4574,23 @@ export const deployTransferredIosBuild: AgentJobHandler = async (
   }
 };
 
-function exportPlist(settings: BuildExportSettings): string {
+function exportPlist(
+  settings: BuildExportSettings,
+  platform?: BuildPlatform,
+): string {
   const method = {
     DEBUGGING: "debugging",
     RELEASE_TESTING: "release-testing",
     ENTERPRISE: "enterprise",
     APP_STORE_CONNECT: "app-store-connect",
+    MAC_APPLICATION: "mac-application",
+    DEVELOPER_ID: "developer-id",
   }[settings.method];
+  const mac =
+    platform === "MACOS" ||
+    platform === "MAC_CATALYST" ||
+    settings.method === "MAC_APPLICATION" ||
+    settings.method === "DEVELOPER_ID";
   const values: Record<string, unknown> = {
     destination: "export",
     method,
@@ -3985,7 +4600,7 @@ function exportPlist(settings: BuildExportSettings): string {
     testFlightInternalTestingOnly: settings.testFlightInternalTestingOnly,
     stripSwiftSymbols: settings.stripSwiftSymbols,
   };
-  if (settings.thinning) values.thinning = settings.thinning;
+  if (settings.thinning && !mac) values.thinning = settings.thinning;
   if (settings.iCloudContainerEnvironment) {
     values.iCloudContainerEnvironment = settings.iCloudContainerEnvironment;
   }
@@ -4029,7 +4644,9 @@ export const exportIosArchive: AgentJobHandler = async (
   await mkdir(exportDirectory, { recursive: true, mode: 0o700 });
   const plistPath = join(exportDirectory, "ExportOptions.plist");
   const logPath = join(exportDirectory, "export.log");
-  await writeFile(plistPath, exportPlist(input.settings), { mode: 0o600 });
+  await writeFile(plistPath, exportPlist(input.settings, input.platform), {
+    mode: 0o600,
+  });
   const logger = new BuildLogger(input.buildId, context, logPath, process.env);
   try {
     const result = await runLoggedCommand({
@@ -4084,6 +4701,38 @@ export async function exportedArtifacts(
   archivePath: string,
   signal: AbortSignal,
 ): Promise<Artifact[]> {
+  if (
+    input.platform === "MACOS" ||
+    input.platform === "MAC_CATALYST" ||
+    input.settings.method === "MAC_APPLICATION" ||
+    input.settings.method === "DEVELOPER_ID"
+  ) {
+    const entries = await readdir(exportDirectory, { withFileTypes: true });
+    return Promise.all(
+      entries.flatMap((entry) => {
+        const kind =
+          entry.isFile() && entry.name.endsWith(".pkg")
+            ? "PKG"
+            : entry.isDirectory() && entry.name.endsWith(".app")
+              ? "EXPORTED_APP"
+              : null;
+        return kind
+          ? [
+              artifact(
+                input.artifactDirectory,
+                kind,
+                join(exportDirectory, entry.name),
+                {
+                  exportId: input.exportId,
+                  exportMethod: input.settings.method,
+                  platformId: input.platform ?? "MACOS",
+                },
+              ),
+            ]
+          : [];
+      }),
+    );
+  }
   const [ipaPath] = await findFiles(
     exportDirectory,
     (name) => name.endsWith(".ipa"),

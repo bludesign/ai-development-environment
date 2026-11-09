@@ -597,7 +597,7 @@ export class ActionCenterService {
         resourceId: build.id,
         href: buildHref(build.id),
         displayNumber: null,
-        label: configuration ?? repository ?? "iOS build",
+        label: configuration ?? repository ?? "Xcode build",
         summary:
           [repository, build.worktree?.branch].filter(Boolean).join(" · ") ||
           null,

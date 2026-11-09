@@ -9,7 +9,10 @@ import {
 } from "graphql-ws";
 import { updateBrowserWebSocketStatus } from "./websocket-status";
 
-type GraphQLResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+type GraphQLResponse<T> = {
+  data?: T;
+  errors?: Array<{ message: string; extensions?: { code?: string } }>;
+};
 
 const MAX_CONCURRENT_REQUESTS = 6;
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -133,9 +136,14 @@ async function executeRequest<T>(
       const detail =
         body?.errors?.map((error) => error.message).join("; ") ||
         `HTTP ${response.status} ${response.statusText}`.trim();
-      throw new Error(
+      const error = new Error(
         !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
       );
+      const code =
+        body?.errors?.length === 1
+          ? body.errors[0]?.extensions?.code
+          : undefined;
+      throw typeof code === "string" ? Object.assign(error, { code }) : error;
     }
     return body.data;
   } catch (error) {

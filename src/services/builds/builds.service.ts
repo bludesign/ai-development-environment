@@ -3,13 +3,14 @@ import { serverUrlSettingsService } from "@/services/server-urls/server-urls.ser
 import type { ServerUrlKind } from "@/lib/server-urls";
 import { BUILD_ENDPOINT_PATHS } from "@ai-development-environment/agent-contract/builds";
 import { filterAsyncIterator } from "@/lib/filter-async-iterator";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 
 import {
   BUILD_ACTIONS,
   BUILD_CONFIGURATION_ICON_KEYS,
   BUILD_DESTINATION_TYPES,
+  BUILD_PLATFORMS,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   BUILD_SCRIPT_LOCK_SCOPES,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
@@ -29,7 +30,11 @@ import {
   IOS_SIGNING_INSPECT_JOB_KIND,
   IOS_SOURCE_DISCOVER_JOB_KIND,
   IOS_SOURCE_PARSE_JOB_KIND,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+  buildDestinationPlatform,
+  buildDestinationSpecifier,
   genericBuildDestinations,
+  isArchiveBuildDestination,
   parseBuildAdvancedSettings,
   parseBuildArtifactSnapshots,
   parseBuildDestination,
@@ -39,6 +44,7 @@ import {
   type BuildAction,
   type BuildAdvancedSettings,
   type BuildDestination,
+  type BuildPlatform,
   type BuildProgressReport,
   type BuildReportKind,
   type BuildSigningRequirement,
@@ -84,6 +90,17 @@ import {
   buildArtifactFileChecksum,
   failBuildArtifactTransferForJob,
 } from "./artifact-relay";
+import {
+  buildPlatformExportSettings,
+  buildPlatformName,
+  isMacBuildPlatform,
+  parsePlatformConfigurations,
+  requireBuildPlatform,
+  resolvePlatformExportSettings,
+  storedBuildPlatform,
+  storedPlatformConfigurations,
+  type BuildPlatformConfigurationInput,
+} from "./build-platforms";
 
 const ICON_KEYS = new Set<string>(BUILD_CONFIGURATION_ICON_KEYS);
 const FINAL_JOB_STATUSES = new Set([
@@ -166,6 +183,18 @@ function capabilities(agent: { capabilitiesJson: string }): string[] {
   return stringArray(parseJson(agent.capabilitiesJson, []));
 }
 
+function requirePlatformAgent(
+  agent: { capabilitiesJson: string },
+  platform: BuildPlatform,
+) {
+  if (
+    platform !== "IOS" &&
+    !capabilities(agent).includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY)
+  ) {
+    throw new Error("Update the build agent to use additional Apple platforms");
+  }
+}
+
 function cleanName(value: string, field: string, max = 80): string {
   const result = value.trim();
   if (!result) throw new Error(`${field} is required`);
@@ -174,7 +203,17 @@ function cleanName(value: string, field: string, max = 80): string {
 }
 
 function destinationKey(destination: BuildDestination): string {
-  return `${destination.type}:${destination.id}`;
+  const platform = buildDestinationPlatform(destination);
+  const key = `${destination.type}:${destination.id}`;
+  return platform === "IOS" ? key : `${platform}:${key}`;
+}
+
+function deploymentCommandSummary(destination: BuildDestination): string {
+  if (destination.type === "LOCAL_MAC") return "open -n <app bundle>";
+  if (destination.type === "SIMULATOR") {
+    return `xcrun simctl bootstatus/install/launch ${destination.id}`;
+  }
+  return `xcrun devicectl device install/process launch --device ${destination.id}`;
 }
 
 function versionParts(value: string): number[] {
@@ -184,12 +223,29 @@ function versionParts(value: string): number[] {
 function runnableDestinationCompatibility(
   destination: BuildDestination,
   metadata: JsonObject,
+  buildPlatform: BuildPlatform,
 ): BuildDestination {
+  const platform = buildDestinationPlatform(destination);
+  const compatibleVariant = platform !== buildPlatform;
+  const architectures = stringArray(metadata.architectures).map(
+    normalizeArchitecture,
+  );
+  if (
+    destination.architecture &&
+    architectures.length > 0 &&
+    !architectures.includes(normalizeArchitecture(destination.architecture))
+  ) {
+    return {
+      ...destination,
+      available: false,
+      unavailableReason: "The app does not contain this architecture",
+    };
+  }
   const minimum =
     typeof metadata.minimumOSVersion === "string"
       ? metadata.minimumOSVersion
       : null;
-  if (destination.type !== "SIMULATOR" || !minimum || !destination.osVersion) {
+  if (compatibleVariant || !minimum || !destination.osVersion) {
     return destination;
   }
   const current = versionParts(destination.osVersion);
@@ -198,10 +254,58 @@ function runnableDestinationCompatibility(
   for (let index = 0; index < length; index += 1) {
     if ((current[index] ?? 0) > (required[index] ?? 0)) return destination;
     if ((current[index] ?? 0) < (required[index] ?? 0)) {
-      return { ...destination, available: false };
+      return {
+        ...destination,
+        available: false,
+        unavailableReason: `The app requires OS version ${minimum} or later`,
+      };
     }
   }
   return destination;
+}
+
+function normalizeArchitecture(value: string) {
+  if (value === "x64") return "x86_64";
+  if (value === "arm64e") return "arm64";
+  return value;
+}
+
+function artifactRunPlatforms(
+  platform: BuildPlatform,
+  destinationType: string,
+  metadata: JsonObject,
+  sameAgent: boolean,
+): BuildPlatform[] {
+  if (platform !== "IOS") return [platform];
+  const variants = stringArray(metadata.compatiblePlatforms);
+  const platforms: BuildPlatform[] = [platform];
+  if (
+    sameAgent &&
+    destinationType === "PHYSICAL_DEVICE" &&
+    variants.includes("MACOS_DESIGNED_FOR_IPAD")
+  )
+    platforms.push("MACOS_DESIGNED_FOR_IPAD");
+  if (variants.includes("VISIONOS_DESIGNED_FOR_IPAD")) {
+    platforms.push("VISIONOS_DESIGNED_FOR_IPAD");
+  }
+  return platforms;
+}
+
+function isArtifactRunDestination(
+  destination: BuildDestination,
+  artifactDestinationType: string,
+  platforms: BuildPlatform[],
+) {
+  const platform = buildDestinationPlatform(destination);
+  const type =
+    platform === "MACOS_DESIGNED_FOR_IPAD"
+      ? "LOCAL_MAC"
+      : artifactDestinationType;
+  return (
+    !destination.generic &&
+    destination.type === type &&
+    platforms.includes(platform)
+  );
 }
 
 function coordinationCodebaseId(build: {
@@ -238,17 +342,6 @@ function buildStatusFromJob(status: string): string {
   if (status === "SUCCEEDED") return "SUCCEEDED";
   if (status === "CANCELLED") return "CANCELLED";
   return "FAILED";
-}
-
-function destinationSpecifier(destination: BuildDestination): string {
-  if (destination.generic) {
-    return destination.type === "SIMULATOR"
-      ? "generic/platform=iOS Simulator"
-      : "generic/platform=iOS";
-  }
-  return destination.type === "SIMULATOR"
-    ? `platform=iOS Simulator,id=${destination.id}`
-    : `platform=iOS,id=${destination.id}`;
 }
 
 function actionArgument(action: BuildAction): string {
@@ -291,7 +384,7 @@ function commandPreview(input: {
           input.configuration,
         ]),
     "-destination",
-    destinationSpecifier(input.destination),
+    buildDestinationSpecifier(input.destination),
     "-hideShellScriptEnvironment",
     "-resultBundlePath",
     join(input.artifactDirectory, "result.xcresult"),
@@ -439,6 +532,7 @@ export type SaveBuildConfigurationInput = {
   advancedSettings?: unknown;
   autoExport?: boolean;
   exportSettings?: unknown;
+  platformConfigurations?: BuildPlatformConfigurationInput[] | null;
 };
 
 export type SaveBuildScriptInput = {
@@ -459,12 +553,110 @@ export type CustomBuildConfigurationInput = {
   sourcePath: string;
   scheme: string;
   buildConfiguration: string;
+  exportSettings?: unknown;
+  platformConfigurations?: BuildPlatformConfigurationInput[] | null;
 };
 
 type BuildConfigurationSelection = {
   configurationId?: string | null;
   customConfiguration?: CustomBuildConfigurationInput | null;
 };
+
+type StartBuildOptions = {
+  destination: unknown;
+  action?: BuildAction | null;
+  advancedSettings?: unknown;
+  exportWhenComplete?: boolean | null;
+  exportSettings?: unknown;
+  serverUrlKind?: ServerUrlKind | null;
+};
+
+type StartBuildContext = BuildConfigurationSelection & {
+  worktreeId: string;
+  scriptIds?: string[] | null;
+  requestId: string;
+  telemetryRequestOrigin?: string | null;
+};
+
+type StartBuildsInput = StartBuildContext & {
+  selections: (StartBuildOptions & { platform: BuildPlatform })[];
+};
+
+function stableDigest(value: unknown): string {
+  const json = JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item).sort(([a], [b]) => a.localeCompare(b)),
+        )
+      : item,
+  );
+  return createHash("sha256").update(json).digest("hex");
+}
+
+function platformConfiguration<
+  T extends {
+    source: { kind: string; relativePath: string };
+    sourceId: string | null;
+    scheme: string;
+    buildConfiguration: string;
+    defaultAction: string;
+    advancedSettingsJson: string;
+    autoExport: boolean;
+    exportSettingsJson: string | null;
+  },
+>(
+  configuration: T,
+  profiles: BuildPlatformConfigurationInput[],
+  platform: BuildPlatform,
+) {
+  const profile = profiles.find((entry) => entry.platform === platform);
+  if (!profile)
+    throw new Error(`The configuration does not include ${platform}`);
+  const source =
+    profile.sourceKind && profile.sourcePath
+      ? { kind: profile.sourceKind, relativePath: profile.sourcePath }
+      : configuration.source;
+  return {
+    ...configuration,
+    source,
+    sourceId:
+      source.relativePath === configuration.source.relativePath
+        ? configuration.sourceId
+        : null,
+    scheme: profile.scheme ?? configuration.scheme,
+    buildConfiguration:
+      profile.buildConfiguration ?? configuration.buildConfiguration,
+    defaultAction: profile.defaultAction ?? configuration.defaultAction,
+    advancedSettingsJson:
+      profile.advancedSettings == null
+        ? configuration.advancedSettingsJson
+        : JSON.stringify({
+            ...objectValue(
+              parseJson(configuration.advancedSettingsJson, {}),
+              "shared advanced settings",
+            ),
+            ...objectValue(
+              profile.advancedSettings,
+              "platform advanced settings",
+            ),
+          }),
+    autoExport: profile.autoExport ?? configuration.autoExport,
+    exportSettingsJson:
+      profile.exportSettings == null
+        ? configuration.exportSettingsJson
+        : JSON.stringify(
+            resolvePlatformExportSettings(
+              platform,
+              configuration.exportSettingsJson
+                ? parseBuildExportSettings(
+                    parseJson(configuration.exportSettingsJson, null),
+                  )
+                : null,
+              profile.exportSettings,
+            ),
+          ),
+  };
+}
 
 export class BuildsService {
   constructor(
@@ -658,6 +850,8 @@ export class BuildsService {
   private async resolveConfiguration(
     input: BuildConfigurationSelection,
     repositoryId: string,
+    platform: BuildPlatform = "IOS",
+    useCaptured = false,
   ) {
     if (Boolean(input.configurationId) === Boolean(input.customConfiguration)) {
       throw new Error(
@@ -678,7 +872,11 @@ export class BuildsService {
         kind: custom.sourceKind,
         relativePath: custom.sourcePath,
       });
-      return {
+      const exportSettings =
+        custom.exportSettings == null
+          ? null
+          : parseBuildExportSettings(custom.exportSettings);
+      const configuration = {
         id: null,
         sourceId: null,
         name: "Custom",
@@ -693,8 +891,21 @@ export class BuildsService {
         defaultAction: "BUILD",
         advancedSettingsJson: "{}",
         autoExport: false,
-        exportSettingsJson: null,
+        exportSettingsJson: exportSettings
+          ? JSON.stringify(exportSettings)
+          : null,
       };
+      if (useCaptured) return configuration;
+      return platformConfiguration(
+        configuration,
+        custom.platformConfigurations
+          ? parsePlatformConfigurations(
+              custom.platformConfigurations,
+              exportSettings,
+            )
+          : storedPlatformConfigurations(),
+        platform,
+      );
     }
     const configuration = await prisma.buildConfiguration.findUnique({
       where: { id: input.configurationId! },
@@ -706,13 +917,21 @@ export class BuildsService {
     ) {
       throw new Error("Build configuration is not available for this worktree");
     }
-    return configuration;
+    return useCaptured
+      ? configuration
+      : platformConfiguration(
+          configuration,
+          storedPlatformConfigurations(
+            configuration.platformConfigurationsJson,
+          ),
+          platform,
+        );
   }
 
   private async requireWorktree(
     worktreeId: string,
     capability: string,
-    capabilityError = "Agent must be updated to use iOS builds",
+    capabilityError = "Agent must be updated to use Xcode builds",
   ) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
@@ -891,6 +1110,45 @@ export class BuildsService {
     if (input.id && (!existing || existing.projectId !== project.id)) {
       throw new Error("Build configuration not found");
     }
+    const platformConfigurations =
+      input.platformConfigurations == null
+        ? null
+        : parsePlatformConfigurations(
+            input.platformConfigurations,
+            exportSettings,
+          );
+    const sharedSettings = {
+      source,
+      sourceId: existing?.sourceId ?? null,
+      scheme,
+      buildConfiguration,
+      defaultAction: input.defaultAction,
+      advancedSettingsJson: JSON.stringify(advanced),
+      autoExport,
+      exportSettingsJson: exportSettings
+        ? JSON.stringify(exportSettings)
+        : null,
+    };
+    const effectiveProfiles =
+      platformConfigurations ??
+      storedPlatformConfigurations(existing?.platformConfigurationsJson);
+    for (const { platform } of effectiveProfiles) {
+      const effective = platformConfiguration(
+        sharedSettings,
+        effectiveProfiles,
+        platform,
+      );
+      if (!effective.autoExport) continue;
+      if (effective.defaultAction !== "ARCHIVE") {
+        throw new Error(
+          `Auto Export requires the Archive action for ${platform}`,
+        );
+      }
+      buildPlatformExportSettings(
+        platform,
+        parseJson(effective.exportSettingsJson),
+      );
+    }
     const savedSource = await prisma.buildSource.upsert({
       where: {
         projectId_relativePath: {
@@ -923,6 +1181,9 @@ export class BuildsService {
         exportSettingsJson: exportSettings
           ? JSON.stringify(exportSettings)
           : null,
+        ...(platformConfigurations && {
+          platformConfigurationsJson: JSON.stringify(platformConfigurations),
+        }),
       },
       update: {
         sourceId: savedSource.id,
@@ -936,6 +1197,9 @@ export class BuildsService {
         exportSettingsJson: exportSettings
           ? JSON.stringify(exportSettings)
           : null,
+        ...(platformConfigurations && {
+          platformConfigurationsJson: JSON.stringify(platformConfigurations),
+        }),
       },
       include: { source: true },
     });
@@ -1297,6 +1561,7 @@ export class BuildsService {
     sourcePath: string;
     scheme?: string | null;
     configuration?: string | null;
+    platform?: BuildPlatform | null;
     requestId: string;
   }) {
     const worktree = await this.requireWorktree(
@@ -1307,6 +1572,12 @@ export class BuildsService {
       kind: input.sourceKind,
       relativePath: input.sourcePath,
     });
+    if (input.platform) {
+      requirePlatformAgent(
+        worktree.codebase.agent,
+        requireBuildPlatform(input.platform),
+      );
+    }
     const job = await this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -1317,8 +1588,9 @@ export class BuildsService {
         source,
         scheme: input.scheme?.trim() || null,
         configuration: input.configuration?.trim() || null,
+        ...(input.platform ? { platform: input.platform } : {}),
       },
-      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}:${input.configuration ?? ""}`,
+      idempotencyKey: `ios:source:inspect:${input.requestId}:${worktree.id}:${source.relativePath}:${input.scheme ?? ""}:${input.configuration ?? ""}:${input.platform ?? ""}`,
       timeoutSeconds: 120,
       visibility: "SYSTEM",
     });
@@ -1330,6 +1602,11 @@ export class BuildsService {
         configurations: stringArray(result.configurations),
         testPlans: stringArray(result.testPlans),
         signingRequirements: signingRequirements(result.signingRequirements),
+        platforms: Array.isArray(result.platforms)
+          ? BUILD_PLATFORMS.filter((platform) =>
+              (result.platforms as unknown[]).includes(platform),
+            )
+          : null,
         headSha:
           typeof result.headSha === "string"
             ? result.headSha
@@ -1354,6 +1631,7 @@ export class BuildsService {
     configurationId?: string | null;
     customConfiguration?: CustomBuildConfigurationInput | null;
     action?: BuildAction | null;
+    platform?: BuildPlatform | null;
     requestId: string;
   }) {
     const worktree = await this.requireWorktree(
@@ -1361,15 +1639,22 @@ export class BuildsService {
       IOS_DESTINATIONS_JOB_KIND,
     );
     const prisma = await getPrismaClient();
+    const platform = requireBuildPlatform(input.platform ?? "IOS");
+    requirePlatformAgent(worktree.codebase.agent, platform);
+    const supportsPlatforms = capabilities(worktree.codebase.agent).includes(
+      XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+    );
     const configuration = await this.resolveConfiguration(
       input,
       worktree.codebase.repositoryId,
+      platform,
     );
     const action = input.action ?? (configuration.defaultAction as BuildAction);
     if (!BUILD_ACTIONS.includes(action))
       throw new Error("Build action is invalid");
-    const genericDestinations = genericBuildDestinations(action);
-    if (action === "ARCHIVE") return genericDestinations;
+    if (!supportsPlatforms && action === "ARCHIVE") {
+      return genericBuildDestinations(action);
+    }
     const job = await this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -1384,16 +1669,19 @@ export class BuildsService {
         scheme: configuration.scheme,
         configuration: configuration.buildConfiguration,
         action,
+        ...(supportsPlatforms ? { platform } : {}),
       },
-      idempotencyKey: `ios:destinations:${input.requestId}:${configuration.id}:${worktree.id}:${action}`,
+      idempotencyKey: `ios:destinations:${input.requestId}:${configuration.id}:${worktree.id}:${action}:${platform}`,
       timeoutSeconds: 120,
       visibility: "SYSTEM",
     });
     try {
       const result = this.result(await this.waitForJob(job.id));
-      return (
-        Array.isArray(result.destinations) ? result.destinations : []
-      ).map((destination) => parseBuildDestination(destination));
+      return (Array.isArray(result.destinations) ? result.destinations : [])
+        .map(parseBuildDestination)
+        .filter(
+          (destination) => buildDestinationPlatform(destination) === platform,
+        );
     } finally {
       await prisma.agentJob.deleteMany({
         where: {
@@ -1476,10 +1764,11 @@ export class BuildsService {
       parseJson(artifact.metadataJson, {}),
       "runnable metadata",
     );
+    const platform = storedBuildPlatform(build);
+    if (!platform)
+      throw new Error("The runnable build platform is unavailable");
     const artifactArchitectures = new Set(
-      stringArray(metadata.architectures).map((value) =>
-        value === "x64" ? "x86_64" : value,
-      ),
+      stringArray(metadata.architectures).map(normalizeArchitecture),
     );
     const cached = await cachedArtifact(build.id, artifact.id);
     const sourceCapabilities = build.agent ? capabilities(build.agent) : [];
@@ -1492,6 +1781,13 @@ export class BuildsService {
           unavailableReason = "NOT_MACOS";
         } else if (!online(agent)) {
           unavailableReason = "OFFLINE";
+        } else if (build.destinationType === "LOCAL_MAC" && !isBuildAgent) {
+          unavailableReason = "LOCAL_MAC_ONLY";
+        } else if (
+          platform !== "IOS" &&
+          !capabilities(agent).includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY)
+        ) {
+          unavailableReason = "AGENT_UPDATE_REQUIRED";
         } else if (isBuildAgent) {
           if (
             !capabilities(agent).includes(IOS_RUN_DESTINATIONS_JOB_KIND) ||
@@ -1514,9 +1810,7 @@ export class BuildsService {
         } else if (
           build.destinationType === "SIMULATOR" &&
           artifactArchitectures.size > 0 &&
-          !artifactArchitectures.has(
-            agent.architecture === "x64" ? "x86_64" : agent.architecture,
-          )
+          !artifactArchitectures.has(normalizeArchitecture(agent.architecture))
         ) {
           unavailableReason = "INCOMPATIBLE_ARCHITECTURE";
         }
@@ -1560,6 +1854,32 @@ export class BuildsService {
     );
     const selectedAgentId = targetAgentId ?? build.agentId;
     if (!selectedAgentId) throw new Error("Build agent is unavailable");
+    const platform = storedBuildPlatform(build);
+    if (!platform)
+      throw new Error("The runnable build platform is unavailable");
+    const platforms = artifactRunPlatforms(
+      platform,
+      build.destinationType,
+      runnableMetadata,
+      selectedAgentId === build.agentId,
+    );
+    const compatibleDestinations = (value: unknown) =>
+      (Array.isArray(value) ? value : [])
+        .map(parseBuildDestination)
+        .filter((destination) =>
+          isArtifactRunDestination(
+            destination,
+            build.destinationType,
+            platforms,
+          ),
+        )
+        .map((destination) =>
+          runnableDestinationCompatibility(
+            destination,
+            runnableMetadata,
+            platform,
+          ),
+        );
     if (selectedAgentId !== build.agentId) {
       const option = (await this.runAgentsForBuild(build.id)).find(
         (entry) => entry.agent.id === selectedAgentId,
@@ -1570,23 +1890,21 @@ export class BuildsService {
       const job = await this.agentControl.createJob({
         agentId: selectedAgentId,
         kind: IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
-        payload: { destinationType: build.destinationType },
+        payload: {
+          destinationType: build.destinationType,
+          ...(capabilities(option.agent).includes(
+            XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+          )
+            ? { platforms }
+            : {}),
+        },
         idempotencyKey: `ios:agent-build-destinations:${cleanName(requestId, "Request ID", 200)}:${build.id}:${selectedAgentId}`,
         timeoutSeconds: 120,
         visibility: "SYSTEM",
       });
       try {
         const result = this.result(await this.waitForJob(job.id));
-        return (Array.isArray(result.destinations) ? result.destinations : [])
-          .map((destination) => parseBuildDestination(destination))
-          .map((destination) =>
-            runnableDestinationCompatibility(destination, runnableMetadata),
-          )
-          .filter(
-            (destination) =>
-              destination.type === build.destinationType &&
-              !destination.generic,
-          );
+        return compatibleDestinations(result.destinations);
       } finally {
         await prisma.agentJob.deleteMany({
           where: {
@@ -1602,6 +1920,7 @@ export class BuildsService {
       build.worktreeId,
       IOS_RUN_DESTINATIONS_JOB_KIND,
     );
+    requirePlatformAgent(worktree.codebase.agent, platform);
     if (
       build.agentId !== worktree.codebase.agentId ||
       build.codebaseId !== worktree.codebaseId
@@ -1616,6 +1935,11 @@ export class BuildsService {
       payload: {
         ...this.identity(worktree),
         destinationType: build.destinationType,
+        ...(capabilities(worktree.codebase.agent).includes(
+          XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+        )
+          ? { platforms }
+          : {}),
       },
       idempotencyKey: `ios:build-destinations:${cleanName(requestId, "Request ID", 200)}:${build.id}`,
       timeoutSeconds: 120,
@@ -1623,15 +1947,7 @@ export class BuildsService {
     });
     try {
       const result = this.result(await this.waitForJob(job.id));
-      return (Array.isArray(result.destinations) ? result.destinations : [])
-        .map((destination) => parseBuildDestination(destination))
-        .map((destination) =>
-          runnableDestinationCompatibility(destination, runnableMetadata),
-        )
-        .filter(
-          (destination) =>
-            destination.type === build.destinationType && !destination.generic,
-        );
+      return compatibleDestinations(result.destinations);
     } finally {
       await prisma.agentJob.deleteMany({
         where: {
@@ -1643,21 +1959,117 @@ export class BuildsService {
     }
   }
 
-  async startBuild(input: {
-    worktreeId: string;
-    configurationId?: string | null;
-    customConfiguration?: CustomBuildConfigurationInput | null;
-    destination: unknown;
-    scriptIds?: string[] | null;
-    action?: BuildAction | null;
-    advancedSettings?: unknown;
-    exportWhenComplete?: boolean | null;
-    exportSettings?: unknown;
-    worktreeCoverage?: boolean;
-    requestId: string;
-    serverUrlKind?: ServerUrlKind | null;
-    telemetryRequestOrigin?: string | null;
-  }) {
+  async startBuilds(input: StartBuildsInput) {
+    const {
+      selections,
+      requestId: rawRequestId,
+      telemetryRequestOrigin,
+      ...context
+    } = input;
+    if (
+      !selections.length ||
+      selections.length > 6 ||
+      new Set(selections.map(({ platform }) => platform)).size !==
+        selections.length
+    ) {
+      throw new Error(
+        "Select at least one build platform and list each platform once",
+      );
+    }
+    if (
+      Boolean(context.configurationId) === Boolean(context.customConfiguration)
+    ) {
+      throw new Error(
+        "Provide exactly one saved or custom build configuration",
+      );
+    }
+    for (const { platform } of selections) requireBuildPlatform(platform);
+    const requestId = cleanName(rawRequestId, "Request ID", 200);
+    const prisma = await getPrismaClient();
+    const requestKey = `${context.worktreeId}:${requestId}`;
+    const payloadDigest = stableDigest({ ...context, selections });
+    const receipt = await prisma.buildBatchRequestReceipt.upsert({
+      where: { requestKey },
+      create: { requestKey, payloadDigest },
+      update: { requestKey },
+    });
+    if (receipt.payloadDigest !== payloadDigest) {
+      throw new Error(
+        "This batch request ID was already used with different settings",
+      );
+    }
+    const results = [];
+    let unconfirmed: Error | undefined;
+    for (const { platform, ...selection } of selections) {
+      const childRequestId = `platform:${stableDigest([requestId, platform])}`;
+      try {
+        const destination = parseBuildDestination(selection.destination);
+        if (buildDestinationPlatform(destination) !== platform) {
+          throw new Error(
+            "The destination does not match the selected build platform",
+          );
+        }
+        const build = await this.startBuild({
+          ...context,
+          ...selection,
+          destination,
+          requestId: childRequestId,
+          telemetryRequestOrigin,
+        });
+        results.push({
+          platform,
+          build,
+          error:
+            build.errorCode === "QUEUE_FAILED"
+              ? (build.error ?? "The build could not be queued")
+              : null,
+        });
+      } catch (error) {
+        const build = await prisma.build.findUnique({
+          where: { requestKey: `${context.worktreeId}:${childRequestId}` },
+          include: buildInclude,
+        });
+        if (build && build.errorCode !== "QUEUE_FAILED") {
+          // A job can already be running even if saving its ID failed. Let the
+          // client replay the original batch so it can recover the same job.
+          unconfirmed ??=
+            error instanceof Error ? error : new Error(String(error));
+          continue;
+        }
+        results.push({
+          platform,
+          build,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    if (unconfirmed) throw unconfirmed;
+    return results;
+  }
+
+  async wasBuildSubmissionRejected({
+    worktreeId,
+    requestId,
+  }: Pick<StartBuildContext, "worktreeId" | "requestId">) {
+    const prisma = await getPrismaClient();
+    const build = await prisma.build.findUnique({
+      where: { requestKey: `${worktreeId}:${requestId.trim()}` },
+      select: { errorCode: true, jobId: true },
+    });
+    return !build || (!build.jobId && build.errorCode === "QUEUE_FAILED");
+  }
+
+  async startBuild(
+    input: StartBuildContext &
+      StartBuildOptions & {
+        worktreeCoverage?: boolean;
+        capturedPlatformConfiguration?: {
+          source: { kind: BuildSourceKind; relativePath: string };
+          scheme: string;
+          buildConfiguration: string;
+        };
+      },
+  ): Promise<Prisma.BuildGetPayload<{ include: typeof buildInclude }>> {
     const requestId = cleanName(input.requestId, "Request ID", 200);
     const requestKey = `${input.worktreeId}:${requestId}`;
     const prisma = await getPrismaClient();
@@ -1665,24 +2077,65 @@ export class BuildsService {
       where: { requestKey },
       include: buildInclude,
     });
-    if (existing) return existing;
+    if (existing) {
+      if (
+        ACTIVE_BUILD_STATUSES.includes(existing.status) &&
+        !existing.jobId &&
+        existing.queuePayloadJson &&
+        existing.agentId &&
+        existing.codebaseId &&
+        existing.worktreeId
+      ) {
+        return this.queueBuild({
+          id: existing.id,
+          requestId,
+          worktreeId: existing.worktreeId,
+          codebaseId: existing.codebaseId,
+          agentId: existing.agentId,
+          payload: JSON.parse(existing.queuePayloadJson),
+        });
+      }
+      return existing;
+    }
+    const destination = parseBuildDestination(input.destination);
+    const platform = requireBuildPlatform(
+      buildDestinationPlatform(destination),
+    );
     const worktree = await this.requireWorktree(
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
     );
+    requirePlatformAgent(worktree.codebase.agent, platform);
     await this.diskSpace?.assertWorktreeCanStart(worktree.id);
-    if (
-      input.worktreeCoverage &&
-      !capabilities(worktree.codebase.agent).includes(
-        IOS_COVERAGE_REPORT_JOB_KIND,
-      )
-    ) {
-      throw new Error("Build agent must be updated for worktree coverage");
+    if (input.worktreeCoverage) {
+      if (!(worktree.baseBranchOverride ?? worktree.codebase.defaultBranch)) {
+        throw new Error("A base branch is required for worktree coverage");
+      }
+      if (
+        !capabilities(worktree.codebase.agent).includes(
+          IOS_COVERAGE_REPORT_JOB_KIND,
+        )
+      ) {
+        throw new Error("Build agent must be updated for worktree coverage");
+      }
     }
-    const configuration = await this.resolveConfiguration(
+    const resolvedConfiguration = await this.resolveConfiguration(
       input,
       worktree.codebase.repositoryId,
+      input.capturedPlatformConfiguration ? undefined : platform,
+      input.capturedPlatformConfiguration != null,
     );
+    const configuration = input.capturedPlatformConfiguration
+      ? {
+          ...resolvedConfiguration,
+          ...input.capturedPlatformConfiguration,
+          sourceId:
+            input.capturedPlatformConfiguration.source.relativePath ===
+            resolvedConfiguration.source.relativePath
+              ? resolvedConfiguration.sourceId
+              : null,
+        }
+      : resolvedConfiguration;
     const observation = configuration.sourceId
       ? await prisma.buildSourceObservation.findUnique({
           where: {
@@ -1704,10 +2157,12 @@ export class BuildsService {
     const exportWhenComplete =
       action === "ARCHIVE" &&
       (input.exportWhenComplete ?? configuration.autoExport);
-    const rawExportSettings =
-      input.exportSettings ?? parseJson(configuration.exportSettingsJson, null);
+    const rawExportSettings = input.capturedPlatformConfiguration
+      ? input.exportSettings
+      : (input.exportSettings ??
+        parseJson(configuration.exportSettingsJson, null));
     const exportSettings = exportWhenComplete
-      ? parseBuildExportSettings(rawExportSettings)
+      ? buildPlatformExportSettings(platform, rawExportSettings)
       : rawExportSettings
         ? parseBuildExportSettings(rawExportSettings)
         : null;
@@ -1716,19 +2171,20 @@ export class BuildsService {
         "Export settings are required when automatic export is enabled",
       );
     }
-    const destination = parseBuildDestination(input.destination);
     if (!BUILD_DESTINATION_TYPES.includes(destination.type)) {
       throw new Error("Destination is invalid");
+    }
+    if (isMacBuildPlatform(platform) !== (destination.type === "LOCAL_MAC")) {
+      throw new Error(
+        "The destination type does not match the selected build platform",
+      );
     }
     if (destination.available === false) {
       throw new Error("The selected build destination is unavailable");
     }
-    if (
-      action === "ARCHIVE" &&
-      (destination.type !== "PHYSICAL_DEVICE" || !destination.generic)
-    ) {
+    if (action === "ARCHIVE" && !isArchiveBuildDestination(destination)) {
       throw new Error(
-        "Archive builds require the generic physical iOS destination",
+        "Archive builds require a generic device or Mac destination for the selected platform",
       );
     }
     if (
@@ -1738,7 +2194,9 @@ export class BuildsService {
       throw new Error("This build action requires a concrete destination");
     }
     const baseAdvanced = objectValue(
-      parseJson(configuration.advancedSettingsJson, {}),
+      input.capturedPlatformConfiguration
+        ? {}
+        : parseJson(configuration.advancedSettingsJson, {}),
       "saved advanced settings",
     );
     const overrideAdvanced = input.advancedSettings
@@ -1791,9 +2249,12 @@ export class BuildsService {
           "The prior Build for Testing result is not compatible with this agent, worktree, and configuration",
         );
       }
-      if (priorBuild.destinationType !== destination.type) {
+      if (
+        priorBuild.destinationType !== destination.type ||
+        storedBuildPlatform(priorBuild) !== platform
+      ) {
         throw new Error(
-          "The prior Build for Testing result uses a different destination type",
+          "The prior Build for Testing result uses a different destination type or platform",
         );
       }
       const priorSnapshot = objectValue(
@@ -1804,13 +2265,13 @@ export class BuildsService {
         priorSnapshot.configuration ?? {},
         "prior Build for Testing configuration snapshot",
       );
-      if (!configuration.id) {
+      if (!configuration.id || priorSnapshot.platform) {
         const priorSource = objectValue(
           priorConfiguration.source ?? {},
           "prior source",
         );
         if (
-          priorConfiguration.kind !== "CUSTOM" ||
+          (!configuration.id && priorConfiguration.kind !== "CUSTOM") ||
           priorSource.kind !== configuration.source.kind ||
           priorSource.relativePath !== configuration.source.relativePath ||
           priorConfiguration.scheme !== configuration.scheme ||
@@ -1818,7 +2279,9 @@ export class BuildsService {
             configuration.buildConfiguration
         ) {
           throw new Error(
-            "The prior Build for Testing result uses different custom source settings",
+            configuration.id
+              ? "The prior Build for Testing result uses different platform source settings"
+              : "The prior Build for Testing result uses different custom source settings",
           );
         }
       }
@@ -1957,6 +2420,7 @@ export class BuildsService {
     const endpointPaths = BUILD_ENDPOINT_PATHS;
     const telemetry = await this.telemetry?.buildSettings();
     const snapshot = {
+      platform,
       repository: {
         id: worktree.codebase.repository.id,
         name: worktree.codebase.repository.name,
@@ -2016,119 +2480,177 @@ export class BuildsService {
       ...(telemetry ? { telemetry } : {}),
       worktreeCoverage: input.worktreeCoverage === true,
     };
+    const payload = {
+      ...this.identity(worktree),
+      buildId,
+      artifactDirectory,
+      derivedDataPath,
+      source,
+      scheme: configuration.scheme,
+      configuration: configuration.buildConfiguration,
+      action,
+      destination,
+      advancedSettings,
+      scripts,
+      server,
+      endpointPaths,
+      ...(telemetry
+        ? {
+            // Older agents still require telemetry URLs on the job wire payload.
+            telemetry: {
+              ...telemetry,
+              localBaseUrl: server.localBaseUrl,
+              remoteBaseUrl: server.remoteBaseUrl,
+              selectedBaseUrl: server.selectedBaseUrl,
+              consoleLogsUrl:
+                server.selectedBaseUrl + endpointPaths.consoleLogs,
+              analyticsEventsUrl:
+                server.selectedBaseUrl + endpointPaths.analyticsEvents,
+            },
+          }
+        : {}),
+      worktreeCoverage: input.worktreeCoverage === true,
+    };
     const buildCreatedAt = new Date();
-    const buildCreation = prisma.build.create({
-      data: {
-        id: buildId,
-        requestKey,
-        requestId,
-        agentId: worktree.codebase.agentId,
-        codebaseId: worktree.codebaseId,
-        worktreeId: worktree.id,
-        repositoryId: worktree.codebase.repository.id,
-        configurationId: configuration.id,
-        status: "QUEUED",
-        action,
-        destinationType: destination.type,
-        destinationJson: JSON.stringify(destination),
-        snapshotJson: JSON.stringify(snapshot),
-        commandSummary,
-        artifactDirectory,
-        createdAt: buildCreatedAt,
-        scriptExecutions: {
-          create: scripts.flatMap((script) => [
-            ...(script.preBuildScript
-              ? [
-                  {
-                    id: randomUUID(),
-                    scriptId: script.id,
-                    phase: "PRE_BUILD",
-                    position: script.position,
-                    nameSnapshot: script.name,
-                    sourceSnapshot: script.preBuildScript,
-                    timeoutSeconds: script.timeoutSeconds,
-                    failureBehavior: script.failureBehavior,
-                  },
-                ]
-              : []),
-            ...(script.postBuildScript
-              ? [
-                  {
-                    id: randomUUID(),
-                    scriptId: script.id,
-                    phase: "POST_BUILD",
-                    position: script.position,
-                    nameSnapshot: script.name,
-                    sourceSnapshot: script.postBuildScript,
-                    timeoutSeconds: script.timeoutSeconds,
-                    failureBehavior: script.failureBehavior,
-                  },
-                ]
-              : []),
-          ]),
-        },
-      },
-    });
-    await buildCreation;
     try {
-      const job = await this.agentControl.createJob({
-        agentId: worktree.codebase.agentId,
-        codebaseId: worktree.codebaseId,
-        worktreeId: worktree.id,
-        kind: IOS_BUILD_JOB_KIND,
-        payload: {
-          ...this.identity(worktree),
-          buildId,
-          artifactDirectory,
-          derivedDataPath,
-          source,
-          scheme: configuration.scheme,
-          configuration: configuration.buildConfiguration,
+      await prisma.build.create({
+        data: {
+          id: buildId,
+          requestKey,
+          requestId,
+          agentId: worktree.codebase.agentId,
+          codebaseId: worktree.codebaseId,
+          worktreeId: worktree.id,
+          repositoryId: worktree.codebase.repository.id,
+          configurationId: configuration.id,
+          status: "QUEUED",
           action,
-          destination,
-          advancedSettings,
-          scripts,
-          server,
-          endpointPaths,
-          ...(telemetry
-            ? {
-                // Older agents still require telemetry URLs on the job wire payload.
-                telemetry: {
-                  ...telemetry,
-                  localBaseUrl: server.localBaseUrl,
-                  remoteBaseUrl: server.remoteBaseUrl,
-                  selectedBaseUrl: server.selectedBaseUrl,
-                  consoleLogsUrl:
-                    server.selectedBaseUrl + endpointPaths.consoleLogs,
-                  analyticsEventsUrl:
-                    server.selectedBaseUrl + endpointPaths.analyticsEvents,
-                },
-              }
-            : {}),
-          worktreeCoverage: input.worktreeCoverage === true,
+          destinationType: destination.type,
+          destinationJson: JSON.stringify(destination),
+          snapshotJson: JSON.stringify(snapshot),
+          queuePayloadJson: JSON.stringify(payload),
+          commandSummary,
+          artifactDirectory,
+          createdAt: buildCreatedAt,
+          scriptExecutions: {
+            create: scripts.flatMap((script) => [
+              ...(script.preBuildScript
+                ? [
+                    {
+                      id: randomUUID(),
+                      scriptId: script.id,
+                      phase: "PRE_BUILD",
+                      position: script.position,
+                      nameSnapshot: script.name,
+                      sourceSnapshot: script.preBuildScript,
+                      timeoutSeconds: script.timeoutSeconds,
+                      failureBehavior: script.failureBehavior,
+                    },
+                  ]
+                : []),
+              ...(script.postBuildScript
+                ? [
+                    {
+                      id: randomUUID(),
+                      scriptId: script.id,
+                      phase: "POST_BUILD",
+                      position: script.position,
+                      nameSnapshot: script.name,
+                      sourceSnapshot: script.postBuildScript,
+                      timeoutSeconds: script.timeoutSeconds,
+                      failureBehavior: script.failureBehavior,
+                    },
+                  ]
+                : []),
+            ]),
+          },
         },
-        idempotencyKey: `ios:build:${requestId}:${worktree.id}`,
-        timeoutSeconds: 7 * 24 * 60 * 60,
-      });
-      await prisma.build.update({
-        where: { id: buildId },
-        data: { jobId: job.id },
       });
     } catch (error) {
-      await prisma.build.update({
-        where: { id: buildId },
-        data: {
-          status: "FAILED",
-          errorCode: "QUEUE_FAILED",
-          error: error instanceof Error ? error.message : String(error),
-          finishedAt: new Date(),
-        },
+      if (!(
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "P2002"
+      )) {
+        throw error;
+      }
+      const concurrent = await prisma.build.findUnique({
+        where: { requestKey },
+        select: { id: true },
       });
-      throw error;
+      if (!concurrent) throw error;
+      return this.startBuild(input);
     }
-    this.publish(buildId);
+    return this.queueBuild({
+      id: buildId,
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      requestId,
+      payload,
+    });
+  }
+
+  private async queueBuild(input: {
+    id: string;
+    agentId: string;
+    codebaseId: string;
+    worktreeId: string;
+    requestId: string;
+    payload: unknown;
+  }) {
+    const { id, agentId, codebaseId, worktreeId, requestId, payload } = input;
+    const prisma = await getPrismaClient();
+    const idempotencyKey = `ios:build:${requestId}:${worktreeId}`;
+    let job;
+    try {
+      job = await this.agentControl.createJob({
+        agentId,
+        codebaseId,
+        worktreeId,
+        kind: IOS_BUILD_JOB_KIND,
+        payload,
+        idempotencyKey,
+        timeoutSeconds: 7 * 24 * 60 * 60,
+      });
+    } catch (error) {
+      job = await this.agentControl.getJobByIdempotencyKey(
+        agentId,
+        idempotencyKey,
+      );
+      if (!job) {
+        await prisma.build.updateMany({
+          where: { id, jobId: null, status: "QUEUED" },
+          data: {
+            status: "FAILED",
+            errorCode: "QUEUE_FAILED",
+            error: error instanceof Error ? error.message : String(error),
+            queuePayloadJson: null,
+            finishedAt: new Date(),
+          },
+        });
+        this.publish(id);
+        throw error;
+      }
+    }
+    const attached = await prisma.build.update({
+      where: { id },
+      data: { jobId: job.id, queuePayloadJson: null },
+      select: { status: true },
+    });
+    if (attached?.status === "CANCELLED") {
+      await this.agentControl.cancelJob(job.id);
+    } else if (
+      attached &&
+      ACTIVE_BUILD_STATUSES.includes(attached.status) &&
+      FINAL_JOB_STATUSES.has(job.status)
+    ) {
+      await this.projectBuildCompletion(job);
+    }
+    this.publish(id);
     return prisma.build.findUniqueOrThrow({
-      where: { id: buildId },
+      where: { id },
       include: buildInclude,
     });
   }
@@ -2163,6 +2685,14 @@ export class BuildsService {
       snapshot.configuration ?? {},
       "build configuration snapshot",
     );
+    const { source, scheme, buildConfiguration } = snapshotConfiguration;
+    const capturedSource =
+      snapshot.platform ||
+      (source != null &&
+        typeof scheme === "string" &&
+        typeof buildConfiguration === "string")
+        ? parseBuildSource(source)
+        : null;
     const snapshotScripts = Array.isArray(snapshot.scripts)
       ? snapshot.scripts
       : [];
@@ -2201,6 +2731,17 @@ export class BuildsService {
             },
           }
         : { configurationId }),
+      ...(capturedSource && {
+        capturedPlatformConfiguration: {
+          source: capturedSource,
+          scheme: cleanName(String(scheme ?? ""), "Scheme", 256),
+          buildConfiguration: cleanName(
+            String(buildConfiguration ?? ""),
+            "Xcode configuration",
+            256,
+          ),
+        },
+      }),
       serverUrlKind: (
         snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
       )?.selectedUrlKind,
@@ -2234,23 +2775,6 @@ export class BuildsService {
     serverUrlKind?: ServerUrlKind | null;
     telemetryRequestOrigin?: string | null;
   }) {
-    const prisma = await getPrismaClient();
-    const coverageWorktree = await prisma.worktree.findUnique({
-      where: { id: input.worktreeId },
-      select: {
-        baseBranchOverride: true,
-        codebase: { select: { defaultBranch: true } },
-      },
-    });
-    if (
-      !coverageWorktree ||
-      !(
-        coverageWorktree.baseBranchOverride ??
-        coverageWorktree.codebase.defaultBranch
-      )
-    ) {
-      throw new Error("A base branch is required for worktree coverage");
-    }
     const advanced = objectValue(
       input.advancedSettings ?? {},
       "coverage advanced settings",
@@ -3061,14 +3585,18 @@ export class BuildsService {
     if (!build) throw new Error("Build not found");
     if (!ACTIVE_BUILD_STATUSES.includes(build.status)) return this.getBuild(id);
     if (build.jobId) await this.agentControl.cancelJob(build.jobId);
-    await prisma.build.update({
+    const cancelled = await prisma.build.update({
       where: { id },
       data: {
         status: "CANCELLED",
+        queuePayloadJson: null,
         finishedAt: new Date(),
         errorCode: "CANCELLED",
       },
     });
+    if (!build.jobId && cancelled.jobId) {
+      await this.agentControl.cancelJob(cancelled.jobId);
+    }
     this.publish(id);
     return this.getBuild(id);
   }
@@ -3268,25 +3796,37 @@ export class BuildsService {
     if (!destinations.length)
       throw new Error("Select at least one destination");
     if (
-      new Set(
-        destinations.map(
-          (destination) => `${destination.type}:${destination.id}`,
-        ),
-      ).size !== destinations.length
+      new Set(destinations.map(destinationKey)).size !== destinations.length
     ) {
       throw new Error("Run destinations must be unique");
-    }
-    if (
-      destinations.some(
-        (destination) => destination.type !== build.destinationType,
-      )
-    ) {
-      throw new Error("Run destinations must match the build destination type");
     }
     const buildAgentId = build.agentId ?? build.worktree?.codebase.agentId;
     const targetAgentId = input.targetAgentId ?? buildAgentId;
     if (!targetAgentId) throw new Error("Build agent is unavailable");
     const sameAgent = targetAgentId === buildAgentId;
+    const platform = storedBuildPlatform(build);
+    if (!platform)
+      throw new Error("The runnable build platform is unavailable");
+    const compatiblePlatforms = artifactRunPlatforms(
+      platform,
+      build.destinationType,
+      metadata,
+      sameAgent,
+    );
+    if (
+      destinations.some(
+        (destination) =>
+          !isArtifactRunDestination(
+            destination,
+            build.destinationType,
+            compatiblePlatforms,
+          ),
+      )
+    ) {
+      throw new Error(
+        "Run destinations must match the build destination type and platform",
+      );
+    }
     if (!sameAgent) {
       const runAgent = (await this.runAgentsForBuild(build.id)).find(
         (entry) => entry.agent.id === targetAgentId,
@@ -3303,8 +3843,7 @@ export class BuildsService {
     const resolvedDestinations = destinations.map((destination) =>
       availableDestinations.find(
         (available) =>
-          available.type === destination.type &&
-          available.id === destination.id,
+          destinationKey(available) === destinationKey(destination),
       ),
     );
     if (resolvedDestinations.some((destination) => !destination)) {
@@ -3352,10 +3891,7 @@ export class BuildsService {
               destinationKey: key,
               targetAgentId,
               status: sameAgent ? "QUEUED" : "TRANSFERRING",
-              commandSummary:
-                destination.type === "SIMULATOR"
-                  ? `open -a Simulator --args -CurrentDeviceUDID ${destination.id}; xcrun simctl install/launch ${destination.id}`
-                  : `xcrun devicectl device install/process launch --device ${destination.id}`,
+              commandSummary: deploymentCommandSummary(destination),
             },
           })),
       );
@@ -3509,11 +4045,14 @@ export class BuildsService {
     }
     const archive = build.artifacts.find((entry) => entry.kind === "ARCHIVE");
     if (!archive) throw new Error("Build does not contain an archive");
-    const settings = parseBuildExportSettings(input.settings);
+    const platform = storedBuildPlatform(build);
+    if (!platform) throw new Error("The archive platform is unavailable");
+    const settings = buildPlatformExportSettings(platform, input.settings);
     const worktree = await this.requireWorktree(
       build.worktree.id,
       IOS_EXPORT_JOB_KIND,
     );
+    requirePlatformAgent(worktree.codebase.agent, platform);
     const exportId = randomUUID();
     const row = await prisma.buildExport.create({
       data: {
@@ -3537,6 +4076,7 @@ export class BuildsService {
           artifactDirectory: build.artifactDirectory,
           archiveRelativePath: archive.relativePath,
           settings,
+          ...(platform !== "IOS" ? { platform } : {}),
         },
         idempotencyKey: `ios:export:${build.id}:${input.requestId}`,
         timeoutSeconds: 3_600,
@@ -3664,13 +4204,25 @@ export class BuildsService {
 
   private async projectBuildCompletion(job: {
     id: string;
+    agentId?: string;
+    payloadJson?: string;
     status: string;
     resultJson: string | null;
     error: string | null;
   }) {
     const prisma = await getPrismaClient();
+    const payload = parseJson(job.payloadJson ?? null, {}) as JsonObject | null;
+    const pending =
+      typeof payload?.buildId === "string" && job.agentId && job.payloadJson
+        ? {
+            id: payload.buildId,
+            agentId: job.agentId,
+            jobId: null,
+            queuePayloadJson: job.payloadJson,
+          }
+        : null;
     const build = await prisma.build.findFirst({
-      where: { jobId: job.id },
+      where: pending ? { OR: [{ jobId: job.id }, pending] } : { jobId: job.id },
       include: { worktree: { select: { highlightColor: true } } },
     });
     if (!build) return;
@@ -3720,6 +4272,11 @@ export class BuildsService {
       await transaction.build.update({
         where: { id: build.id },
         data: {
+          ...(!build.jobId &&
+            build.queuePayloadJson && {
+              jobId: job.id,
+              queuePayloadJson: null,
+            }),
           status,
           errorCode:
             typeof result.errorCode === "string"
@@ -3876,10 +4433,7 @@ export class BuildsService {
               status === "SUCCEEDED"
                 ? "IOS_BUILD_SUCCEEDED"
                 : "IOS_BUILD_FAILED",
-            title:
-              status === "SUCCEEDED"
-                ? "iOS build succeeded"
-                : "iOS build failed",
+            title: `${buildPlatformName(storedBuildPlatform(build))} build ${status === "SUCCEEDED" ? "succeeded" : "failed"}`,
             body: context.join(" · ") || `Build ${build.id}`,
             href: `/dashboard/builds/${build.id}`,
             resourceKind: "BUILD",

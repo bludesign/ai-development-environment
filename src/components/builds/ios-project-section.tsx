@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -59,10 +59,18 @@ import { formatDateValue } from "@/lib/date-format";
 import type {
   BuildAction,
   BuildConfiguration,
-  BuildDestination,
+  BuildPlatform,
+  BuildPlatformConfiguration,
   BuildScript,
   IosAppProject,
 } from "./types";
+import {
+  BUILD_PLATFORMS,
+  configurationPlatforms,
+  platformLabel,
+  settingsForPlatform,
+} from "./types";
+import { BUILD_PLATFORM_CONFIGURATION_FIELDS } from "./graphql-fields";
 import { CollectDsymsSelect } from "./collect-dsyms-select";
 import {
   BUILD_CONFIGURATION_ICON_KEYS,
@@ -71,6 +79,7 @@ import {
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
+  exportSettingsForPlatform,
   type ExportSettingsValue,
 } from "./export-settings-form";
 
@@ -79,6 +88,7 @@ const PROJECT_FIELDS = `
   configurations {
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
+    platformConfigurations { ${BUILD_PLATFORM_CONFIGURATION_FIELDS} }
     observation { id scopeKey status schemes configurations testPlans error stale headSha xcodeVersion lastParseAttemptAt lastParsedAt }
   }
   allowedScripts {
@@ -98,6 +108,7 @@ type SourceInspection = {
   configurations: string[];
   testPlans: string[];
   signingRequirements: BuildSigningRequirement[];
+  platforms?: BuildPlatform[] | null;
   headSha: string | null;
   xcodeVersion: string | null;
 };
@@ -250,7 +261,7 @@ export function IosProjectSection({
   };
 
   const updateDefaultDestinationType = async (
-    defaultDestinationType: BuildDestination["type"],
+    defaultDestinationType: IosAppProject["defaultDestinationType"],
   ) => {
     if (!project) return;
     setBusy(true);
@@ -258,7 +269,7 @@ export function IosProjectSection({
     try {
       const data = await controlPlaneRequest<{
         updateIosAppProject: {
-          defaultDestinationType: BuildDestination["type"];
+          defaultDestinationType: IosAppProject["defaultDestinationType"];
         };
       }>(
         `mutation UpdateIosAppProject($id: ID!, $defaultDestinationType: BuildDestinationType!) {
@@ -379,7 +390,7 @@ export function IosProjectSection({
                 value={project.defaultDestinationType}
                 onValueChange={(value) =>
                   void updateDefaultDestinationType(
-                    value as BuildDestination["type"],
+                    value as IosAppProject["defaultDestinationType"],
                   )
                 }
               >
@@ -435,6 +446,11 @@ export function IosProjectSection({
                             </h3>
                             <p className="font-mono text-xs text-muted-foreground">
                               {configuration.source.relativePath}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {configurationPlatforms(configuration)
+                                .map(({ platform }) => platformLabel(platform))
+                                .join(" · ")}
                             </p>
                           </div>
                           <Badge
@@ -598,6 +614,7 @@ export function BuildConfigurationDialog({
   onSaved,
   onCustom,
   inline = false,
+  platformEditor,
 }: {
   codebaseId: string;
   worktreeId: string;
@@ -607,6 +624,7 @@ export function BuildConfigurationDialog({
   onSaved: () => Promise<void>;
   onCustom?: (configuration: BuildConfiguration) => void;
   inline?: boolean;
+  platformEditor?: BuildPlatform;
 }) {
   const t = useTranslations("builds");
   const [name, setName] = useState(configuration?.name ?? "");
@@ -669,8 +687,19 @@ export function BuildConfigurationDialog({
   );
   const [loadingSources, setLoadingSources] = useState(false);
   const [inspecting, setInspecting] = useState(false);
+  const inspectionRequest = useRef(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [platforms, setPlatforms] = useState<BuildPlatformConfiguration[]>(
+    () =>
+      configuration
+        ? configurationPlatforms(configuration)
+        : [{ platform: "IOS" }],
+  );
+  const [editingPlatform, setEditingPlatform] = useState<BuildPlatform | null>(
+    null,
+  );
+  const inspectedPlatform = platformEditor ?? platforms[0]?.platform ?? "IOS";
 
   const discover = useCallback(async () => {
     setLoadingSources(true);
@@ -699,7 +728,9 @@ export function BuildConfigurationDialog({
   const inspect = async (
     candidate: SourceCandidate,
     selectedScheme?: string,
+    selectedConfiguration = buildConfiguration,
   ) => {
+    const request = ++inspectionRequest.current;
     setInspecting(true);
     setError(null);
     try {
@@ -709,7 +740,7 @@ export function BuildConfigurationDialog({
         `mutation InspectBuildSource($input: InspectBuildSourceInput!) {
           inspectBuildSource(input: $input) {
             source { kind relativePath }
-            schemes configurations testPlans headSha xcodeVersion
+            schemes configurations testPlans platforms headSha xcodeVersion
             signingRequirements {
               bundleId name target platform teamId provisioningProfileSpecifier
             }
@@ -721,13 +752,30 @@ export function BuildConfigurationDialog({
             sourceKind: candidate.kind,
             sourcePath: candidate.relativePath,
             scheme: selectedScheme || null,
-            configuration: null,
+            configuration:
+              platformEditor && selectedScheme
+                ? selectedConfiguration || null
+                : null,
+            ...(platformEditor ? { platform: platformEditor } : {}),
             requestId: createClientId(),
           },
         },
       );
+      if (request !== inspectionRequest.current) return;
       setInspection(data.inspectBuildSource);
-      setParseStatus("VALID");
+      const supportedPlatforms = data.inspectBuildSource.platforms;
+      const unsupported =
+        platformEditor &&
+        selectedScheme &&
+        supportedPlatforms &&
+        !supportedPlatforms.includes(platformEditor);
+      setParseStatus(unsupported ? "INVALID" : "VALID");
+      if (unsupported)
+        setError(
+          t("unsupportedBuildPlatform", {
+            platform: platformLabel(inspectedPlatform),
+          }),
+        );
       setInspectionStale(false);
       setSourcePath(candidate.relativePath);
       setSourceKind(candidate.kind);
@@ -738,13 +786,29 @@ export function BuildConfigurationDialog({
         );
       }
     } catch (value) {
+      if (request !== inspectionRequest.current) return;
       setParseStatus("ERROR");
       setInspectionStale(Boolean(inspection));
       setError(value instanceof Error ? value.message : String(value));
     } finally {
-      setInspecting(false);
+      if (request === inspectionRequest.current) setInspecting(false);
     }
   };
+
+  useEffect(() => {
+    if (!platformEditor || !sourcePath) return;
+    const timer = window.setTimeout(
+      () =>
+        void inspect({ kind: sourceKind, relativePath: sourcePath }, scheme),
+      0,
+    );
+    return () => {
+      window.clearTimeout(timer);
+      inspectionRequest.current += 1;
+    };
+    // Inspect the inherited source when the platform editor first opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platformEditor]);
 
   const parseSigningRequirements = async () => {
     if (!sourcePath || !scheme || !buildConfiguration) {
@@ -769,6 +833,9 @@ export function BuildConfigurationDialog({
           sourcePath,
           scheme,
           configuration: buildConfiguration,
+          ...(inspectedPlatform !== "IOS"
+            ? { platform: inspectedPlatform }
+            : {}),
           requestId: createClientId(),
         },
       },
@@ -776,60 +843,69 @@ export function BuildConfigurationDialog({
     return data.inspectBuildSource.signingRequirements;
   };
 
+  const draft = (): BuildConfiguration => {
+    let advancedSettings: unknown;
+    try {
+      advancedSettings = JSON.parse(advanced);
+      if (
+        !advancedSettings ||
+        typeof advancedSettings !== "object" ||
+        Array.isArray(advancedSettings)
+      ) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(t("advancedJsonInvalid"));
+    }
+    advancedSettings = {
+      ...(advancedSettings as Record<string, unknown>),
+      testPlan: testPlan === "__SCHEME_DEFAULT__" ? null : testPlan,
+      parseTestResults,
+      collectDsyms,
+    };
+    return {
+      id: "__custom__",
+      name: "Custom",
+      iconKey: null,
+      source: { id: "", kind: sourceKind, relativePath: sourcePath },
+      scheme,
+      buildConfiguration,
+      defaultAction: action,
+      advancedSettings: advancedSettings as Record<string, unknown>,
+      autoExport: action === "ARCHIVE" && autoExport,
+      exportSettings: exportSettingsForPlatform(
+        inspectedPlatform,
+        exportSettings,
+      ),
+      platformConfigurations: platforms,
+      observation: inspection
+        ? {
+            id: "",
+            scopeKey: `worktree:${worktreeId}`,
+            status: parseStatus,
+            schemes: inspection.schemes,
+            configurations: inspection.configurations,
+            testPlans: inspection.testPlans,
+            error: null,
+            stale: inspectionStale,
+            headSha: inspection.headSha,
+            xcodeVersion: inspection.xcodeVersion,
+            lastParseAttemptAt: new Date().toISOString(),
+            lastParsedAt: new Date().toISOString(),
+          }
+        : null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  };
+
   const save = async () => {
     setBusy(true);
     setError(null);
     try {
-      let advancedSettings: unknown;
-      try {
-        advancedSettings = JSON.parse(advanced);
-        if (
-          !advancedSettings ||
-          typeof advancedSettings !== "object" ||
-          Array.isArray(advancedSettings)
-        ) {
-          throw new Error();
-        }
-      } catch {
-        throw new Error(t("advancedJsonInvalid"));
-      }
-      advancedSettings = {
-        ...(advancedSettings as Record<string, unknown>),
-        testPlan: testPlan === "__SCHEME_DEFAULT__" ? null : testPlan,
-        parseTestResults,
-        collectDsyms,
-      };
+      const value = draft();
       if (onCustom) {
-        onCustom({
-          id: "__custom__",
-          name: "Custom",
-          iconKey: null,
-          source: { id: "", kind: sourceKind, relativePath: sourcePath },
-          scheme,
-          buildConfiguration,
-          defaultAction: action,
-          advancedSettings: advancedSettings as Record<string, unknown>,
-          autoExport: action === "ARCHIVE" && autoExport,
-          exportSettings,
-          observation: inspection
-            ? {
-                id: "",
-                scopeKey: `worktree:${worktreeId}`,
-                status: parseStatus,
-                schemes: inspection.schemes,
-                configurations: inspection.configurations,
-                testPlans: inspection.testPlans,
-                error: null,
-                stale: inspectionStale,
-                headSha: inspection.headSha,
-                xcodeVersion: inspection.xcodeVersion,
-                lastParseAttemptAt: new Date().toISOString(),
-                lastParsedAt: new Date().toISOString(),
-              }
-            : null,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        });
+        onCustom(value);
         onOpenChange(false);
         return;
       }
@@ -850,9 +926,10 @@ export function BuildConfigurationDialog({
             scheme,
             buildConfiguration,
             defaultAction: action,
-            advancedSettings,
+            advancedSettings: value.advancedSettings,
             autoExport: action === "ARCHIVE" && autoExport,
-            exportSettings,
+            exportSettings: value.exportSettings,
+            platformConfigurations: platforms,
           },
         },
       );
@@ -875,11 +952,13 @@ export function BuildConfigurationDialog({
     }
   };
 
-  const title = onCustom
-    ? t("customBuild")
-    : configuration
-      ? t("editConfiguration")
-      : t("newConfiguration");
+  const title = platformEditor
+    ? t("editPlatformSettings", { platform: platformLabel(platformEditor) })
+    : onCustom
+      ? t("customBuild")
+      : configuration
+        ? t("editConfiguration")
+        : t("newConfiguration");
   const content = (
     <>
       {error && (
@@ -888,6 +967,105 @@ export function BuildConfigurationDialog({
         </Alert>
       )}
       <div className="space-y-5">
+        {!platformEditor && (
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">
+              {t("buildPlatforms")}
+            </legend>
+            <p className="text-xs text-muted-foreground">
+              {t("platformSettingsDescription")}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {BUILD_PLATFORMS.map((platform) => {
+                const enabled = platforms.some(
+                  (entry) => entry.platform === platform,
+                );
+                return (
+                  <div
+                    className="flex items-center gap-2 rounded-lg border px-2 py-1"
+                    key={platform}
+                  >
+                    <label className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={enabled}
+                        disabled={enabled && platforms.length === 1}
+                        onCheckedChange={(checked) => {
+                          setPlatforms((current) =>
+                            checked
+                              ? [...current, { platform }]
+                              : current.filter(
+                                  (entry) => entry.platform !== platform,
+                                ),
+                          );
+                        }}
+                      />
+                      {platformLabel(platform)}
+                    </label>
+                    {enabled && (
+                      <Button
+                        aria-label={t("editPlatformSettings", {
+                          platform: platformLabel(platform),
+                        })}
+                        disabled={!sourcePath || !scheme || !buildConfiguration}
+                        onClick={() => {
+                          try {
+                            draft();
+                            setEditingPlatform(platform);
+                          } catch (value) {
+                            setError(
+                              value instanceof Error
+                                ? value.message
+                                : String(value),
+                            );
+                          }
+                        }}
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <Settings2 />
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {platforms.length > 1 && (
+              <div className="flex items-center gap-2">
+                <Label htmlFor="default-build-platform">
+                  {t("defaultBuildPlatform")}
+                </Label>
+                <Select
+                  value={platforms[0]?.platform}
+                  onValueChange={(value) => {
+                    setPlatforms((current) => {
+                      const selected = current.find(
+                        (entry) => entry.platform === value,
+                      );
+                      return selected
+                        ? [
+                            selected,
+                            ...current.filter((entry) => entry !== selected),
+                          ]
+                        : current;
+                    });
+                  }}
+                >
+                  <SelectTrigger id="default-build-platform">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {platforms.map(({ platform }) => (
+                      <SelectItem key={platform} value={platform}>
+                        {platformLabel(platform)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </fieldset>
+        )}
         {!onCustom && (
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
@@ -1012,7 +1190,7 @@ export function BuildConfigurationDialog({
                     }}
                     value={scheme}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger aria-label={t("scheme")}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1032,7 +1210,11 @@ export function BuildConfigurationDialog({
                 <div className="space-y-2">
                   <Label>{t("configuration")}</Label>
                   <Select
-                    onValueChange={setBuildConfiguration}
+                    onValueChange={(value) => {
+                      setBuildConfiguration(value);
+                      if (platformEditor)
+                        void inspect(inspection.source, scheme, value);
+                    }}
                     value={buildConfiguration}
                   >
                     <SelectTrigger>
@@ -1114,7 +1296,11 @@ export function BuildConfigurationDialog({
                 key={`${sourceKind}:${sourcePath}:${scheme}:${buildConfiguration}`}
                 onChange={setExportSettings}
                 onParseSigningRequirements={parseSigningRequirements}
-                value={exportSettings}
+                platform={inspectedPlatform}
+                value={exportSettingsForPlatform(
+                  inspectedPlatform,
+                  exportSettings,
+                )}
               />
             )}
           </section>
@@ -1191,6 +1377,7 @@ export function BuildConfigurationDialog({
           disabled={
             busy ||
             inspecting ||
+            parseStatus === "INVALID" ||
             (!onCustom && !name.trim()) ||
             !sourcePath ||
             !scheme ||
@@ -1201,6 +1388,72 @@ export function BuildConfigurationDialog({
           {busy && <Spinner />} {t(onCustom ? "useSettings" : "save")}
         </Button>
       </DialogFooter>
+      {editingPlatform && (
+        <BuildConfigurationDialog
+          codebaseId={codebaseId}
+          configuration={settingsForPlatform(draft(), editingPlatform)}
+          key={editingPlatform}
+          onCustom={(value) => {
+            const base = draft();
+            const advancedSettings = Object.fromEntries(
+              Object.entries(value.advancedSettings).filter(
+                ([key, setting]) =>
+                  JSON.stringify(setting) !==
+                  JSON.stringify(base.advancedSettings[key]),
+              ),
+            );
+            const exportSettings = Object.fromEntries(
+              Object.entries(value.exportSettings ?? {}).filter(
+                ([key, setting]) =>
+                  JSON.stringify(setting) !==
+                  JSON.stringify(base.exportSettings?.[key]),
+              ),
+            );
+            setPlatforms((current) =>
+              current.map((entry) =>
+                entry.platform !== editingPlatform
+                  ? entry
+                  : {
+                      platform: editingPlatform,
+                      ...(value.source.relativePath !==
+                        base.source.relativePath ||
+                      value.source.kind !== base.source.kind
+                        ? {
+                            sourcePath: value.source.relativePath,
+                            sourceKind: value.source.kind,
+                          }
+                        : {}),
+                      ...(value.scheme !== base.scheme
+                        ? { scheme: value.scheme }
+                        : {}),
+                      ...(value.buildConfiguration !== base.buildConfiguration
+                        ? { buildConfiguration: value.buildConfiguration }
+                        : {}),
+                      ...(value.defaultAction !== base.defaultAction
+                        ? { defaultAction: value.defaultAction }
+                        : {}),
+                      ...(value.autoExport !== base.autoExport
+                        ? { autoExport: value.autoExport }
+                        : {}),
+                      ...(Object.keys(advancedSettings).length
+                        ? { advancedSettings }
+                        : {}),
+                      ...(Object.keys(exportSettings).length
+                        ? { exportSettings }
+                        : {}),
+                    },
+              ),
+            );
+          }}
+          onOpenChange={(open) => {
+            if (!open) setEditingPlatform(null);
+          }}
+          onSaved={async () => {}}
+          open
+          platformEditor={editingPlatform}
+          worktreeId={worktreeId}
+        />
+      )}
     </>
   );
 

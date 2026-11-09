@@ -126,7 +126,9 @@ function toProfile(
     raw.Entitlements && typeof raw.Entitlements === "object"
       ? (raw.Entitlements as Record<string, unknown>)
       : {};
-  const applicationIdentifier = text(entitlements["application-identifier"]);
+  const applicationIdentifier =
+    text(entitlements["application-identifier"]) ??
+    text(entitlements["com.apple.application-identifier"]);
   const teamId =
     stringList(raw.TeamIdentifier)[0] ??
     text(entitlements["com.apple.developer.team-identifier"]);
@@ -144,9 +146,26 @@ function toProfile(
     teamName: text(raw.TeamName),
     bundleId,
     type: provisioningProfileType({
-      getTaskAllow: entitlements["get-task-allow"] === true,
+      getTaskAllow:
+        entitlements["get-task-allow"] === true ||
+        entitlements["com.apple.security.get-task-allow"] === true,
       hasProvisionedDevices: stringList(raw.ProvisionedDevices).length > 0,
       provisionsAllDevices: raw.ProvisionsAllDevices === true,
+      hasDeveloperIdCertificate: stringList(raw.DeveloperCertificates).some(
+        (encoded) => {
+          try {
+            const certificate = new X509Certificate(
+              Buffer.from(encoded, "base64"),
+            );
+            return (
+              certificateType(commonName(certificate)) ===
+              "Developer ID Application"
+            );
+          } catch {
+            return false;
+          }
+        },
+      ),
     }),
     platforms: stringList(raw.Platform),
     expiresAt,
@@ -486,25 +505,28 @@ async function bundleIdentifier(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<string | null> {
-  try {
-    const result = await captureCommand({
-      command: "/usr/bin/plutil",
-      args: [
-        "-extract",
-        "CFBundleIdentifier",
-        "raw",
-        "-o",
-        "-",
-        join(bundlePath, "Info.plist"),
-      ],
-      timeoutMs: Math.min(timeoutMs, 5_000),
-      signal,
-    });
-    const value = result.stdout.trim();
-    return result.exitCode === 0 && value ? value : null;
-  } catch {
-    return null;
+  for (const name of ["Info.plist", "Contents/Info.plist"]) {
+    try {
+      const result = await captureCommand({
+        command: "/usr/bin/plutil",
+        args: [
+          "-extract",
+          "CFBundleIdentifier",
+          "raw",
+          "-o",
+          "-",
+          join(bundlePath, name),
+        ],
+        timeoutMs: Math.min(timeoutMs, 5_000),
+        signal,
+      });
+      const value = result.stdout.trim();
+      if (result.exitCode === 0 && value) return value;
+    } catch {
+      continue;
+    }
   }
+  return null;
 }
 
 async function embeddedProfile(
@@ -518,6 +540,7 @@ async function embeddedProfile(
   for (const name of [
     "embedded.mobileprovision",
     "embedded.provisionprofile",
+    "Contents/embedded.provisionprofile",
   ]) {
     const path = join(bundlePath, name);
     try {

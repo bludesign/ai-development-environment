@@ -403,6 +403,7 @@ const mockTranslations = {
     ticket: "Ticket",
     staleTicket: "Some ticket data is stale because Jira could not be reached.",
     openInJira: "Open in Jira",
+    copyLink: "Copy link",
     worktreeAction: "Create worktree",
     ticketWorktreeTitle: "Create from {issueKey}",
     ticketWorktreeDescription:

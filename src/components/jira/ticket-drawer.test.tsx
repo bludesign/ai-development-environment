@@ -34,7 +34,26 @@ afterEach(async () => {
 });
 
 describe("JiraTicketDrawer", () => {
-  test("opens the ticket worktree popup from the sidebar action", async () => {
+  test("copies the Jira link and opens the ticket worktree popup from the sidebar actions", async ({
+    onTestFinished,
+  }) => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(
+      navigator,
+      "clipboard",
+    );
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    onTestFinished(() => {
+      if (originalClipboard) {
+        Object.defineProperty(navigator, "clipboard", originalClipboard);
+      } else {
+        Reflect.deleteProperty(navigator, "clipboard");
+      }
+    });
+
     request.mockResolvedValue({
       jiraTicket: {
         id: "10001",
@@ -120,6 +139,12 @@ describe("JiraTicketDrawer", () => {
       name: "Create worktree",
     });
     const openInJira = screen.getByRole("link", { name: "Open in Jira" });
+    const copyLink = screen.getByRole("button", { name: "Copy link" });
+    expect(openInJira.nextElementSibling).toBe(copyLink);
+    fireEvent.click(copyLink);
+    expect(await screen.findByText("Copied")).toBeDefined();
+    expect(writeText).toHaveBeenCalledWith(openInJira.getAttribute("href"));
+
     expect(
       screen
         .getByRole("link", { name: "Open full details" })

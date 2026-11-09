@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  BUILD_EXPORT_METHODS,
   EXPORT_METHOD_PROFILE_TYPES,
   profileCoversBundle,
   type ArchiveBundle,
@@ -35,6 +34,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
+import { platformLabel, type BuildPlatform } from "./types";
+import { buildExportMethods } from "./export-settings-form";
 
 type SigningOptions = {
   teams: SigningTeam[];
@@ -54,15 +55,24 @@ const SIGNING_OPTIONS_QUERY = `query BuildSigningOptions($buildId: ID!) {
     bundles { bundleId name relativePath embeddedProfileUuid embeddedProfileName }
   }
 }`;
+const XCODE_DEFAULT_PROFILE = "__XCODE_DEFAULT__";
 
-/** The platform an iOS archive's profiles must cover. */
-const ARCHIVE_PLATFORM = "iOS";
-
-function coversPlatform(profile: SigningProfile): boolean {
-  return (
-    profile.platforms.length === 0 ||
-    profile.platforms.includes(ARCHIVE_PLATFORM)
-  );
+function coversPlatform(
+  profile: SigningProfile,
+  platform: BuildPlatform,
+): boolean {
+  if (!profile.platforms.length) return true;
+  const names =
+    platform === "MAC_CATALYST"
+      ? ["macOS", "OSX", "Mac Catalyst"]
+      : platform === "MACOS"
+        ? ["macOS", "OSX"]
+        : platform === "WATCHOS"
+          ? ["watchOS", "iOS"]
+          : platform === "VISIONOS"
+            ? ["visionOS", "xrOS"]
+            : [platformLabel(platform)];
+  return names.some((name) => profile.platforms.includes(name));
 }
 
 /**
@@ -75,13 +85,14 @@ function candidatesFor(
   bundleId: string,
   method: BuildExportMethod,
   team: string,
+  platform: BuildPlatform,
 ): SigningProfile[] {
   const type = EXPORT_METHOD_PROFILE_TYPES[method];
   return profiles.filter(
     (profile) =>
       profile.type === type &&
       !profile.expired &&
-      coversPlatform(profile) &&
+      coversPlatform(profile, platform) &&
       profileCoversBundle(profile.bundleId, bundleId) &&
       (!team || !profile.teamId || profile.teamId === team),
   );
@@ -113,18 +124,24 @@ function profileLabel(profile: SigningProfile, locale: string): string {
 
 export function ExportArchiveDialog({
   buildId,
+  platform = "IOS",
   open,
   onOpenChange,
   onSaved,
 }: {
   buildId: string;
+  platform?: BuildPlatform;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => Promise<void>;
 }) {
   const t = useTranslations("builds");
   const locale = useLocale();
-  const [method, setMethod] = useState<BuildExportMethod>("DEBUGGING");
+  const [method, setMethod] = useState<BuildExportMethod>(
+    platform === "MACOS" || platform === "MAC_CATALYST"
+      ? "MAC_APPLICATION"
+      : "DEBUGGING",
+  );
   const [signingStyle, setSigningStyle] = useState("AUTOMATIC");
   const [teamId, setTeamId] = useState("");
   // Only what the user picked explicitly. Everything else is derived, so a
@@ -186,6 +203,7 @@ export function ExportArchiveDialog({
   }
 
   const manual = signingStyle === "MANUAL";
+  const profilesOptional = method === "DEVELOPER_ID";
 
   const profiles = Object.fromEntries(
     (options?.bundles ?? []).flatMap((bundle) => {
@@ -194,11 +212,14 @@ export function ExportArchiveDialog({
         bundle.bundleId,
         method,
         teamId,
+        platform,
       );
       const chosen =
         profileOverrides[bundle.bundleId] ??
         bestProfile(candidates, bundle)?.uuid;
-      return chosen ? [[bundle.bundleId, chosen] as const] : [];
+      return chosen && chosen !== XCODE_DEFAULT_PROFILE
+        ? [[bundle.bundleId, chosen] as const]
+        : [];
     }),
   );
 
@@ -271,6 +292,8 @@ export function ExportArchiveDialog({
 
   const missingProfiles =
     manual &&
+    !profilesOptional &&
+    EXPORT_METHOD_PROFILE_TYPES[method] !== null &&
     (options?.bundles ?? []).some((bundle) => !profiles[bundle.bundleId]);
 
   return (
@@ -308,7 +331,7 @@ export function ExportArchiveDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {BUILD_EXPORT_METHODS.map((value) => (
+                {buildExportMethods(platform).map((value) => (
                   <SelectItem key={value} value={value}>
                     {t(`exportMethod.${value}`)}
                   </SelectItem>
@@ -379,77 +402,96 @@ export function ExportArchiveDialog({
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <Label>{t("provisioningProfiles")}</Label>
-                  <Button
-                    onClick={() => setShowAllProfiles((value) => !value)}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                  >
-                    {showAllProfiles ? t("showMatching") : t("showAllProfiles")}
-                  </Button>
-                </div>
-                {loading && <Spinner />}
-                {!loading && !options?.bundles.length && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("noArchiveBundles")}
-                  </p>
-                )}
-                {(options?.bundles ?? []).map((bundle) => {
-                  const matching = candidatesFor(
-                    options?.profiles ?? [],
-                    bundle.bundleId,
-                    method,
-                    teamId,
-                  );
-                  const listed = showAllProfiles
-                    ? (options?.profiles ?? []).filter((profile) =>
-                        profileCoversBundle(profile.bundleId, bundle.bundleId),
-                      )
-                    : matching;
-                  return (
-                    <div
-                      className="rounded-lg border p-2"
-                      key={bundle.bundleId}
+              {EXPORT_METHOD_PROFILE_TYPES[method] !== null && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <Label>{t("provisioningProfiles")}</Label>
+                    <Button
+                      onClick={() => setShowAllProfiles((value) => !value)}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
                     >
-                      <p className="text-sm font-medium">{bundle.name}</p>
-                      <p className="mb-2 break-all font-mono text-xs text-muted-foreground">
-                        {bundle.bundleId}
-                      </p>
-                      <Select
-                        onValueChange={(value) =>
-                          setProfileOverrides((current) => ({
-                            ...current,
-                            [bundle.bundleId]: value,
-                          }))
-                        }
-                        value={profiles[bundle.bundleId] ?? ""}
+                      {showAllProfiles
+                        ? t("showMatching")
+                        : t("showAllProfiles")}
+                    </Button>
+                  </div>
+                  {loading && <Spinner />}
+                  {!loading && !options?.bundles.length && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("noArchiveBundles")}
+                    </p>
+                  )}
+                  {(options?.bundles ?? []).map((bundle) => {
+                    const matching = candidatesFor(
+                      options?.profiles ?? [],
+                      bundle.bundleId,
+                      method,
+                      teamId,
+                      platform,
+                    );
+                    const listed = showAllProfiles
+                      ? (options?.profiles ?? []).filter((profile) =>
+                          profileCoversBundle(
+                            profile.bundleId,
+                            bundle.bundleId,
+                          ),
+                        )
+                      : matching;
+                    return (
+                      <div
+                        className="rounded-lg border p-2"
+                        key={bundle.bundleId}
                       >
-                        <SelectTrigger className="w-full min-w-0">
-                          <SelectValue placeholder={t("selectProfile")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {listed.map((profile) => (
-                            <SelectItem key={profile.uuid} value={profile.uuid}>
-                              {profileLabel(profile, locale)}
-                              {profile.expired
-                                ? ` (${t("profileExpired")})`
-                                : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {!matching.length && (
-                        <p className="mt-1 text-xs text-destructive">
-                          {t("noMatchingProfiles")}
+                        <p className="text-sm font-medium">{bundle.name}</p>
+                        <p className="mb-2 break-all font-mono text-xs text-muted-foreground">
+                          {bundle.bundleId}
                         </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                        <Select
+                          onValueChange={(value) =>
+                            setProfileOverrides((current) => ({
+                              ...current,
+                              [bundle.bundleId]: value,
+                            }))
+                          }
+                          value={
+                            profiles[bundle.bundleId] ??
+                            (profilesOptional ? XCODE_DEFAULT_PROFILE : "")
+                          }
+                        >
+                          <SelectTrigger className="w-full min-w-0">
+                            <SelectValue placeholder={t("selectProfile")} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {profilesOptional && (
+                              <SelectItem value={XCODE_DEFAULT_PROFILE}>
+                                {t("defaultProvisioningProfile")}
+                              </SelectItem>
+                            )}
+                            {listed.map((profile) => (
+                              <SelectItem
+                                key={profile.uuid}
+                                value={profile.uuid}
+                              >
+                                {profileLabel(profile, locale)}
+                                {profile.expired
+                                  ? ` (${t("profileExpired")})`
+                                  : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {!profilesOptional && !matching.length && (
+                          <p className="mt-1 text-xs text-destructive">
+                            {t("noMatchingProfiles")}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
         </div>

@@ -1,3 +1,4 @@
+import { GraphQLError } from "graphql";
 import { serverUrlSettingsService } from "@/services/server-urls/server-urls.service";
 import { jobBlockedReason } from "@/services/operation-locks/operation-locks.service";
 import { serverBaseUrl, type ServerUrlKind } from "@/lib/server-urls";
@@ -5,6 +6,10 @@ import { signArtifactToken } from "@/lib/artifact-token";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { BuildLogRange } from "@/lib/build-log-ranges";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
+import {
+  storedBuildPlatform,
+  storedPlatformConfigurations,
+} from "@/services/builds/build-platforms";
 import {
   BUILD_SCRIPTS_CHANGED_TOPIC,
   agentEventBus,
@@ -27,6 +32,27 @@ function requireControlPlane(context: GraphQLContext): void {
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
   return context.agentId;
+}
+
+async function resolveBuildSubmission<T>(
+  service: BuildsService,
+  input: Parameters<BuildsService["wasBuildSubmissionRejected"]>[0],
+  submit: () => Promise<T>,
+) {
+  try {
+    return await submit();
+  } catch (error) {
+    const rejected = await service
+      .wasBuildSubmissionRejected(input)
+      .catch(() => false);
+    if (rejected) {
+      throw new GraphQLError(
+        error instanceof Error ? error.message : String(error),
+        { extensions: { code: "BUILD_SUBMISSION_REJECTED" } },
+      );
+    }
+    throw error;
+  }
 }
 
 const iso = (value: Date | null) => value?.toISOString() ?? null;
@@ -69,6 +95,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
       json(value.advancedSettingsJson, {}),
     exportSettings: (value: { exportSettingsJson: string | null }) =>
       value.exportSettingsJson ? json(value.exportSettingsJson, null) : null,
+    platformConfigurations: (value: { platformConfigurationsJson?: string }) =>
+      storedPlatformConfigurations(value.platformConfigurationsJson),
     observation: (value: { source?: { observations?: unknown[] } }) =>
       value.source?.observations?.[0] ?? null,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
@@ -207,6 +235,7 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : service.reportsForBuild(value.id, args.kind ?? undefined, false),
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
+    platform: storedBuildPlatform,
     snapshot: (value: { snapshotJson: string }) => json(value.snapshotJson, {}),
     warnings: (value: { snapshotJson: string }) => {
       const warnings = json(value.snapshotJson, {})?.warnings;
@@ -474,7 +503,20 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startBuild({
+      return resolveBuildSubmission(service, input, () =>
+        service.startBuild({
+          ...input,
+          telemetryRequestOrigin: context.requestOrigin,
+        }),
+      );
+    },
+    startBuilds: (
+      _root: unknown,
+      { input }: { input: Parameters<BuildsService["startBuilds"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.startBuilds({
         ...input,
         telemetryRequestOrigin: context.requestOrigin,
       });
@@ -551,10 +593,12 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startWorktreeCoverage({
-        ...input,
-        telemetryRequestOrigin: context.requestOrigin,
-      });
+      return resolveBuildSubmission(service, input, () =>
+        service.startWorktreeCoverage({
+          ...input,
+          telemetryRequestOrigin: context.requestOrigin,
+        }),
+      );
     },
     reportBuildDeploymentLaunched: (
       _root: unknown,

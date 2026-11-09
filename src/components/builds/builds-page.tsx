@@ -84,7 +84,7 @@ import { BuildConfigurations } from "./build-configurations";
 import { BuildIconPicker } from "./build-icon-picker";
 import { ConfigurationIcon } from "./configuration-icon";
 import { RebuildButton } from "./rebuild-button";
-import type { BuildRecord, BuildScript } from "./types";
+import { platformLabel, type BuildRecord, type BuildScript } from "./types";
 import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
@@ -726,7 +726,14 @@ export function BuildsPage({
                                 {t(`actions.${build.action}`)}
                               </Badge>
                             </TableCell>
-                            <TableCell>{build.destination.name}</TableCell>
+                            <TableCell>
+                              {build.destination.name}
+                              {build.platform && build.platform !== "IOS" && (
+                                <p className="text-xs text-muted-foreground">
+                                  {platformLabel(build.platform)}
+                                </p>
+                              )}
+                            </TableCell>
                             <TableCell className="text-muted-foreground">
                               <div className="flex flex-col gap-0.5">
                                 <DateTime
