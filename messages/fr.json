@@ -1974,6 +1974,7 @@
     "ticket": "Ticket",
     "staleTicket": "Certaines données sont expirées car Jira n’a pas répondu.",
     "openInJira": "Ouvrir dans Jira",
+    "copyLink": "Copier le lien",
     "worktreeAction": "Créer un worktree",
     "ticketWorktreeTitle": "Créer depuis {issueKey}",
     "ticketWorktreeDescription": "Créez un nouveau worktree sur un agent, ou créez la branche du ticket et basculez-y un worktree existant.",

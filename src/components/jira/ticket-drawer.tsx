@@ -2,6 +2,7 @@
 
 import {
   AlertTriangle,
+  Copy,
   ExternalLink,
   GitBranch,
   Maximize2,
@@ -35,6 +36,7 @@ import {
 } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
+import { copyText } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { JiraTicketDetail } from "@/services/jira/types";
 import { TicketWorktreeDialog } from "./ticket-worktree-dialog";
@@ -68,6 +70,10 @@ export function JiraTicketDrawer({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false);
+  const [linkCopyResult, setLinkCopyResult] = useState<{
+    url: string;
+    copied: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!issueKey) {
@@ -87,6 +93,7 @@ export function JiraTicketDrawer({
         );
         if (controller.signal.aborted) return;
         setTicket(data.jiraTicket);
+        setLinkCopyResult(null);
         setError(null);
       } catch (value) {
         if (controller.signal.aborted) return;
@@ -171,6 +178,37 @@ export function JiraTicketDrawer({
                         <ExternalLink /> {t("openInJira")}
                       </a>
                     </Button>
+                    <Button
+                      onClick={async () => {
+                        const url = ticket.jiraUrl;
+                        try {
+                          await copyText(url);
+                          setLinkCopyResult({ url, copied: true });
+                        } catch {
+                          setLinkCopyResult({ url, copied: false });
+                        }
+                      }}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      <Copy /> {t("copyLink")}
+                    </Button>
+                    <span
+                      className="self-center text-xs empty:sr-only"
+                      role="status"
+                    >
+                      {linkCopyResult?.url === ticket.jiraUrl &&
+                        (linkCopyResult.copied ? (
+                          <span className="text-muted-foreground">
+                            {t("copied")}
+                          </span>
+                        ) : (
+                          <span className="text-destructive">
+                            {t("copyFailed")}
+                          </span>
+                        ))}
+                    </span>
                   </div>
                 </div>
                 <JiraTicketActions
