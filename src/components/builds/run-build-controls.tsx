@@ -20,7 +20,15 @@ import { Spinner } from "@/components/ui/spinner";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import type { BuildDestination, BuildRecord, BuildRunAgent } from "./types";
+import {
+  destinationKey,
+  destinationPlatform,
+  platformLabel,
+  type BuildDestination,
+  type BuildRecord,
+  type BuildRunAgent,
+  type RunPlatform,
+} from "./types";
 import {
   observeBuildDeployments,
   type ObservedBuildDeployment,
@@ -66,8 +74,9 @@ export function RunBuildControls({
     preferred ? [preferred] : [],
   );
   const [selectedDestinations, setSelectedDestinations] = useState<Set<string>>(
-    preferred ? new Set([preferred.id]) : new Set(),
+    preferred ? new Set([destinationKey(preferred)]) : new Set(),
   );
+  const [runPlatform, setRunPlatform] = useState<RunPlatform | null>(null);
   const [destinationsLoaded, setDestinationsLoaded] = useState(false);
   const [loadingDestinations, setLoadingDestinations] = useState(false);
   const [runAgents, setRunAgents] = useState<BuildRunAgent[]>([]);
@@ -93,9 +102,31 @@ export function RunBuildControls({
     [buildId],
   );
 
+  const runPlatforms = useMemo(
+    () => Array.from(new Set(destinations.map(destinationPlatform))),
+    [destinations],
+  );
+  const activePlatform =
+    runPlatform && runPlatforms.includes(runPlatform)
+      ? runPlatform
+      : (runPlatforms.find(
+          (entry) => preferred && destinationPlatform(preferred) === entry,
+        ) ?? runPlatforms[0]);
+  const platformDestinations = useMemo(
+    () =>
+      destinations.filter(
+        (destination) => destinationPlatform(destination) === activePlatform,
+      ),
+    [activePlatform, destinations],
+  );
   const filteredDestinations = useMemo(() => {
-    return filterDestinations(destinations, destinationSearch, t);
-  }, [destinationSearch, destinations, t]);
+    return filterDestinations(platformDestinations, destinationSearch, t);
+  }, [destinationSearch, platformDestinations, t]);
+  const hasSelectedDestinations = platformDestinations.some(
+    (destination) =>
+      destination.available !== false &&
+      selectedDestinations.has(destinationKey(destination)),
+  );
   const tabStopAgentId =
     runAgents.find(
       (option) => option.agent.id === selectedAgentId && option.available,
@@ -107,7 +138,7 @@ export function RunBuildControls({
       const availableIds = new Set(
         compatible
           .filter((destination) => destination.available !== false)
-          .map((destination) => destination.id),
+          .map(destinationKey),
       );
       return new Set([...current].filter((id) => availableIds.has(id)));
     });
@@ -134,7 +165,8 @@ export function RunBuildControls({
       );
       const compatible = data.inspectBuildRunDestinations.filter(
         (destination) =>
-          destination.type === destinationType && !destination.generic,
+          !destination.generic &&
+          (destination.platformId || destination.type === destinationType),
       );
       destinationCache.current.set(agentId, compatible);
       if (activeAgentId.current === agentId) applyDestinations(compatible);
@@ -194,6 +226,7 @@ export function RunBuildControls({
     if (!option.available || option.agent.id === selectedAgentId) return;
     activeAgentId.current = option.agent.id;
     setSelectedAgentId(option.agent.id);
+    setRunPlatform(null);
     setSelectedDestinations(new Set());
     setDestinations([]);
     setDestinationsLoaded(false);
@@ -235,10 +268,10 @@ export function RunBuildControls({
             targetAgentId: selectedAgentId,
             destinations: onlyDestination
               ? [onlyDestination]
-              : destinations.filter(
+              : platformDestinations.filter(
                   (destination) =>
                     destination.available !== false &&
-                    selectedDestinations.has(destination.id),
+                    selectedDestinations.has(destinationKey(destination)),
                 ),
             requestId: createClientId(),
           },
@@ -271,8 +304,9 @@ export function RunBuildControls({
     if (destination.available === false) return;
     setSelectedDestinations((current) => {
       const next = new Set(current);
-      if (next.has(destination.id)) next.delete(destination.id);
-      else next.add(destination.id);
+      const key = destinationKey(destination);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
@@ -342,6 +376,32 @@ export function RunBuildControls({
         })}
       </div>
       <DropdownMenuSeparator />
+      {runPlatforms.length > 0 && (
+        <div
+          aria-label={t("runPlatform")}
+          className="flex gap-1 overflow-x-auto p-1.5"
+          role="group"
+        >
+          {runPlatforms.map((platform) => (
+            <Button
+              aria-pressed={platform === activePlatform}
+              disabled={running}
+              key={platform}
+              onClick={() => {
+                if (platform === activePlatform) return;
+                setRunPlatform(platform);
+                setSelectedDestinations(new Set());
+                setDestinationSearch("");
+              }}
+              size="sm"
+              type="button"
+              variant={platform === activePlatform ? "secondary" : "ghost"}
+            >
+              {platformLabel(platform)}
+            </Button>
+          ))}
+        </div>
+      )}
       <DestinationSearch
         value={destinationSearch}
         onChange={setDestinationSearch}
@@ -356,11 +416,13 @@ export function RunBuildControls({
         {!loadingDestinations &&
           filteredDestinations.map((destination) => {
             const available = destination.available !== false;
-            const selected = selectedDestinations.has(destination.id);
+            const selected = selectedDestinations.has(
+              destinationKey(destination),
+            );
             return (
               <div
                 className="flex items-stretch gap-1 rounded-md p-0.5 hover:bg-accent"
-                key={`${destination.type}:${destination.id}`}
+                key={destinationKey(destination)}
               >
                 <DestinationRow
                   destination={destination}
@@ -405,14 +467,15 @@ export function RunBuildControls({
         <div className="flex gap-1">
           <Button
             disabled={
-              running || !destinations.some((item) => item.available !== false)
+              running ||
+              !platformDestinations.some((item) => item.available !== false)
             }
             onClick={() =>
               setSelectedDestinations(
                 new Set(
-                  destinations
+                  platformDestinations
                     .filter((destination) => destination.available !== false)
-                    .map((destination) => destination.id),
+                    .map(destinationKey),
                 ),
               )
             }
@@ -433,7 +496,7 @@ export function RunBuildControls({
           </Button>
         </div>
         <Button
-          disabled={running || selectedDestinations.size === 0}
+          disabled={running || !hasSelectedDestinations}
           onClick={() => void run()}
           size="sm"
           type="button"

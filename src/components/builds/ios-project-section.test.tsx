@@ -209,4 +209,59 @@ describe("iOS project source card", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
+
+  test("saves a tvOS scheme override independently of the shared scheme", async () => {
+    const original = request.getMockImplementation()!;
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("mutation InspectBuildSource")) {
+        return {
+          inspectBuildSource: {
+            source: { kind: "WORKSPACE", relativePath: "App.xcworkspace" },
+            schemes: ["RemovedScheme", "TVApp"],
+            configurations: ["LegacyDebug"],
+            platforms: ["TVOS"],
+            testPlans: ["TestPlan"],
+          },
+        } as never;
+      }
+      if (query.includes("mutation SaveBuildConfiguration")) {
+        return { saveBuildConfiguration: { id: "configuration-1" } } as never;
+      }
+      if (query.includes("mutation ReparseSavedBuildConfiguration")) {
+        return {
+          reparseBuildConfiguration: { id: "observation-1", status: "VALID" },
+        } as never;
+      }
+      return original(query, variables);
+    });
+    render(<IosProjectSection codebaseId="codebase-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "tvOS" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit tvOS settings" }));
+    const editor = within(
+      await screen.findByRole("dialog", { name: "Edit tvOS settings" }),
+    );
+    fireEvent.click(await editor.findByRole("combobox", { name: "Scheme" }));
+    fireEvent.click(await screen.findByRole("option", { name: "TVApp" }));
+    const useSettings = editor.getByRole("button", { name: "Use settings" });
+    await waitFor(() =>
+      expect(useSettings.hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(useSettings);
+    fireEvent.click(await screen.findByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("mutation SaveBuildConfiguration"),
+        {
+          input: expect.objectContaining({
+            scheme: "RemovedScheme",
+            platformConfigurations: [
+              { platform: "IOS" },
+              { platform: "TVOS", scheme: "TVApp" },
+            ],
+          }),
+        },
+      ),
+    );
+  });
 });

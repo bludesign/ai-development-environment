@@ -393,6 +393,60 @@ test.describe("app screenshots", () => {
           page.getByRole("button", { name: "Run on QA Phone", exact: true }),
         ).toBeVisible();
       }
+      if (route.destinationPicker === "start-platforms") {
+        const dialog = page.getByRole("dialog");
+        await dialog
+          .getByRole("checkbox", { name: "tvOS", exact: true })
+          .check();
+        await dialog
+          .getByRole("combobox", { name: "Device", exact: true })
+          .click();
+        await page
+          .getByRole("option", { name: /QA Apple TV.*Apple TV 4K/ })
+          .click();
+        await expect(
+          dialog.getByRole("button", { name: "Start 2 Builds" }),
+        ).toBeEnabled();
+      }
+      if (route.destinationPicker === "run-platform") {
+        await page
+          .getByRole("button", { name: "Run", exact: true })
+          .first()
+          .click();
+        await page
+          .getByRole("button", { name: "Apple Vision (Designed for iPad)" })
+          .click();
+        await expect(
+          page.getByRole("button", {
+            name: "Run on QA Apple Vision Pro",
+            exact: true,
+          }),
+        ).toBeVisible();
+      }
+      if (route.buildWorkflow === "configuration-platforms") {
+        await page
+          .getByRole("button", {
+            name: "Edit build configuration",
+            exact: true,
+          })
+          .click();
+        await expect(
+          page.getByRole("checkbox", { name: "tvOS", exact: true }),
+        ).toBeChecked();
+        await expect(
+          page.getByRole("combobox", { name: "Default platform", exact: true }),
+        ).toContainText("iOS");
+        await page
+          .getByRole("button", { name: "Edit tvOS settings", exact: true })
+          .click();
+        const platformEditor = page.getByRole("dialog", {
+          name: "Edit tvOS settings",
+          exact: true,
+        });
+        await expect(
+          platformEditor.getByRole("combobox", { name: "Scheme", exact: true }),
+        ).toContainText("AcmeTV");
+      }
       if (route.buildWorkflow === "script") {
         await page.getByRole("tab", { name: "Build Scripts" }).click();
         await page

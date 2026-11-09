@@ -50,8 +50,30 @@ enum BuildDestinationType {
   SIMULATOR
   "Represents the physical device option."
   PHYSICAL_DEVICE
+  "Represents a concrete or generic Mac destination."
+  LOCAL_MAC
   "Represents the agent host itself, for records that ran no device build — an imported coverage report."
   HOST
+}
+
+"Apple SDK family or compatible runtime used by an Xcode destination."
+enum BuildPlatform {
+  "iOS and iPadOS."
+  IOS
+  "Apple TV."
+  TVOS
+  "Apple Vision."
+  VISIONOS
+  "Apple Watch."
+  WATCHOS
+  "Native Mac."
+  MACOS
+  "Mac Catalyst."
+  MAC_CATALYST
+  "An iOS app running on Apple silicon Mac."
+  MACOS_DESIGNED_FOR_IPAD
+  "An iOS app running on Apple Vision."
+  VISIONOS_DESIGNED_FOR_IPAD
 }
 
 "Lifecycle statuses for build."
@@ -150,12 +172,58 @@ type BuildConfiguration {
   autoExport: Boolean!
   "The export settings associated with this build configuration. May be null when unavailable or not applicable."
   exportSettings: JSON
+  "Ordered platforms and their optional overrides to the shared settings."
+  platformConfigurations: [BuildPlatformConfiguration!]!
   "The observation associated with this build configuration. May be null when unavailable or not applicable."
   observation: BuildSourceObservation
   "ISO 8601 timestamp when this build configuration was created."
   createdAt: String!
   "ISO 8601 timestamp when this build configuration was last updated."
   updatedAt: String!
+}
+
+"Overrides for one Apple build platform. Omitted values inherit the shared configuration."
+type BuildPlatformConfiguration {
+  "Apple platform built with these overrides."
+  platform: BuildPlatform!
+  "Kind of Xcode source to use for this platform."
+  sourceKind: BuildSourceKind
+  "Repository-relative path of the platform's Xcode source."
+  sourcePath: String
+  "Xcode scheme to build for this platform."
+  scheme: String
+  "Xcode configuration to build for this platform."
+  buildConfiguration: String
+  "Action selected by default when starting this platform."
+  defaultAction: BuildAction
+  "Advanced and signing settings that override the shared values."
+  advancedSettings: JSON
+  "Whether to export this platform's successful archives automatically."
+  autoExport: Boolean
+  "Export options for this platform's archive."
+  exportSettings: JSON
+}
+
+"Overrides for one Apple build platform. Supply source kind and path together."
+input BuildPlatformConfigurationInput {
+  "Apple platform to configure."
+  platform: BuildPlatform!
+  "Kind of Xcode source to use for this platform."
+  sourceKind: BuildSourceKind
+  "Repository-relative path of the platform's Xcode source."
+  sourcePath: String
+  "Xcode scheme to build for this platform."
+  scheme: String
+  "Xcode configuration to build for this platform."
+  buildConfiguration: String
+  "Action selected by default when starting this platform."
+  defaultAction: BuildAction
+  "Advanced and signing settings that override the shared values."
+  advancedSettings: JSON
+  "Whether to export this platform's successful archives automatically."
+  autoExport: Boolean
+  "Export options for this platform's archive."
+  exportSettings: JSON
 }
 
 "Represents a build script in the GraphQL API."
@@ -464,6 +532,8 @@ enum BuildRunAgentUnavailableReason {
   INCOMPATIBLE_ARCHITECTURE
   "The agent is not running macOS."
   NOT_MACOS
+  "A Mac app must run on the agent that built it."
+  LOCAL_MAC_ONLY
 }
 
 "An agent that may inspect devices and run a completed build."
@@ -564,6 +634,8 @@ type Build {
   action: BuildAction!
   "The destination type associated with this build."
   destinationType: BuildDestinationType!
+  "Apple SDK family for the build. Imported coverage has no platform."
+  platform: BuildPlatform
   "The destination associated with this build."
   destination: JSON!
   "The snapshot associated with this build."
@@ -663,6 +735,8 @@ type BuildSourceInspection {
   testPlans: [String!]!
   "Signing requirements associated with this build source inspection."
   signingRequirements: [BuildSigningRequirement!]!
+  "Build platforms reported by the agent for the selected scheme."
+  platforms: [BuildPlatform!]
   "Git commit SHA associated with this build source inspection. May be null when unavailable or not applicable."
   headSha: String
   "The Xcode version associated with this build source inspection. May be null when unavailable or not applicable."
@@ -703,6 +777,8 @@ input SaveBuildConfigurationInput {
   autoExport: Boolean = false
   "The export settings to use for the request."
   exportSettings: JSON
+  "Ordered platforms. Omit to preserve existing platform settings."
+  platformConfigurations: [BuildPlatformConfigurationInput!]
 }
 
 "Values used to save a build script."
@@ -739,6 +815,8 @@ input CustomBuildConfigurationInput {
   scheme: String!
   "Xcode build configuration."
   buildConfiguration: String!
+  "Ordered platform overrides for this submission."
+  platformConfigurations: [BuildPlatformConfigurationInput!]
 }
 
 "Values used to inspect build destinations."
@@ -751,6 +829,8 @@ input InspectBuildDestinationsInput {
   customConfiguration: CustomBuildConfigurationInput
   "The action to use for the request."
   action: BuildAction
+  "Platform whose preset overrides and destinations to inspect."
+  platform: BuildPlatform
   "Identifier of the request to use."
   requestId: ID!
 }
@@ -767,6 +847,8 @@ input InspectBuildSourceInput {
   scheme: String
   "The configuration to use for the request."
   configuration: String
+  "Platform to use when inspecting the source's signing requirements."
+  platform: BuildPlatform
   "Identifier of the request to use."
   requestId: ID!
 }
@@ -795,6 +877,50 @@ input StartBuildInput {
   exportSettings: JSON
   "Identifier of the request to use."
   requestId: ID!
+}
+
+"One independently tracked build in a multiplatform submission."
+input StartBuildSelectionInput {
+  "Apple platform to build."
+  platform: BuildPlatform!
+  "Selected destination returned by inspectBuildDestinations."
+  destination: JSON!
+  "Action override for this build."
+  action: BuildAction
+  "Advanced settings override for this build."
+  advancedSettings: JSON
+  "Whether to export this build's successful archive automatically."
+  exportWhenComplete: Boolean
+  "Export options for this build's archive."
+  exportSettings: JSON
+  "Server address override for this build."
+  serverUrlKind: ServerUrlKind
+}
+
+"Values used to queue independently tracked builds from the same worktree."
+input StartBuildsInput {
+  "Worktree shared by all selected platforms."
+  worktreeId: ID!
+  "Saved configuration identifier. Provide exactly one saved or Custom configuration."
+  configurationId: ID
+  "One-time configuration. Provide exactly one saved or Custom configuration."
+  customConfiguration: CustomBuildConfigurationInput
+  "Build scripts to run for each selected platform."
+  scriptIds: [ID!]
+  "Request identifier reused when retrying the same submission."
+  requestId: ID!
+  "Selections in queue order, with one destination per platform."
+  selections: [StartBuildSelectionInput!]!
+}
+
+"The queue outcome for one platform in a multiplatform submission."
+type StartBuildSelectionResult {
+  "Platform associated with this result."
+  platform: BuildPlatform!
+  "Build record, when one was created."
+  build: Build
+  "Queueing error for this platform, when applicable."
+  error: String
 }
 
 "Values used to run a build."
@@ -1153,6 +1279,11 @@ extend type Mutation {
     "Values for the requested operation."
     input: StartBuildInput!
   ): Build!
+  "Queues one independent build per selected Apple platform."
+  startBuilds(
+    "Configuration, destinations, and idempotency key for the submission."
+    input: StartBuildsInput!
+  ): [StartBuildSelectionResult!]!
   "Rebuilds a build and returns a build."
   rebuildBuild(
     "Identifier of the resource to return or affect."

@@ -447,6 +447,75 @@ describe("RunBuildControls", () => {
     ).toBeDefined();
   });
 
+  test("offers server-verified compatibility destinations and scopes selection to the chosen platform", async () => {
+    const iphone = {
+      type: "PHYSICAL_DEVICE",
+      platformId: "IOS",
+      platform: "iOS",
+      id: "same-id",
+      name: "QA iPhone",
+      state: "Connected",
+      osVersion: "27.0",
+    };
+    const mac = {
+      type: "LOCAL_MAC",
+      platformId: "MACOS_DESIGNED_FOR_IPAD",
+      platform: "macOS",
+      id: "same-id",
+      name: "QA Mac",
+      state: "Available",
+      osVersion: "27.0",
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("BuildRunAgents")) return { buildRunAgents } as never;
+      if (query.includes("BuildRunDestinations"))
+        return { inspectBuildRunDestinations: [iphone, mac] } as never;
+      if (query.includes("RunCompletedBuild"))
+        return {
+          runBuild: [
+            { id: "deployment", status: "SUCCEEDED", destination: mac },
+          ],
+        } as never;
+      throw new Error("Unexpected request");
+    });
+    render(
+      <RunBuildControls
+        buildId="build"
+        destinationType="PHYSICAL_DEVICE"
+        onError={vi.fn()}
+      />,
+    );
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", { name: /QA iPhone/ }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Mac (Designed for iPad)",
+      }),
+    );
+    expect(
+      screen.queryByRole("menuitemcheckbox", { name: /QA iPhone/ }),
+    ).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Run Selected" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Run on QA Mac" }));
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("RunCompletedBuild"),
+        {
+          input: expect.objectContaining({ destinations: [mac] }),
+        },
+      ),
+    );
+  });
+
   test("switches agents lazily and submits only the active agent", async () => {
     const targetAgent = {
       agent: {

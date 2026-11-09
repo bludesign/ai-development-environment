@@ -557,6 +557,15 @@ describe("StartBuildDialog", () => {
         screen.queryByRole("status", { name: "Loading devices…" }),
       ).toBeNull();
       expect(device.getAttribute("aria-busy")).toBe("false");
+      if (!destinations.length) {
+        expect(device.hasAttribute("disabled")).toBe(true);
+        expect(
+          screen
+            .getByRole("button", { name: "Start Build" })
+            .hasAttribute("disabled"),
+        ).toBe(true);
+        return;
+      }
       expect(device.textContent).toContain("Any iOS Simulator");
       fireEvent.pointerDown(device, {
         button: 0,
@@ -1118,6 +1127,124 @@ describe("StartBuildDialog", () => {
     fireEvent.click(await screen.findByRole("option", { name: "Test" }));
     const testPlanLabel = await screen.findByText("Test plan");
     expect(testPlanLabel.closest("details")).not.toBeNull();
+  });
+
+  test("replays the original batch after a transport failure and retries only rejected platforms after a response", async () => {
+    const fallback = request.getMockImplementation()!;
+    let submissions = 0;
+    request.mockImplementation(async (query, variables) => {
+      const operation = String(query);
+      if (operation.includes("query StartBuildProject")) {
+        const data = (await fallback(query, variables)) as {
+          iosAppProject: IosAppProject;
+        };
+        data.iosAppProject.configurations[0]!.platformConfigurations = [
+          { platform: "IOS" },
+          { platform: "TVOS", scheme: "TVApp", defaultAction: "ARCHIVE" },
+        ];
+        return data as never;
+      }
+      if (operation.includes("mutation StartPlatformBuilds")) {
+        if (++submissions === 1) throw new TypeError("Network disconnected");
+        const input = variables?.input as { selections: unknown[] };
+        return {
+          startBuilds:
+            input.selections.length === 2
+              ? [
+                  { platform: "IOS", build: { id: "ios-build" }, error: null },
+                  {
+                    platform: "TVOS",
+                    build: { id: "rejected-tv-build" },
+                    error: "Build agent is busy",
+                  },
+                ]
+              : [{ platform: "TVOS", build: { id: "tv-build" }, error: null }],
+        } as never;
+      }
+      if (
+        operation.includes("mutation InspectStartBuildDestinations") &&
+        (variables?.input as { platform?: string })?.platform === "TVOS"
+      ) {
+        return {
+          inspectBuildDestinations: [
+            {
+              platformId: "TVOS",
+              platform: "tvOS",
+              type: "PHYSICAL_DEVICE",
+              id: "generic-tvos",
+              name: "Any Physical tvOS Device",
+              osVersion: null,
+              state: null,
+              generic: true,
+            },
+          ],
+        } as never;
+      }
+      return fallback(query, variables);
+    });
+    const started = vi.fn();
+    render(
+      <StartBuildButton
+        codebaseId="codebase-1"
+        worktreeId="worktree-1"
+        onStarted={started}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Build" }));
+    await screen.findByRole("combobox", { name: "Device" });
+    await waitFor(() =>
+      expect(
+        screen
+          .getByRole("button", { name: "Start Build" })
+          .hasAttribute("disabled"),
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "tvOS" }));
+    const startBoth = await screen.findByRole("button", {
+      name: "Start 2 Builds",
+    });
+    await waitFor(() => expect(startBoth.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(startBoth);
+    const retry = await screen.findByRole("button", {
+      name: "Retry submission",
+    });
+    expect(started).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("checkbox", { name: "tvOS" }).closest("[inert]"),
+    ).not.toBeNull();
+    fireEvent.click(retry);
+    expect(await screen.findByText("tvOS: Build agent is busy")).toBeDefined();
+    expect(started).toHaveBeenCalledTimes(1);
+    expect(started).toHaveBeenCalledWith("ios-build");
+    expect(
+      screen.getByRole("checkbox", { name: "iOS" }).hasAttribute("disabled"),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Start Build" }));
+    await waitFor(() => expect(started).toHaveBeenLastCalledWith("tv-build"));
+    const inputs = request.mock.calls.flatMap(([query, variables]) =>
+      String(query).includes("mutation StartPlatformBuilds")
+        ? [variables?.input]
+        : [],
+    ) as Array<{ requestId: string; selections: unknown[] }>;
+    expect(inputs[0]?.selections).toEqual([
+      expect.objectContaining({
+        platform: "IOS",
+        action: "BUILD",
+        destination: expect.objectContaining({ type: "SIMULATOR" }),
+      }),
+      expect.objectContaining({
+        platform: "TVOS",
+        action: "ARCHIVE",
+        destination: expect.objectContaining({
+          platformId: "TVOS",
+          type: "PHYSICAL_DEVICE",
+          generic: true,
+        }),
+      }),
+    ]);
+    expect(inputs[1]).toEqual(inputs[0]);
+    expect(inputs[2]?.selections).toEqual([inputs[0]?.selections[1]]);
+    expect(inputs[2]?.requestId).not.toBe(inputs[0]?.requestId);
   });
 
   test("preflights a configuration, previews a safe command, validates overrides, and snapshots default scripts", async () => {

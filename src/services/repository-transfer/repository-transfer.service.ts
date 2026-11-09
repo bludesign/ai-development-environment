@@ -7,10 +7,19 @@ import {
   normalizeDefaultBranchPatterns,
 } from "@ai-development-environment/agent-contract/codebases";
 import {
+  BUILD_ACTIONS,
+  BUILD_PLATFORMS,
+  BUILD_SOURCE_KINDS,
   parseBuildSource,
   parseBuildAdvancedSettings,
   parseBuildExportSettings,
 } from "@ai-development-environment/agent-contract/builds";
+import {
+  buildPlatformExportSettings,
+  parsePlatformConfigurations,
+  storedPlatformConfigurations,
+  type BuildPlatformConfigurationInput,
+} from "@/services/builds/build-platforms";
 import { getPrismaClient } from "@/data/prisma-client";
 import type { Prisma } from "@/generated/prisma/client";
 import { compileRe2 } from "@/lib/re2.server";
@@ -116,6 +125,52 @@ const configFields = [
   "defaultAction",
   "autoExport",
 ];
+const platformConfigurationsSchema = z
+  .array(
+    z
+      .object({
+        platform: z.enum(BUILD_PLATFORMS),
+        sourceKind: z.enum(BUILD_SOURCE_KINDS).nullish(),
+        sourcePath: z.string().nullish(),
+        scheme: z.string().nullish(),
+        buildConfiguration: z.string().nullish(),
+        defaultAction: z.enum(BUILD_ACTIONS).nullish(),
+        advancedSettings: z.record(z.string(), z.unknown()).nullish(),
+        autoExport: z.boolean().nullish(),
+        exportSettings: z.record(z.string(), z.unknown()).nullish(),
+      })
+      .strict(),
+  )
+  .max(6);
+const machineBuildSettingKeys = [
+  "priorBuildForTestingId",
+  "priorTestProductsPath",
+  "priorXctestrunPath",
+] as const;
+
+function portableBuildSettings(
+  advanced: Record<string, unknown>,
+  name: string,
+  warnings: string[],
+) {
+  const settings = { ...advanced };
+  for (const key of machineBuildSettingKeys) {
+    if (settings[key])
+      warnings.push(
+        `${name}: ${key} is installation-specific and was excluded.`,
+      );
+    delete settings[key];
+  }
+  return settings;
+}
+
+function requirePortableBuildSettings(advanced: Record<string, unknown>) {
+  if (machineBuildSettingKeys.some((key) => advanced[key])) {
+    throw new Error(
+      "Historical builds and machine test-product paths cannot be imported",
+    );
+  }
+}
 const keyFor = (kind: string, id: string) => `${kind.toLowerCase()}:${id}`;
 const string = (value: unknown) => (typeof value === "string" ? value : "");
 const strings = (value: unknown): string[] =>
@@ -432,26 +487,32 @@ export class RepositoryTransferService {
         entity.repositoryKey = repoKey;
         entity.parentKey = repoKey;
         entity.name = config.name;
-        const advanced = jsonValue(config.advancedSettingsJson);
-        for (const key of [
-          "priorBuildForTestingId",
-          "priorTestProductsPath",
-          "priorXctestrunPath",
-        ]) {
-          if (advanced[key])
-            warnings.push(
-              `${config.name}: ${key} is installation-specific and was excluded.`,
-            );
-          delete advanced[key];
-        }
         entity.fields = {
           ...pick(config, configFields),
           sourceKind: config.source.kind,
           sourcePath: config.source.relativePath,
-          advancedSettings: advanced,
+          advancedSettings: portableBuildSettings(
+            jsonValue(config.advancedSettingsJson),
+            config.name,
+            warnings,
+          ),
           exportSettings: config.exportSettingsJson
             ? jsonValue(config.exportSettingsJson)
             : null,
+          platformConfigurations: storedPlatformConfigurations(
+            config.platformConfigurationsJson,
+          ).map((entry) => ({
+            ...entry,
+            ...(entry.advancedSettings
+              ? {
+                  advancedSettings: portableBuildSettings(
+                    entry.advancedSettings as Record<string, unknown>,
+                    `${config.name} (${entry.platform})`,
+                    warnings,
+                  ),
+                }
+              : {}),
+          })),
         };
       } else if (kind === "BUILD_SCRIPT") {
         const script = await prisma.buildScript.findUniqueOrThrow({
@@ -787,6 +848,9 @@ export class RepositoryTransferService {
             exportSettings: v.exportSettingsJson
               ? jsonValue(v.exportSettingsJson)
               : null,
+            platformConfigurations: storedPlatformConfigurations(
+              v.platformConfigurationsJson,
+            ),
             revision: v.updatedAt.toISOString(),
           },
         }));
@@ -1763,14 +1827,7 @@ export class RepositoryTransferService {
           relativePath: f.sourcePath,
         });
         const advanced = parseBuildAdvancedSettings(f.advancedSettings ?? {});
-        if (
-          advanced.priorBuildForTestingId ||
-          advanced.priorTestProductsPath ||
-          advanced.priorXctestrunPath
-        )
-          throw new Error(
-            "Historical builds and machine test-product paths cannot be imported",
-          );
+        requirePortableBuildSettings(advanced);
         const autoExport = z.boolean().parse(f.autoExport ?? false);
         const exportSettings = f.exportSettings
           ? parseBuildExportSettings(f.exportSettings)
@@ -1779,6 +1836,35 @@ export class RepositoryTransferService {
           throw new Error(
             "Automatic export requires an Archive configuration and export settings",
           );
+        const platformConfigurations = Object.hasOwn(
+          f,
+          "platformConfigurations",
+        )
+          ? parsePlatformConfigurations(
+              platformConfigurationsSchema.parse(f.platformConfigurations),
+            )
+          : undefined;
+        for (const entry of platformConfigurations ?? []) {
+          requirePortableBuildSettings(entry.advancedSettings ?? {});
+        }
+        const effectivePlatforms = platformConfigurations ??
+          (existing?.platformConfigurations as
+            BuildPlatformConfigurationInput[] | undefined) ?? [
+            { platform: "IOS" },
+          ];
+        for (const entry of effectivePlatforms) {
+          if (!(entry.autoExport ?? autoExport)) continue;
+          const settings = entry.exportSettings ?? exportSettings;
+          if (
+            (entry.defaultAction ?? f.defaultAction) !== "ARCHIVE" ||
+            !settings
+          ) {
+            throw new Error(
+              `Automatic export for ${entry.platform} requires an Archive configuration and export settings`,
+            );
+          }
+          buildPlatformExportSettings(entry.platform, settings);
+        }
         return {
           ...pick(f, configFields),
           sourceKind: source.kind,
@@ -1786,6 +1872,7 @@ export class RepositoryTransferService {
           advancedSettings: advanced,
           autoExport,
           exportSettings,
+          ...(platformConfigurations && { platformConfigurations }),
         };
       }
       case "BUILD_SCRIPT": {
@@ -2206,6 +2293,11 @@ export class RepositoryTransferService {
                 exportSettingsJson: f.exportSettings
                   ? JSON.stringify(f.exportSettings)
                   : null,
+                ...(Object.hasOwn(f, "platformConfigurations") && {
+                  platformConfigurationsJson: JSON.stringify(
+                    f.platformConfigurations,
+                  ),
+                }),
               } as Prisma.BuildConfigurationUncheckedUpdateInput;
               await tx.buildConfiguration.upsert({
                 where: { id: e.id },

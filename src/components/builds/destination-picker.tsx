@@ -20,7 +20,7 @@ import {
   DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import { buildDestinationState } from "./build-format";
-import type { BuildDestination } from "./types";
+import { destinationPlatform, type BuildDestination } from "./types";
 
 type Translate = Parameters<typeof buildDestinationState>[1];
 export function destinationName(destination: BuildDestination) {
@@ -51,9 +51,14 @@ export function filterDestinations(
 }
 function DestinationLabel({ destination }: { destination: BuildDestination }) {
   const t = useTranslations("builds");
-  const name = destination.generic
-    ? t(destination.type === "SIMULATOR" ? "anySimulator" : "anyPhysicalDevice")
-    : destinationName(destination);
+  const name =
+    destination.generic && destinationPlatform(destination) === "IOS"
+      ? t(
+          destination.type === "SIMULATOR"
+            ? "anySimulator"
+            : "anyPhysicalDevice",
+        )
+      : destinationName(destination);
   const detail = [destination.platform, destination.osVersion]
     .filter(Boolean)
     .join(" ");
@@ -64,6 +69,8 @@ function DestinationLabel({ destination }: { destination: BuildDestination }) {
         <span className="block truncate text-xs text-muted-foreground">
           {detail ? `${detail} · ` : ""}
           {buildDestinationState(destination, t)}
+          {destination.unavailableReason &&
+            ` · ${destination.unavailableReason}`}
         </span>
       )}
     </span>

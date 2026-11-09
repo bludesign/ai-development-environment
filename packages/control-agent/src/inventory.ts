@@ -25,7 +25,10 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skills";
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
-import { IOS_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
+import {
+  IOS_BUILD_JOB_KINDS,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+} from "@ai-development-environment/agent-contract/builds";
 import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
@@ -64,6 +67,7 @@ const MACOS_AGENT_CAPABILITIES = [
   ...BUILD_DATA_JOB_KINDS,
   ...SIMULATOR_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
   ...SIGNING_ASSET_JOB_KINDS,
   // `atos` ships with Xcode, so only a Mac can name crash frames.
   ...CRASH_JOB_KINDS,

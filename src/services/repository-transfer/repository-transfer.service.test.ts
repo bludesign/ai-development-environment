@@ -737,6 +737,92 @@ describe("complete repository settings", () => {
     expect(project?.defaultDestinationType).toBe("SIMULATOR");
     expect(await prisma.codebase.count()).toBe(0);
   });
+
+  test("round trips platform overrides and preserves them when an older package omits the field", async () => {
+    const platforms = [
+      {
+        platform: "TVOS",
+        scheme: "Television",
+        sourceKind: "WORKSPACE",
+        sourcePath: "TV/Television.xcworkspace",
+        advancedSettings: { collectDsyms: true },
+      },
+      { platform: "IOS" },
+    ];
+    await prisma.codebaseProject.create({
+      data: {
+        id: "platform-project",
+        repositoryId: "source",
+        type: "IOS_APP",
+        sources: {
+          create: {
+            id: "platform-source",
+            kind: "PROJECT",
+            relativePath: "Mobile.xcodeproj",
+          },
+        },
+        configurations: {
+          create: {
+            id: "platform-configuration",
+            sourceId: "platform-source",
+            name: "Debug",
+            scheme: "Mobile",
+            buildConfiguration: "Debug",
+            defaultAction: "BUILD",
+            advancedSettingsJson: "{}",
+            platformConfigurationsJson: JSON.stringify([
+              {
+                ...platforms[0],
+                advancedSettings: {
+                  collectDsyms: true,
+                  priorBuildForTestingId: "local-build",
+                },
+              },
+              platforms[1],
+            ]),
+          },
+        },
+      },
+    });
+    const exported = await input();
+    const configuration = (exported.payload as TransferPackage).entities.find(
+      (entity) => entity.kind === "BUILD_CONFIGURATION",
+    )!;
+    expect(configuration.fields.platformConfigurations).toEqual(platforms);
+    await apply(exported);
+    const stored = () =>
+      prisma.buildConfiguration.findFirstOrThrow({
+        where: { project: { repositoryId: "destination" } },
+      });
+    expect(JSON.parse((await stored()).platformConfigurationsJson)).toEqual(
+      platforms,
+    );
+
+    const older = await input();
+    const olderFields = (older.payload as TransferPackage).entities.find(
+      (entity) => entity.kind === "BUILD_CONFIGURATION",
+    )!.fields;
+    delete olderFields.platformConfigurations;
+    olderFields.scheme = "UpdatedMobile";
+    await apply(older, "older-platform-package");
+    const updated = await stored();
+    expect(updated.scheme).toBe("UpdatedMobile");
+    expect(JSON.parse(updated.platformConfigurationsJson)).toEqual(platforms);
+
+    const invalid = await input();
+    const invalidFields = (invalid.payload as TransferPackage).entities.find(
+      (entity) => entity.kind === "BUILD_CONFIGURATION",
+    )!.fields;
+    invalidFields.platformConfigurations = [
+      {
+        platform: "TVOS",
+        advancedSettings: { priorBuildForTestingId: "foreign-build" },
+      },
+    ];
+    expect((await service.preview(invalid)).blockers.join(" ")).toContain(
+      "Historical builds and machine test-product paths cannot be imported",
+    );
+  });
   test("maps skill groups, imports paused retry rules, and preserves unlisted scripts", async () => {
     await prisma.skillGroup.create({
       data: {

@@ -6,6 +6,10 @@ import type { GraphQLContext } from "@/services/graphql-server/graphql-server.se
 import type { BuildLogRange } from "@/lib/build-log-ranges";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
 import {
+  storedBuildPlatform,
+  storedPlatformConfigurations,
+} from "@/services/builds/build-platforms";
+import {
   BUILD_SCRIPTS_CHANGED_TOPIC,
   agentEventBus,
   buildLogChunkTopic,
@@ -69,6 +73,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
       json(value.advancedSettingsJson, {}),
     exportSettings: (value: { exportSettingsJson: string | null }) =>
       value.exportSettingsJson ? json(value.exportSettingsJson, null) : null,
+    platformConfigurations: (value: { platformConfigurationsJson?: string }) =>
+      storedPlatformConfigurations(value.platformConfigurationsJson),
     observation: (value: { source?: { observations?: unknown[] } }) =>
       value.source?.observations?.[0] ?? null,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
@@ -207,6 +213,7 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : service.reportsForBuild(value.id, args.kind ?? undefined, false),
     destination: (value: { destinationJson: string }) =>
       json(value.destinationJson, {}),
+    platform: storedBuildPlatform,
     snapshot: (value: { snapshotJson: string }) => json(value.snapshotJson, {}),
     warnings: (value: { snapshotJson: string }) => {
       const warnings = json(value.snapshotJson, {})?.warnings;
@@ -475,6 +482,17 @@ export const createBuildResolvers = (service: BuildsService) => ({
     ) => {
       requireControlPlane(context);
       return service.startBuild({
+        ...input,
+        telemetryRequestOrigin: context.requestOrigin,
+      });
+    },
+    startBuilds: (
+      _root: unknown,
+      { input }: { input: Parameters<BuildsService["startBuilds"]>[0] },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.startBuilds({
         ...input,
         telemetryRequestOrigin: context.requestOrigin,
       });

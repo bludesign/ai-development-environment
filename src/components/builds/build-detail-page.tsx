@@ -81,10 +81,15 @@ import {
 } from "./build-configuration-label";
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
-import type { BuildLogChunk, BuildRecord, BuildReport } from "./types";
+import {
+  platformLabel,
+  type BuildLogChunk,
+  type BuildRecord,
+  type BuildReport,
+} from "./types";
 
 const BUILD_DETAIL_FIELDS = `
-  id requestId jobId status action destinationType destination snapshot commandSummary artifactDirectory errorCode error warnings outOfDate blockedReason
+  id requestId jobId status action platform destinationType destination snapshot commandSummary artifactDirectory errorCode error warnings outOfDate blockedReason
   createdAt startedAt finishedAt durationMs updatedAt
   worktree { id highlightColor }
   configuration {
@@ -109,7 +114,7 @@ const LOG_FIELDS = `id scope scopeId sequence phase stream dataBase64 byteLength
 const EMPTY_LOG_CHUNKS: BuildLogChunk[] = [];
 
 /** Acronyms that title casing would otherwise mangle, such as IPA into "Ipa". */
-const PRESERVED_ACRONYMS = new Set(["IPA"]);
+const PRESERVED_ACRONYMS = new Set(["IPA", "PKG"]);
 
 function humanizeConstant(value: string): string {
   return value
@@ -739,6 +744,9 @@ export function BuildDetailPage({
               {t(`statuses.${build.status}`)}
             </Badge>
             <Badge variant="outline">{t(`actions.${build.action}`)}</Badge>
+            {build.platform && build.platform !== "IOS" && (
+              <Badge variant="outline">{platformLabel(build.platform)}</Badge>
+            )}
             {build.outOfDate && (
               <OutOfDateBadge
                 buildId={build.id}
@@ -1226,6 +1234,7 @@ export function BuildDetailPage({
       {exportOpen && (
         <ExportArchiveDialog
           buildId={build.id}
+          platform={build.platform ?? undefined}
           onOpenChange={setExportOpen}
           onSaved={load}
           open={exportOpen}

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { SpawnOptions } from "node:child_process";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-const launch = vi.hoisted(() => ({ exitCode: 0 }));
+const launch = vi.hoisted(() => ({ exitCode: 0, openExitCode: 0 }));
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
   return {
@@ -15,7 +15,11 @@ vi.mock("node:child_process", async (importOriginal) => {
     ) => {
       if (["xcrun", "/usr/bin/open", "/usr/bin/codesign"].includes(command)) {
         const exitCode =
-          command === "xcrun" && args.includes("launch") ? launch.exitCode : 0;
+          command === "/usr/bin/open"
+            ? launch.openExitCode
+            : command === "xcrun" && args.includes("launch")
+              ? launch.exitCode
+              : 0;
         return actual.spawn(
           process.execPath,
           ["-e", `process.exit(${exitCode})`],
@@ -38,12 +42,15 @@ import {
 registerWorktreeFixtures();
 beforeEach(() => {
   launch.exitCode = 0;
+  launch.openExitCode = 0;
 });
 
 describe("device launch reports", () => {
   test.each([false, true])(
     "reports successful launches and retains a repair timestamp when reporting fails (%s)",
     async (reportFails) => {
+      // A headless agent may launch an app without opening the simulator UI.
+      if (!reportFails) launch.openExitCode = 1;
       const folder = await repository();
       const artifactDirectory = join(folder, "artifacts");
       await mkdir(join(artifactDirectory, "App.app"), { recursive: true });

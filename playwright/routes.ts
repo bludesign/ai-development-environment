@@ -39,7 +39,8 @@ export type RouteEntry = {
   clickButton?: string;
   /** Accessible tab name selected after the page reaches its ready state. */
   clickTab?: string;
-  buildWorkflow?: "start" | "custom" | "script" | "project";
+  buildWorkflow?:
+    "start" | "custom" | "script" | "project" | "configuration-platforms";
   /** Open a transfer review without applying configuration or queuing clones. */
   transferWorkflow?: "export" | "import" | "import-destinations";
   /** Auth pages are intentionally captured without the seeded bearer session. */
@@ -52,7 +53,7 @@ export type RouteEntry = {
   reviewerCapture?: ReviewerCapture;
   jiraProjectSettings?: boolean;
   usagePopover?: boolean;
-  destinationPicker?: "start" | "run";
+  destinationPicker?: "start" | "run" | "start-platforms" | "run-platform";
   desktopOnly?: boolean;
   /** Expand two independent Claude child conversations in the session Agents card. */
   sessionAgents?: boolean;
@@ -318,6 +319,13 @@ export const routes: RouteEntry[] = [
     name: "build-configuration-detail",
     path: `/dashboard/builds/configurations/${ids.buildConfigurations.release}`,
   },
+  {
+    name: "build-configuration-platforms",
+    path: `/dashboard/builds/configurations/${ids.buildConfigurations.release}`,
+    stubWorktree: true,
+    buildWorkflow: "configuration-platforms",
+    desktopOnly: true,
+  },
   { name: "build-custom-detail", path: "/dashboard/builds/build-ios-custom" },
   {
     name: "build-script-editor",
@@ -343,6 +351,21 @@ export const routes: RouteEntry[] = [
     path: `/dashboard/builds/${ids.builds.archive}`,
     stubWorktree: true,
     destinationPicker: "run",
+    desktopOnly: true,
+  },
+  {
+    name: "build-start-platforms",
+    path: `/dashboard/apps/${ids.apps.mobileSuite}`,
+    stubWorktree: true,
+    buildWorkflow: "start",
+    destinationPicker: "start-platforms",
+    desktopOnly: true,
+  },
+  {
+    name: "build-run-platform",
+    path: `/dashboard/builds/${ids.builds.archive}`,
+    stubWorktree: true,
+    destinationPicker: "run-platform",
     desktopOnly: true,
   },
   {

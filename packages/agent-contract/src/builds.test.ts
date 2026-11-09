@@ -8,6 +8,10 @@ import {
   PROVISIONING_PROFILE_TYPES,
   profileCoversBundle,
   provisioningProfileType,
+  buildDestinationSpecifier,
+  genericBuildDestinations,
+  parseBuildAgentRunDestinationsPayload,
+  parseBuildDestination,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   parseBuildAdvancedSettings,
   parseBuildArtifactDownloadPayload,
@@ -49,6 +53,60 @@ function buildPayload() {
 }
 
 describe("iOS build agent contract", () => {
+  test("encodes platform-specific destinations and keeps legacy iOS inputs valid", () => {
+    expect(buildDestinationSpecifier(parseBuildDestination(destination))).toBe(
+      "platform=iOS Simulator,id=SIMULATOR-1",
+    );
+    expect(
+      genericBuildDestinations("ARCHIVE", ["TVOS", "MAC_CATALYST"]).map(
+        buildDestinationSpecifier,
+      ),
+    ).toEqual([
+      "generic/platform=tvOS",
+      "generic/platform=macOS,variant=Mac Catalyst",
+    ]);
+    expect(
+      buildDestinationSpecifier(
+        parseBuildDestination({
+          ...destination,
+          type: "PHYSICAL_DEVICE",
+          platform: "tvOS",
+          platformId: "TVOS",
+          id: "CORE-1",
+          xcodeId: "UDID-1",
+        }),
+      ),
+    ).toBe("platform=tvOS,id=UDID-1");
+    expect(
+      buildDestinationSpecifier(
+        parseBuildDestination({
+          ...destination,
+          platform: "visionOS Simulator",
+          platformId: "VISIONOS_DESIGNED_FOR_IPAD",
+          variant: "Designed for [iPad,iPhone]",
+        }),
+      ),
+    ).toBe(
+      "platform=visionOS Simulator,variant=Designed for iPad,id=SIMULATOR-1",
+    );
+  });
+
+  test("accepts platform-specific run discovery alongside legacy jobs", () => {
+    expect(
+      parseBuildAgentRunDestinationsPayload({ destinationType: "SIMULATOR" }),
+    ).toEqual({ destinationType: "SIMULATOR" });
+    expect(
+      parseBuildAgentRunDestinationsPayload({
+        destinationType: "PHYSICAL_DEVICE",
+        platforms: [
+          "IOS",
+          "MACOS_DESIGNED_FOR_IPAD",
+          "VISIONOS_DESIGNED_FOR_IPAD",
+        ],
+      }).platforms,
+    ).toEqual(["IOS", "MACOS_DESIGNED_FOR_IPAD", "VISIONOS_DESIGNED_FOR_IPAD"]);
+  });
+
   test("preserves cache ownership and validates script resource scopes with legacy defaults", () => {
     const script = {
       id: "hook",
@@ -414,11 +472,12 @@ describe("provisioning profile classification", () => {
     ).toBe("ENTERPRISE");
   });
 
-  test("maps every distribution method to a profile type", () => {
+  test("maps distribution methods that require a profile to a profile type", () => {
     for (const method of BUILD_EXPORT_METHODS) {
-      expect(PROVISIONING_PROFILE_TYPES).toContain(
-        EXPORT_METHOD_PROFILE_TYPES[method],
-      );
+      const type = EXPORT_METHOD_PROFILE_TYPES[method];
+      if (method === "MAC_APPLICATION" || method === "DEVELOPER_ID")
+        expect(type).toBeNull();
+      else expect(PROVISIONING_PROFILE_TYPES).toContain(type);
     }
   });
 });

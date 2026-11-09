@@ -14,6 +14,7 @@ import {
   IOS_DEPLOY_JOB_KIND,
   IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
   parseBuildJobPayload,
   type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
@@ -873,6 +874,64 @@ describe("BuildsService", () => {
     expect(recordInTransaction).not.toHaveBeenCalled();
   });
 
+  test("projects a completion that arrives before the build job is attached", async () => {
+    let completeBuild:
+      | Parameters<AgentControlService["registerCompletionHandler"]>[1]
+      | undefined;
+    const payloadJson = JSON.stringify({ buildId: "pending-build" });
+    const findFirst = vi.fn().mockResolvedValue({
+      id: "pending-build",
+      jobId: null,
+      queuePayloadJson: payloadJson,
+      status: "QUEUED",
+      snapshotJson: "{}",
+    });
+    const update = vi.fn();
+    getPrismaClient.mockResolvedValue({
+      build: { findFirst },
+      $transaction: vi.fn((callback) => callback({ build: { update } })),
+    });
+    new BuildsService({
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === IOS_BUILD_JOB_KIND) completeBuild = handler;
+      }),
+    } as unknown as AgentControlService);
+
+    await completeBuild!({
+      id: "finished-job",
+      agentId: "agent-1",
+      payloadJson,
+      status: "SUCCEEDED",
+      resultJson: "{}",
+      error: null,
+    } as never);
+
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { jobId: "finished-job" },
+            {
+              id: "pending-build",
+              agentId: "agent-1",
+              jobId: null,
+              queuePayloadJson: payloadJson,
+            },
+          ],
+        },
+      }),
+    );
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          jobId: "finished-job",
+          queuePayloadJson: null,
+          status: "SUCCEEDED",
+        }),
+      }),
+    );
+  });
+
   test("queues one automatic export from the immutable build snapshot", async () => {
     let completeBuild:
       | Parameters<AgentControlService["registerCompletionHandler"]>[1]
@@ -1293,6 +1352,171 @@ describe("BuildsService", () => {
       expect.objectContaining({
         kind: IOS_DESTINATIONS_JOB_KIND,
         payload: expect.objectContaining({ action: "BUILD" }),
+      }),
+    );
+  });
+
+  test("queues per-platform settings independently and replays accepted batch entries", async () => {
+    const buildWorktree = worktree();
+    const createJob = vi.fn().mockResolvedValue({ id: "job-1" });
+    const rows = new Map<string, Record<string, unknown>>();
+    let digest: string | undefined;
+    const build = {
+      findUnique: vi.fn(({ where }) => rows.get(where.requestKey) ?? null),
+      findUniqueOrThrow: vi.fn(({ where }) =>
+        [...rows.values()].find((row) => row.id === where.id),
+      ),
+      create: vi.fn(({ data }) => rows.set(data.requestKey, data)),
+      update: vi.fn(({ where, data }) => {
+        const row = [...rows.values()].find((entry) => entry.id === where.id);
+        Object.assign(row!, data);
+      }),
+    };
+    getPrismaClient.mockResolvedValue({
+      build,
+      buildBatchRequestReceipt: {
+        upsert: vi.fn(({ create }) => ({
+          payloadDigest: (digest ??= create.payloadDigest),
+        })),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+      buildConfiguration: {
+        findUnique: vi.fn().mockResolvedValue({
+          ...configuration(),
+          platformConfigurationsJson: JSON.stringify([
+            { platform: "IOS" },
+            {
+              platform: "TVOS",
+              sourceKind: "PROJECT",
+              sourcePath: "TV.xcodeproj",
+              scheme: "TV",
+              buildConfiguration: "Release",
+              advancedSettings: { developmentTeam: "TELEVISION" },
+            },
+          ]),
+        }),
+      },
+      buildSourceObservation: { findUnique: vi.fn().mockResolvedValue(null) },
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildsService(control(createJob));
+    const input = {
+      worktreeId: "worktree-1",
+      configurationId: "configuration-1",
+      requestId: "batch-1",
+      selections: [
+        { platform: "IOS", destination },
+        {
+          platform: "TVOS",
+          destination: {
+            ...destination,
+            id: "TV-1",
+            platform: "tvOS Simulator",
+            platformId: "TVOS",
+          },
+        },
+      ],
+    } as const;
+    const request = { ...input, selections: [...input.selections] };
+    const first = await service.startBuilds(request);
+    expect(first).toMatchObject([
+      { platform: "IOS", build: { status: "QUEUED" }, error: null },
+      {
+        platform: "TVOS",
+        build: null,
+        error: expect.stringContaining("Update the build agent"),
+      },
+    ]);
+    expect(createJob).toHaveBeenCalledTimes(1);
+
+    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+      IOS_BUILD_JOB_KIND,
+      XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+    ]);
+    const resumed = await service.startBuilds(request);
+    expect(resumed[0]?.build?.id).toBe(first[0]?.build?.id);
+    expect(resumed[1]?.build?.commandSummary).toContain(
+      "platform=tvOS Simulator,id=TV-1",
+    );
+    expect(createJob).toHaveBeenCalledTimes(2);
+    expect(createJob.mock.calls[1]?.[0].payload).toMatchObject({
+      scheme: "TV",
+      configuration: "Release",
+      source: { kind: "PROJECT", relativePath: "TV.xcodeproj" },
+      advancedSettings: { developmentTeam: "TELEVISION" },
+    });
+    await service.startBuilds(request);
+    expect(createJob).toHaveBeenCalledTimes(2);
+    await expect(
+      service.startBuilds({ ...request, scriptIds: ["other"] }),
+    ).rejects.toThrow("already used with different settings");
+  });
+
+  test("offers only artifact-compatible run platforms and keeps iOS SDK variants separate", async () => {
+    const buildWorktree = worktree();
+    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+      IOS_RUN_DESTINATIONS_JOB_KIND,
+      XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+    ]);
+    const vision = {
+      ...destination,
+      id: "VISION-1",
+      platform: "visionOS Simulator",
+      platformId: "VISIONOS_DESIGNED_FOR_IPAD",
+      osVersion: "2.0",
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          status: "SUCCEEDED",
+          agentId: "agent-1",
+          codebaseId: "codebase-1",
+          worktreeId: "worktree-1",
+          destinationType: "SIMULATOR",
+          destinationJson: JSON.stringify(destination),
+          artifacts: [
+            {
+              kind: "RUNNABLE_APP",
+              metadataJson: JSON.stringify({
+                minimumOSVersion: "26.0",
+                compatiblePlatforms: ["IOS", "VISIONOS_DESIGNED_FOR_IPAD"],
+              }),
+            },
+          ],
+        }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+      agentJob: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    });
+    const createJob = vi.fn().mockResolvedValue({ id: "destinations-job" });
+    const service = new BuildsService({
+      registerCompletionHandler: vi.fn(),
+      createJob,
+      getJob: vi.fn().mockResolvedValue({
+        id: "destinations-job",
+        status: "SUCCEEDED",
+        error: null,
+        resultJson: JSON.stringify({
+          destinations: [
+            destination,
+            vision,
+            { ...vision, platformId: "VISIONOS" },
+            { ...destination, platform: "tvOS Simulator", platformId: "TVOS" },
+          ],
+        }),
+      }),
+    } as unknown as AgentControlService);
+    await expect(
+      service.destinationsForBuild("build-1", "request-vision"),
+    ).resolves.toEqual([destination, vision]);
+    expect(createJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          platforms: ["IOS", "VISIONOS_DESIGNED_FOR_IPAD"],
+        }),
       }),
     );
   });
