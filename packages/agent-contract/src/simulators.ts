@@ -44,6 +44,14 @@ export type Simulator = {
   dataPath: string | null;
 };
 
+export function canDeleteSimulator({
+  state,
+  isAvailable,
+}: Pick<Simulator, "state" | "isAvailable">): boolean {
+  // CoreSimulator can leave records with a missing runtime stuck in Creating.
+  return state === "Shutdown" || (state === "Creating" && !isAvailable);
+}
+
 export type SimulatorDeviceType = { id: string; name: string };
 
 export type SimulatorRuntime = {

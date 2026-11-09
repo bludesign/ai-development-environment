@@ -181,6 +181,26 @@ test.describe("app screenshots", () => {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
       }
+      if (route.simulatorSelection) {
+        await page.getByRole("button", { name: "Edit", exact: true }).click();
+        const group = page.getByRole("checkbox", {
+          name: "Select all simulators on Studio Mac",
+          exact: true,
+        });
+        await group.check();
+        await expect(
+          page.getByRole("checkbox", { name: "Select Living Room Apple TV" }),
+        ).toBeChecked();
+        await expect(
+          page.getByRole("checkbox", { name: "Select Watch QA" }),
+        ).toBeChecked();
+        await expect(
+          page.getByRole("checkbox", { name: "Select QA iPhone 18 Pro" }),
+        ).toBeDisabled();
+        await expect(
+          page.getByRole("button", { name: "Delete selected" }),
+        ).toBeEnabled();
+      }
       if (route.mcpAuthorizationReview) {
         await page
           .getByRole("table", { name: "Current authorizations for ChatGPT" })

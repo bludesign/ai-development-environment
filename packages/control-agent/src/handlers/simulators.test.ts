@@ -159,6 +159,54 @@ describe("simulator jobs", () => {
     expect(commands()).toEqual([["simctl", "list", "-j"]]);
   });
 
+  test("deletes only the selected unavailable simulator stuck in Creating", async () => {
+    capture
+      .mockResolvedValueOnce(
+        inventory({
+          [legacyRuntimeId]: [
+            device(simulatorId, {
+              state: "Creating",
+              isAvailable: false,
+              availabilityError:
+                "runtime profile not found using “System” match policy",
+            }),
+            device(replacementId, { isAvailable: false }),
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(response());
+
+    await performSimulatorAction(
+      { action: "DELETE", simulatorId },
+      timeout,
+      signal(),
+    );
+
+    expect(commands()).toEqual([
+      ["simctl", "list", "-j"],
+      ["simctl", "delete", simulatorId],
+    ]);
+  });
+
+  test.each([
+    { state: "Creating", isAvailable: true },
+    { state: "Booting", isAvailable: false },
+    { state: "Booted", isAvailable: false },
+    { state: "Shutting Down", isAvailable: false },
+  ])("protects an in-use simulator reported as $state", async (state) => {
+    capture.mockResolvedValueOnce(
+      inventory({ [tvRuntimeId]: [device(simulatorId, state)] }),
+    );
+    await expect(
+      performSimulatorAction(
+        { action: "DELETE", simulatorId },
+        timeout,
+        signal(),
+      ),
+    ).rejects.toThrow("shut down");
+    expect(commands()).toEqual([["simctl", "list", "-j"]]);
+  });
+
   test("reads apps on a shut-down device and reveals only validated local paths", async () => {
     const dataPath = join(
       scratch,
@@ -346,6 +394,20 @@ describe("simulator jobs", () => {
       "Shut down all",
     );
     expect(commands()).toHaveLength(1);
+  });
+
+  test("keeps the reset requirement that all simulators be shut down", async () => {
+    capture.mockResolvedValueOnce(
+      inventory({
+        [legacyRuntimeId]: [
+          device(simulatorId, { state: "Creating", isAvailable: false }),
+        ],
+      }),
+    );
+    await expect(resetSimulators({}, timeout, signal())).rejects.toThrow(
+      "Shut down all",
+    );
+    expect(commands()).toEqual([["simctl", "list", "-j"]]);
   });
 
   test("keeps every original when a device boots while reset is staging", async () => {

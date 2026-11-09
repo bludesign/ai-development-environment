@@ -73,17 +73,17 @@ const buildInventory: SimulatorInventory = {
   runtimes: [visionos],
 };
 
+const unavailableSimulator: Simulator = {
+  ...device(ios, ids.simulators.legacyIOS, "Legacy iPhone QA", "Creating"),
+  runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+  runtimeName: "iOS 18.6",
+  deviceTypeId: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+  isAvailable: false,
+  availabilityError: "runtime profile not found using “System” match policy",
+};
+
 const ciInventory: SimulatorInventory = {
-  simulators: [
-    {
-      ...device(ios, ids.simulators.legacyIOS, "Legacy iPhone QA"),
-      runtimeId: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
-      runtimeName: "iOS 18.6",
-      deviceTypeId: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
-      isAvailable: false,
-      availabilityError: "The iOS 18.6 runtime is no longer installed.",
-    },
-  ],
+  simulators: [unavailableSimulator],
   runtimes: [],
 };
 
@@ -143,6 +143,17 @@ export async function seedSimulators(prisma: PrismaClient): Promise<void> {
         idempotencyKey: `${SIMULATOR_INSPECT_JOB_KIND}:${ids.simulators.detailRequest}`,
         payloadJson: JSON.stringify({ simulatorId: capturedSimulator.id }),
         resultJson: JSON.stringify({ details }),
+      },
+      {
+        ...terminal,
+        id: "job-simulator-detail-unavailable",
+        agentId: ids.agents.ci,
+        kind: SIMULATOR_INSPECT_JOB_KIND,
+        idempotencyKey: `${SIMULATOR_INSPECT_JOB_KIND}:${ids.simulators.detailRequest}`,
+        payloadJson: JSON.stringify({ simulatorId: unavailableSimulator.id }),
+        resultJson: JSON.stringify({
+          details: { simulator: unavailableSimulator, apps: [] },
+        }),
       },
     ],
   });

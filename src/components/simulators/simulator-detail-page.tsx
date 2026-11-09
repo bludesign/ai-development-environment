@@ -1,5 +1,6 @@
 "use client";
 
+import { canDeleteSimulator } from "@ai-development-environment/agent-contract/simulators";
 import {
   ArrowLeft,
   Copy,
@@ -109,6 +110,7 @@ export function SimulatorDetailPage({
   );
   const booted = simulator?.state.toLowerCase() === "booted";
   const shutDown = simulator?.state.toLowerCase() === "shutdown";
+  const deletable = Boolean(simulator && canDeleteSimulator(simulator));
 
   useBreadcrumbLabel(["system", "simulators", agentId], agent?.name);
   useBreadcrumbFallback(["system", "simulators", agentId], !loading && !agent);
@@ -326,7 +328,7 @@ export function SimulatorDetailPage({
               <CardTitle>{t("controls")}</CardTitle>
               <CardDescription>
                 {t("controlsDescription", { agent: agentName })}
-                {!shutDown && <> {t("deleteNeedsShutdown")}</>}
+                {!deletable && <> {t("deleteNeedsShutdown")}</>}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
@@ -376,7 +378,7 @@ export function SimulatorDetailPage({
                 {t("erase")}
               </Button>
               <Button
-                disabled={!canAct || !shutDown}
+                disabled={!canAct || !deletable}
                 onClick={() => setDestructive("DELETE")}
                 variant="destructive"
               >
@@ -386,13 +388,19 @@ export function SimulatorDetailPage({
           </Card>
 
           <Card className="gap-0 pb-0">
-            <CardHeader className="pb-4">
+            <CardHeader>
               <CardTitle>{t("installedApps")}</CardTitle>
               <CardDescription>{t("appsDescription")}</CardDescription>
             </CardHeader>
             {!booted || details.apps.length === 0 ? (
-              <CardContent className="pb-6 text-sm text-muted-foreground">
-                {t(booted ? "noApps" : "bootForApps")}
+              <CardContent className="py-(--card-spacing) text-muted-foreground">
+                {t(
+                  !simulator.isAvailable
+                    ? "appsUnavailable"
+                    : booted
+                      ? "noApps"
+                      : "bootForApps",
+                )}
               </CardContent>
             ) : (
               <Table>

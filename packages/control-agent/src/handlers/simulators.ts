@@ -4,6 +4,7 @@ import { isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  canDeleteSimulator,
   simulatorActionPayload,
   simulatorCreatePayload,
   simulatorEmptyPayload,
@@ -489,7 +490,7 @@ async function openFolder(
 }
 
 async function deleteDevice(run: CommandRunner, simulator: Simulator) {
-  checkState(simulator, "Shutdown");
+  if (!canDeleteSimulator(simulator)) checkState(simulator, "Shutdown");
   await simctl(run, "delete", simulator.id);
 }
 

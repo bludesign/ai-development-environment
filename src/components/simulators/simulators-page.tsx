@@ -1,11 +1,15 @@
 "use client";
 
+import { canDeleteSimulator } from "@ai-development-environment/agent-contract/simulators";
 import {
+  ListFilter,
   MoreHorizontal,
   Plus,
   RefreshCw,
   Search,
   TabletSmartphone,
+  Trash2,
+  X,
 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
@@ -19,10 +23,12 @@ import {
   ALL_PAGE_AGENTS,
   PageAgentFilter,
 } from "@/components/active-agent/page-agent-filter";
+import { SelectAllCheckbox } from "@/components/common/select-all-checkbox";
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,6 +85,44 @@ type SimulatorRow = {
   deviceTypeName: string | undefined;
 };
 
+type DeleteFailure = { row: SimulatorRow; message: string };
+type DeleteBatchResult = { agentIds: string[]; failures: DeleteFailure[] };
+
+function simulatorRowKey({ agent, simulator }: SimulatorRow) {
+  return `${agent.id}:${simulator.id}`;
+}
+
+async function deleteSimulatorGroups(groups: SimulatorRow[][]) {
+  // Confirmed writes keep their original targets when the visible agent changes.
+  const { signal } = new AbortController();
+  const failures: DeleteFailure[] = [];
+  const concurrentAgents = 4;
+  for (let offset = 0; offset < groups.length; offset += concurrentAgents) {
+    await Promise.all(
+      groups.slice(offset, offset + concurrentAgents).map(async (rows) => {
+        for (const row of rows) {
+          try {
+            await performSimulatorAction(
+              {
+                agentId: row.agent.id,
+                simulatorId: row.simulator.id,
+                action: "DELETE",
+              },
+              signal,
+            );
+          } catch (error) {
+            failures.push({
+              row,
+              message: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+      }),
+    );
+  }
+  return failures;
+}
+
 export function SimulatorsPage() {
   const t = useTranslations("simulators");
   const { activeAgentId, agents, loading, ready, error } = useActiveAgent();
@@ -88,6 +132,21 @@ export function SimulatorsPage() {
   );
   const agentId =
     activeAgentId ?? (selection === ALL_PAGE_AGENTS ? null : selection);
+  const [deleting, setDeleting] = useState(false);
+  const [completedDeletion, setCompletedDeletion] =
+    useState<DeleteBatchResult | null>(null);
+
+  async function deleteBatch(groups: SimulatorRow[][]) {
+    setDeleting(true);
+    try {
+      setCompletedDeletion({
+        agentIds: groups.map((rows) => rows[0]!.agent.id),
+        failures: await deleteSimulatorGroups(groups),
+      });
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
@@ -107,12 +166,41 @@ export function SimulatorsPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+      {deleting && (
+        <p
+          className="flex items-center gap-2 text-sm text-muted-foreground"
+          role="status"
+        >
+          <Spinner /> {t("deletingSelected")}
+        </p>
+      )}
+      {!deleting && Boolean(completedDeletion?.failures.length) && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <p>{t("deleteFailures")}</p>
+            <ul className="list-disc pl-4">
+              {completedDeletion?.failures.map(({ row, message }) => (
+                <li key={simulatorRowKey(row)}>
+                  {t("deleteFailure", {
+                    name: row.simulator.name,
+                    agent: row.agent.name,
+                    message,
+                  })}
+                </li>
+              ))}
+            </ul>
+          </AlertDescription>
+        </Alert>
+      )}
       {ready && (!loading || agents.length > 0) ? (
         <SimulatorList
+          completedDeletion={completedDeletion}
+          deleting={deleting}
           key={agentId ?? ALL_PAGE_AGENTS}
           agents={
             agentId ? agents.filter((agent) => agent.id === agentId) : agents
           }
+          onDelete={deleteBatch}
         />
       ) : (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -123,7 +211,17 @@ export function SimulatorsPage() {
   );
 }
 
-function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
+function SimulatorList({
+  agents,
+  completedDeletion,
+  deleting,
+  onDelete,
+}: {
+  agents: ActiveAgentOption[];
+  completedDeletion: DeleteBatchResult | null;
+  deleting: boolean;
+  onDelete: (groups: SimulatorRow[][]) => Promise<void>;
+}) {
   const t = useTranslations("simulators");
   const tc = useTranslations("common");
   const locale = useLocale();
@@ -141,25 +239,42 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
   const [state, setState] = useState("all");
   const [dialog, setDialog] = useState<"create" | "reset" | null>(null);
   const [deletion, setDeletion] = useState<SimulatorRow | null>(null);
-  const inventoryRequest = useRef<AbortController | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [selection, setSelection] = useState<{
+    result: DeleteBatchResult | null;
+    keys: Set<string>;
+  } | null>(null);
+  const [bulkDeletion, setBulkDeletion] = useState<Set<string> | null>(null);
+  const inventoryRequests = useRef(new Map<string, AbortController>());
   const operationRequest = useRef<AbortController | null>(null);
+  const [reconciledDeletion, setReconciledDeletion] =
+    useState(completedDeletion);
+  const selected =
+    selection?.result === completedDeletion
+      ? selection.keys
+      : new Set(
+          completedDeletion?.failures.map(({ row }) => simulatorRowKey(row)),
+        );
+  const setSelected = (keys: Set<string>) =>
+    setSelection({ result: completedDeletion, keys });
+  const operationsBusy = busy || deleting;
 
   const eligibleIds = agents
     .filter((agent) => simulatorAgentSupports(agent, "inventory"))
     .map(({ id }) => id)
     .join("\0");
   const refresh = useCallback(
-    async (onlyAgentId?: string) => {
-      inventoryRequest.current?.abort();
-      const controller = new AbortController();
-      inventoryRequest.current = controller;
+    async (onlyAgentIds?: string[]) => {
       const agentIds = eligibleIds ? eligibleIds.split("\0") : [];
-      const targets = onlyAgentId
-        ? agentIds.filter((id) => id === onlyAgentId)
+      const targets = onlyAgentIds
+        ? agentIds.filter((id) => onlyAgentIds.includes(id))
         : agentIds;
-      setRefreshing(targets.length > 0);
+      setRefreshing(targets.length > 0 || inventoryRequests.current.size > 0);
       await Promise.all(
         targets.map(async (id) => {
+          inventoryRequests.current.get(id)?.abort();
+          const controller = new AbortController();
+          inventoryRequests.current.set(id, controller);
           try {
             const result = await refreshSimulatorInventory(
               id,
@@ -174,26 +289,41 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
               ...current,
               [id]: value instanceof Error ? value.message : String(value),
             }));
+          } finally {
+            if (inventoryRequests.current.get(id) === controller) {
+              inventoryRequests.current.delete(id);
+              setRefreshing(inventoryRequests.current.size > 0);
+            }
           }
         }),
       );
-      if (!controller.signal.aborted) setRefreshing(false);
     },
     [eligibleIds],
   );
 
   useEffect(() => {
+    const requests = inventoryRequests.current;
     const timer = window.setTimeout(() => void refresh(), 0);
     return () => {
       window.clearTimeout(timer);
-      inventoryRequest.current?.abort();
+      for (const controller of requests.values()) controller.abort();
+      requests.clear();
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!completedDeletion || reconciledDeletion === completedDeletion) return;
+    const timer = window.setTimeout(() => {
+      setReconciledDeletion(completedDeletion);
+      void refresh(completedDeletion.agentIds);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [completedDeletion, reconciledDeletion, refresh]);
 
   useEffect(() => () => operationRequest.current?.abort(), []);
 
   async function run(
-    agentId: string,
+    agentIds: string[],
     action: (signal: AbortSignal) => Promise<unknown>,
   ) {
     const controller = new AbortController();
@@ -204,7 +334,7 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
       await action(controller.signal);
     } finally {
       if (!controller.signal.aborted) {
-        await refresh(agentId);
+        await refresh(agentIds);
         if (!controller.signal.aborted) setBusy(false);
       }
     }
@@ -215,7 +345,7 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
     action: SimulatorAction,
   ) => {
     try {
-      await run(agent.id, (signal) =>
+      await run([agent.id], (signal) =>
         performSimulatorAction(
           { agentId: agent.id, simulatorId: simulator.id, action },
           signal,
@@ -288,6 +418,43 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
       rows: filtered.filter((row) => row.agent.id === agent.id),
     }))
     .filter((group) => group.rows.length > 0);
+  const canDelete = ({ agent, simulator }: SimulatorRow) =>
+    !agentErrors[agent.id] &&
+    simulatorAgentSupports(agent, "action") &&
+    canDeleteSimulator(simulator);
+  const selectedVisible = new Set(
+    filtered
+      .filter((row) => canDelete(row) && selected.has(simulatorRowKey(row)))
+      .map(simulatorRowKey),
+  );
+  const selectionBusy =
+    operationsBusy || refreshing || completedDeletion !== reconciledDeletion;
+
+  function changeFilter(setFilter: (value: string) => void, value: string) {
+    setFilter(value);
+    setSelected(new Set());
+  }
+
+  function toggleEditMode() {
+    setEditMode(!editMode);
+    if (editMode) setSelected(new Set());
+  }
+
+  async function deleteSelected(targets: Set<string>) {
+    const targetGroups = groups
+      .map(({ rows }) =>
+        rows.filter(
+          (row) => canDelete(row) && targets.has(simulatorRowKey(row)),
+        ),
+      )
+      .filter((rows) => rows.length > 0);
+    if (selectionBusy || targetGroups.flat().length !== targets.size) {
+      setError(t("selectionChanged"));
+      return;
+    }
+    setError(null);
+    await onDelete(targetGroups);
+  }
 
   return (
     <>
@@ -297,12 +464,17 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           <Input
             aria-label={t("search")}
             className="pl-9"
-            onChange={(event) => setSearch(event.target.value)}
+            disabled={operationsBusy}
+            onChange={(event) => changeFilter(setSearch, event.target.value)}
             placeholder={t("search")}
             value={search}
           />
         </div>
-        <Select onValueChange={setPlatform} value={platform}>
+        <Select
+          disabled={operationsBusy}
+          onValueChange={(value) => changeFilter(setPlatform, value)}
+          value={platform}
+        >
           <SelectTrigger aria-label={t("platform")}>
             <SelectValue />
           </SelectTrigger>
@@ -315,7 +487,11 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
             ))}
           </SelectContent>
         </Select>
-        <Select onValueChange={setState} value={state}>
+        <Select
+          disabled={operationsBusy}
+          onValueChange={(value) => changeFilter(setState, value)}
+          value={state}
+        >
           <SelectTrigger aria-label={t("state")}>
             <SelectValue />
           </SelectTrigger>
@@ -327,7 +503,7 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           </SelectContent>
         </Select>
         <Button
-          disabled={refreshing || busy || !eligibleIds}
+          disabled={selectionBusy || !eligibleIds}
           onClick={() => void refresh()}
           variant="outline"
         >
@@ -335,19 +511,42 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           {t("refresh")}
         </Button>
         <Button
-          disabled={busy || refreshing || !resetAgents.length}
+          disabled={operationsBusy || (!editMode && !filtered.length)}
+          onClick={toggleEditMode}
+          variant={editMode ? "default" : "outline"}
+        >
+          {editMode ? <X /> : <ListFilter />} {t(editMode ? "done" : "edit")}
+        </Button>
+        <Button
+          disabled={editMode || selectionBusy || !resetAgents.length}
           onClick={() => setDialog("reset")}
           variant="outline"
         >
           {t("reset")}
         </Button>
         <Button
-          disabled={busy || refreshing || !createAgents.length}
+          disabled={editMode || selectionBusy || !createAgents.length}
           onClick={() => setDialog("create")}
         >
           <Plus /> {t("create")}
         </Button>
       </div>
+
+      {editMode && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 p-2">
+          <span className="text-xs text-muted-foreground" role="status">
+            {t("selectedCount", { count: selectedVisible.size })}
+          </span>
+          <Button
+            disabled={selectionBusy || !selectedVisible.size}
+            onClick={() => setBulkDeletion(selectedVisible)}
+            size="sm"
+            variant="destructive"
+          >
+            {deleting ? <Spinner /> : <Trash2 />} {t("deleteSelected")}
+          </Button>
+        </div>
+      )}
 
       {error && (
         <Alert variant="destructive">
@@ -385,21 +584,42 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           <Table>
             <TableHeader>
               <TableRow>
+                {editMode && (
+                  <TableHead className="w-10">
+                    <span className="sr-only">{t("selection")}</span>
+                  </TableHead>
+                )}
                 <TableHead>{t("name")}</TableHead>
                 <TableHead className="hidden sm:table-cell">
                   {t("runtime")}
                 </TableHead>
                 <TableHead>{t("state")}</TableHead>
-                <TableHead className="w-10">
-                  <span className="sr-only">{t("actions")}</span>
-                </TableHead>
+                {!editMode && (
+                  <TableHead className="w-10">
+                    <span className="sr-only">{t("actions")}</span>
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
               {groups.map(({ agent, rows }) => (
                 <Fragment key={agent.id}>
                   <TableRow className="bg-muted/35 hover:bg-muted/35">
-                    <TableCell className="px-3 py-1.5 font-medium" colSpan={4}>
+                    {editMode && (
+                      <TableCell className="px-2 py-1.5">
+                        <SelectAllCheckbox
+                          disabled={selectionBusy}
+                          ids={rows.filter(canDelete).map(simulatorRowKey)}
+                          label={t("selectAllAgent", { agent: agent.name })}
+                          onChange={setSelected}
+                          selected={selectedVisible}
+                        />
+                      </TableCell>
+                    )}
+                    <TableCell
+                      className="px-3 py-1.5 font-medium"
+                      colSpan={editMode ? 3 : 4}
+                    >
                       <Link
                         className={rowLinkClass}
                         href={`/dashboard/agents/${encodeURIComponent(agent.id)}`}
@@ -411,15 +631,42 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
                   {rows.map((row) => {
                     const { agent, simulator, deviceTypeName } = row;
                     const canAct =
-                      !busy &&
-                      !refreshing &&
+                      !selectionBusy &&
                       !agentErrors[agent.id] &&
                       simulatorAgentSupports(agent, "action");
                     const booted = simulator.state.toLowerCase() === "booted";
                     const shutDown =
                       simulator.state.toLowerCase() === "shutdown";
+                    const deletable = canDeleteSimulator(simulator);
+                    const key = simulatorRowKey(row);
+                    const isSelected = selectedVisible.has(key);
                     return (
-                      <TableRow key={`${agent.id}:${simulator.id}`}>
+                      <TableRow
+                        data-state={isSelected ? "selected" : undefined}
+                        key={key}
+                      >
+                        {editMode && (
+                          <TableCell>
+                            <Checkbox
+                              aria-label={t("selectSimulator", {
+                                name: simulator.name,
+                              })}
+                              checked={isSelected}
+                              disabled={selectionBusy || !canDelete(row)}
+                              onCheckedChange={(checked) => {
+                                const next = new Set(selectedVisible);
+                                if (checked === true) next.add(key);
+                                else next.delete(key);
+                                setSelected(next);
+                              }}
+                              title={
+                                !deletable
+                                  ? t("deleteNeedsShutdown")
+                                  : undefined
+                              }
+                            />
+                          </TableCell>
+                        )}
                         <TableCell className="min-w-32 whitespace-normal">
                           <Link
                             className={cn(
@@ -446,53 +693,56 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
                         <TableCell>
                           <SimulatorStateBadge simulator={simulator} />
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex items-center justify-end gap-1.5">
-                            {simulator.isAvailable && (booted || shutDown) && (
-                              <Button
-                                disabled={!canAct}
-                                onClick={() =>
-                                  void runRowAction(
-                                    row,
-                                    booted ? "SHUTDOWN" : "BOOT",
-                                  )
-                                }
-                                size="sm"
-                                variant="outline"
-                              >
-                                {t(booted ? "shutdown" : "boot")}
-                              </Button>
-                            )}
-                            <DropdownMenu>
-                              <DropdownMenuTrigger asChild>
-                                <Button
-                                  aria-label={t("actionsFor", {
-                                    name: simulator.name,
-                                  })}
-                                  disabled={!canAct}
-                                  size="icon-sm"
-                                  variant="ghost"
-                                >
-                                  <MoreHorizontal />
-                                </Button>
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end">
-                                <DropdownMenuItem
-                                  disabled={!shutDown}
-                                  onSelect={() => setDeletion(row)}
-                                  variant="destructive"
-                                >
-                                  {t("delete")}
-                                </DropdownMenuItem>
-                                {!shutDown && (
-                                  <DropdownMenuLabel className="max-w-52 font-normal whitespace-normal text-muted-foreground">
-                                    {t("deleteNeedsShutdown")}
-                                  </DropdownMenuLabel>
+                        {!editMode && (
+                          <TableCell className="text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              {simulator.isAvailable &&
+                                (booted || shutDown) && (
+                                  <Button
+                                    disabled={!canAct}
+                                    onClick={() =>
+                                      void runRowAction(
+                                        row,
+                                        booted ? "SHUTDOWN" : "BOOT",
+                                      )
+                                    }
+                                    size="sm"
+                                    variant="outline"
+                                  >
+                                    {t(booted ? "shutdown" : "boot")}
+                                  </Button>
                                 )}
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          </div>
-                        </TableCell>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button
+                                    aria-label={t("actionsFor", {
+                                      name: simulator.name,
+                                    })}
+                                    disabled={!canAct}
+                                    size="icon-sm"
+                                    variant="ghost"
+                                  >
+                                    <MoreHorizontal />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem
+                                    disabled={!deletable}
+                                    onSelect={() => setDeletion(row)}
+                                    variant="destructive"
+                                  >
+                                    {t("delete")}
+                                  </DropdownMenuItem>
+                                  {!deletable && (
+                                    <DropdownMenuLabel className="max-w-52 font-normal whitespace-normal text-muted-foreground">
+                                      {t("deleteNeedsShutdown")}
+                                    </DropdownMenuLabel>
+                                  )}
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        )}
                       </TableRow>
                     );
                   })}
@@ -526,10 +776,10 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           mode={dialog}
           onClose={() => setDialog(null)}
           onCreate={(input: CreateSimulatorInput) =>
-            run(input.agentId, (signal) => createSimulator(input, signal))
+            run([input.agentId], (signal) => createSimulator(input, signal))
           }
           onReset={(agentId) =>
-            run(agentId, (signal) => resetSimulators(agentId, signal))
+            run([agentId], (signal) => resetSimulators(agentId, signal))
           }
         />
       )}
@@ -547,6 +797,21 @@ function SimulatorList({ agents }: { agents: ActiveAgentOption[] }) {
           }}
           open
           title={t("deleteTitle")}
+        />
+      )}
+      {bulkDeletion && (
+        <ConfirmationDialog
+          actionLabel={t("deleteSelected")}
+          cancelLabel={tc("cancel")}
+          description={t("deleteSelectedDescription", {
+            count: bulkDeletion.size,
+          })}
+          onConfirm={() => deleteSelected(bulkDeletion)}
+          onOpenChange={(open) => {
+            if (!open) setBulkDeletion(null);
+          }}
+          open
+          title={t("deleteSelectedTitle")}
         />
       )}
     </>

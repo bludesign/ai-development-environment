@@ -56,7 +56,20 @@ export type RouteEntry = {
   desktopOnly?: boolean;
   /** Expand two independent Claude child conversations in the session Agents card. */
   sessionAgents?: boolean;
+  /** Show simulator Edit mode with one agent's eligible devices selected. */
+  simulatorSelection?: boolean;
 };
+
+const simulatorInventoryCapture = {
+  path: "/system/simulators",
+  readyGraphqlOperation: "RefreshSimulatorInventory",
+  readyTexts: ["QA iPhone 18 Pro"],
+  readyEnabledButton: "Create simulator",
+  initScript: `Object.defineProperty(crypto, "randomUUID", {
+    configurable: true,
+    value: () => "${ids.simulators.inventoryRequest}",
+  });`,
+} satisfies Omit<RouteEntry, "name">;
 
 export const routes: RouteEntry[] = [
   {
@@ -379,21 +392,32 @@ export const routes: RouteEntry[] = [
     });`,
   },
   {
+    ...simulatorInventoryCapture,
     name: "simulators",
-    path: "/system/simulators",
-    readyGraphqlOperation: "RefreshSimulatorInventory",
-    readyTexts: ["QA iPhone 18 Pro"],
-    readyEnabledButton: "Create simulator",
-    initScript: `Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => "${ids.simulators.inventoryRequest}",
-    });`,
+  },
+  {
+    ...simulatorInventoryCapture,
+    name: "simulators-edit",
+    simulatorSelection: true,
   },
   {
     name: "simulator-detail",
     path: `/system/simulators/${ids.agents.studio}/${ids.simulators.ios}`,
     readyGraphqlOperation: "InspectSimulator",
     readyTexts: ["Acme Weather"],
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.detailRequest}",
+    });`,
+  },
+  {
+    name: "simulator-detail-unavailable",
+    path: `/system/simulators/${ids.agents.ci}/${ids.simulators.legacyIOS}`,
+    readyGraphqlOperation: "InspectSimulator",
+    readyTexts: [
+      "The simulator runtime is unavailable, so installed apps can’t be loaded.",
+    ],
+    readyEnabledButton: "Delete simulator",
     initScript: `Object.defineProperty(crypto, "randomUUID", {
       configurable: true,
       value: () => "${ids.simulators.detailRequest}",
