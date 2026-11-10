@@ -202,6 +202,7 @@ import {
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
+import { WorktreeBulkMerge } from "./worktree-bulk-merge";
 import { WorktreeBulkSync } from "./worktree-bulk-sync";
 import {
   shouldNavigateWorktreeSurface,
@@ -1139,6 +1140,13 @@ export function WorktreesPage({
             onReload={refreshPage}
             overview={overview}
             scopeRepositoryIds={scopeRepositoryIds}
+          />
+          <WorktreeBulkMerge
+            agentId={globalAgent.activeAgentId}
+            appId={appId}
+            disabled={busy || fetchOperation.active || !overview}
+            key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+            onReload={refreshPage}
           />
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
             <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}

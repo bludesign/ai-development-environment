@@ -4170,6 +4170,153 @@ describe("GitHub service", () => {
     },
   );
 
+  test.each([
+    "same request",
+    "new source",
+    "new target",
+    "conflict after submit",
+    "missing response",
+    "unconfirmed response",
+    "primary rate limit",
+    "secondary rate limit",
+    "partial response",
+  ])(
+    "checks the reviewed Bulk Merge revision again after acquiring the reservation (%s)",
+    async (change) => {
+      let reads = 0;
+      const submit = vi.fn();
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) => {
+          const body = JSON.parse(String(init?.body));
+          if (body.query.includes("query GitHubPullRequestMergeOptions")) {
+            const changed = ++reads > 1;
+            const observed = reads > 2;
+            return response({
+              data: {
+                viewer: { email: "" },
+                repository: {
+                  squashMergeAllowed: true,
+                  viewerPermission: "WRITE",
+                  pullRequest: {
+                    id: "pr-17",
+                    state:
+                      observed && change === "missing response"
+                        ? "MERGED"
+                        : "OPEN",
+                    isDraft: false,
+                    mergeable: "MERGEABLE",
+                    mergeStateStatus: "CLEAN",
+                    headRefOid:
+                      (changed && change === "new source") ||
+                      (observed && change === "conflict after submit")
+                        ? "new-head"
+                        : "reviewed-head",
+                    headRefName: "feature",
+                    headRepository: { nameWithOwner: "acme/widgets" },
+                    baseRefName:
+                      changed && change === "new target" ? "release" : "main",
+                  },
+                },
+              },
+            });
+          }
+          if (body.query.includes("mutation MergeGitHubPullRequest")) {
+            submit(body.variables);
+            if (
+              change === "missing response" ||
+              change === "unconfirmed response"
+            )
+              return new Response("invalid JSON");
+            if (change === "primary rate limit")
+              return response({
+                data: null,
+                errors: [
+                  { type: "RATE_LIMITED", message: "Wait before retrying" },
+                ],
+              });
+            if (
+              change === "secondary rate limit" ||
+              change === "partial response"
+            )
+              return response({
+                errors: [
+                  { message: "You have exceeded a secondary rate limit." },
+                ],
+                ...(change === "partial response"
+                  ? { data: { mergePullRequest: { pullRequest: null } } }
+                  : {}),
+              });
+            if (change === "conflict after submit")
+              return new Response(
+                JSON.stringify({ errors: [{ message: "Head changed" }] }),
+                { status: 409 },
+              );
+            return response({
+              data: {
+                mergePullRequest: {
+                  pullRequest: {
+                    id: "pr-17",
+                    state: "MERGED",
+                    headRefOid: "reviewed-head",
+                    baseRefName: "main",
+                  },
+                },
+              },
+            });
+          }
+          throw new Error(`Unexpected GitHub request: ${body.query}`);
+        }),
+      );
+
+      const merge = new GitHubService().mergePullRequest({
+        owner: "acme",
+        name: "widgets",
+        number: 17,
+        method: "SQUASH",
+        commitHeadline: "Ship feature",
+        commitBody: "",
+        reviewedMerge: {
+          itemId: "batch-item",
+          headSha: "reviewed-head",
+          sourceBranch: "feature",
+          sourceOrigin: "github.com/acme/widgets",
+          targetBranch: "main",
+        },
+      });
+      if (change === "same request" || change === "missing response") {
+        await expect(merge).resolves.toMatchObject({ state: "MERGED" });
+        expect(submit).toHaveBeenCalledOnce();
+        expect(submit).toHaveBeenCalledWith(
+          expect.objectContaining({ expectedHeadOid: "reviewed-head" }),
+        );
+      } else if (
+        change === "primary rate limit" ||
+        change === "secondary rate limit"
+      ) {
+        await expect(merge).rejects.not.toHaveProperty("mergeOutcomeUnknown");
+        expect(submit).toHaveBeenCalledOnce();
+        expect(reads).toBe(2);
+      } else if (
+        change === "unconfirmed response" ||
+        change === "partial response"
+      ) {
+        await expect(merge).rejects.toHaveProperty("mergeOutcomeUnknown", true);
+        expect(submit).toHaveBeenCalledOnce();
+      } else if (change === "conflict after submit") {
+        await expect(merge).rejects.toThrow(
+          "The reviewed source or target changed",
+        );
+        expect(submit).toHaveBeenCalledOnce();
+      } else {
+        await expect(merge).rejects.toThrow(
+          "The reviewed pull request changed",
+        );
+        expect(submit).not.toHaveBeenCalled();
+      }
+    },
+  );
+
   test("reports unmet GitHub merge requirements before mutation", async () => {
     vi.stubGlobal(
       "fetch",

@@ -6,6 +6,7 @@ import type { WorktreesService } from "@/services/worktrees";
 import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
 import type { WorkflowsService } from "@/services/workflows";
+import { unknownMergeOutcome } from "@/services/worktrees/bulk-merge-review";
 import type { GitLabMergeOptions, GitLabMergeRequestView } from "./types";
 
 vi.mock("@/services/operation-locks/operation-locks.service", () => ({
@@ -36,7 +37,10 @@ vi.mock("@/services/integration-configuration-events", () => ({
 }));
 import { GitLabMergeService, gitLabMergeBlocker } from "./gitlab-merge.service";
 import { CodebaseBusyError } from "@/lib/codebase-busy";
-import { LEGACY_CODEBASE_BUSY_MESSAGE } from "@/services/worktrees/merge-branch-sync";
+import {
+  LEGACY_CODEBASE_BUSY_MESSAGE,
+  MergeSyncNotSubmittedError,
+} from "@/services/worktrees/merge-branch-sync";
 
 const mr: GitLabMergeRequestView = {
   id: "101",
@@ -100,6 +104,14 @@ const options: GitLabMergeOptions = {
   operation: null,
 };
 const input = { projectId: "7", iid: 3, sha: "abc" };
+const bulkReview = {
+  itemId: "item",
+  headSha: mr.sha,
+  sourceBranch: mr.sourceBranch,
+  sourceOrigin: "gitlab.test/team/repo",
+  targetBranch: mr.targetBranch,
+  instanceUrl: "https://gitlab.test",
+};
 
 function setup() {
   const gitlab = {
@@ -615,6 +627,26 @@ test("rejects a changed reviewed SHA without a remote mutation or persisted inte
   expect(database.gitLabMergeOperation.upsert).not.toHaveBeenCalled();
 });
 
+test("skips a bulk merge if GitLab now forces deletion of a source branch reviewed to keep", async () => {
+  const { service, gitlab, primary } = setupPrimarySwitch();
+  vi.mocked(service.options).mockResolvedValue({
+    ...options,
+    worktreeId: primary.id,
+    worktreeFolder: primary.folder,
+    removeSourceBranch: true,
+    canRemoveSourceBranch: false,
+  });
+
+  await expect(
+    service.submit(
+      { ...input, worktreeId: primary.id, removeSourceBranch: false },
+      bulkReview,
+    ),
+  ).rejects.toBeInstanceOf(MergeSyncNotSubmittedError);
+  expect(gitlab.mergeMergeRequestDirect).not.toHaveBeenCalled();
+  expect(database.gitLabMergeOperation.upsert).not.toHaveBeenCalled();
+});
+
 test.each(["always", "never"])(
   "enforces %s squash policy before mutation",
   async (policy) => {
@@ -661,6 +693,35 @@ test("recovers a merge accepted before a network timeout without resubmitting", 
   expect(result.mergeRequest.state).toBe("MERGED");
   expect(jira.transitionTicketToConfiguredDone).toHaveBeenCalledOnce();
   expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+});
+
+test("leaves native auto-merge enabled when a pending bulk merge observes a retargeted request", async () => {
+  const { service, gitlab, jira, primary } = setupPrimarySwitch();
+  gitlab.mergeRequestState.mockResolvedValue(mr);
+  gitlab.mergeMergeRequestDirect.mockRejectedValue(
+    unknownMergeOutcome(new Error("timeout")),
+  );
+
+  await expect(
+    service.submit(
+      { ...input, worktreeId: primary.id, moveTicketToDone: true },
+      bulkReview,
+    ),
+  ).rejects.toMatchObject({ mergeOutcomeUnknown: true });
+  expect(database.row?.state).toBe("PREPARING");
+
+  gitlab.mergeRequestState.mockResolvedValue({
+    ...mr,
+    targetBranch: "release",
+    mergeWhenPipelineSucceeds: true,
+  });
+  await service.reconcile();
+
+  expect(database.row?.state).toBe("ACTION_REQUIRED");
+  expect(database.row?.lastError).toContain("source or target changed");
+  expect(gitlab.cancelAutoMergeDirect).not.toHaveBeenCalled();
+  expect(gitlab.mergeMergeRequestDirect).toHaveBeenCalledOnce();
+  expect(jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
 });
 
 test("definite provider rejection is actionable without automatic resubmission", async () => {

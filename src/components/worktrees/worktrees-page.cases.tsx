@@ -722,6 +722,9 @@ export function registerWorktreesPageTests(
           const fetchButton = screen.getByRole("button", { name: "Fetch now" });
           const bulkButton = screen.getByRole("button", { name: "Bulk Sync" });
           expect(fetchButton.nextElementSibling).toBe(bulkButton);
+          expect(bulkButton.nextElementSibling).toBe(
+            screen.getByRole("button", { name: "Bulk Merge" }),
+          );
           fireEvent.change(
             screen.getByRole("searchbox", { name: "Search worktrees" }),
             {
@@ -2125,7 +2128,11 @@ export function registerWorktreesPageTests(
             expect(assign).not.toBeNull();
             expect(assign!.hasAttribute("disabled")).toBe(false);
           } else expect(assign).toBeNull();
-          expect(request.mock.calls[0]![0]).toContain("canAssignReviewers");
+          expect(
+            request.mock.calls.find(([query]) =>
+              query.includes("query WorktreeOverview"),
+            )?.[0],
+          ).toContain("canAssignReviewers");
         },
       );
 

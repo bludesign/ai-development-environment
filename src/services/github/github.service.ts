@@ -14,6 +14,7 @@ import {
 } from "@/services/operation-locks/operation-locks.service";
 import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
 import { MergeSyncNotSubmittedError } from "@/services/worktrees/merge-branch-sync";
+import type { BulkMergeReview } from "@/services/worktrees/bulk-merge-review";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import { compileRe2 } from "@/lib/re2.server";
 import type { Prisma } from "@/generated/prisma/client";
@@ -473,8 +474,8 @@ type RawReviewPullRequest = RawReviewPullRequestMetadata & {
 };
 
 type GitHubResponse<T> = {
-  data?: T;
-  errors?: Array<{ message?: string }>;
+  data?: T | null;
+  errors?: Array<{ message?: string; type?: string }>;
 };
 
 class GitHubRequestError extends Error {
@@ -482,6 +483,7 @@ class GitHubRequestError extends Error {
     message: string,
     public readonly statusCode: number | null,
     public readonly rateLimit: GitHubRateLimitMetadata | null,
+    public readonly rateLimitRejected = false,
   ) {
     super(message);
     this.name = "GitHubRequestError";
@@ -1357,16 +1359,28 @@ export class GitHubService {
       );
     }
 
-    if (!response.ok || body.errors?.length || !body.data) {
+    const errors = body.errors ?? [];
+    if (!response.ok || errors.length || !body.data) {
       const message =
-        body.errors
-          ?.map((error) => error.message)
+        errors
+          .map((error) => error.message)
           .filter(Boolean)
           .join("; ") || `GitHub returned HTTP ${response.status}`;
+      const rateLimitRejected =
+        response.status < 500 &&
+        !body.data &&
+        errors.some(
+          (error) =>
+            error.type === "RATE_LIMITED" ||
+            /API rate limit exceeded|secondary rate limit/i.test(
+              error.message ?? "",
+            ),
+        );
       throw new GitHubRequestError(
         sanitizeError(message, token),
         response.status,
         rateLimit,
+        rateLimitRejected,
       );
     }
     const extracted = extractGitHubGraphqlCost(body.data);
@@ -6362,6 +6376,7 @@ export class GitHubService {
       authorEmail?: string | null;
       expectedHeadSha?: string;
       expectedTargetSha?: string;
+      reviewedMerge?: BulkMergeReview;
     },
     requestSource: GitHubRequestSource = "PULL_REQUEST_DETAILS",
   ): Promise<GitHubPullRequestMergeResult> {
@@ -6382,12 +6397,27 @@ export class GitHubService {
       requestSource,
       true,
     );
+    const review = input.reviewedMerge;
+    const matchesReview = (pr: RawPullRequestMergeState) =>
+      !review ||
+      (pr.headRefOid === review.headSha &&
+        pr.headRefName === review.sourceBranch &&
+        `github.com/${pr.headRepository?.nameWithOwner.toLowerCase()}` ===
+          review.sourceOrigin.toLowerCase() &&
+        pr.baseRefName === review.targetBranch);
+    const assertReviewedRequest = (pr: RawPullRequestMergeState) => {
+      if (review && (!matchesReview(pr) || pr.autoMergeRequest))
+        throw new MergeSyncNotSubmittedError(
+          "The reviewed pull request changed or Auto Merge is now enabled.",
+        );
+    };
+    assertReviewedRequest(state.pullRequest);
     const blockedReason = this.mergeBlockedReason(
       state.pullRequest,
       state.viewerPermission,
     );
     if (blockedReason)
-      throw input.expectedHeadSha
+      throw input.expectedHeadSha || review
         ? new MergeSyncNotSubmittedError(blockedReason)
         : new Error(blockedReason);
     if (input.expectedHeadSha) {
@@ -6405,9 +6435,11 @@ export class GitHubService {
         );
     }
     if (!state.availableMethods.includes(input.method)) {
-      throw new Error(
-        "The selected merge method is not enabled for this repository.",
-      );
+      const message =
+        "The selected merge method is not enabled for this repository.";
+      throw review
+        ? new MergeSyncNotSubmittedError(message)
+        : new Error(message);
     }
     const authorEmail = input.authorEmail?.trim() || null;
     if (authorEmail) {
@@ -6439,6 +6471,11 @@ export class GitHubService {
           requestSource,
           true,
         );
+        assertReviewedRequest(fresh.pullRequest);
+        if (review && !fresh.availableMethods.includes(input.method))
+          throw new MergeSyncNotSubmittedError(
+            "The selected merge method is no longer available.",
+          );
         if (
           fresh.pullRequest.headRefOid !== state.pullRequest.headRefOid ||
           fresh.pullRequest.headRefName !== state.pullRequest.headRefName ||
@@ -6493,7 +6530,7 @@ export class GitHubService {
               commitHeadline,
               commitBody: input.commitBody,
               authorEmail,
-              expectedHeadOid: state.pullRequest.headRefOid,
+              expectedHeadOid: review?.headSha ?? state.pullRequest.headRefOid,
             },
             token,
             { requestSource },
@@ -6501,12 +6538,31 @@ export class GitHubService {
           const pullRequest = data.mergePullRequest.pullRequest;
           if (!pullRequest)
             throw new Error("GitHub did not return the merged pull request");
+          if (
+            review &&
+            (pullRequest.state !== "MERGED" ||
+              pullRequest.headRefOid !== review.headSha ||
+              pullRequest.baseRefName !== review.targetBranch)
+          )
+            throw new Error("GitHub did not confirm the reviewed merge.");
           const { mergeCommit, ...result } = pullRequest;
           return { ...result, mergeCommitSha: mergeCommit?.oid ?? null };
         } catch (error) {
+          if (
+            review &&
+            error instanceof GitHubRequestError &&
+            error.rateLimitRejected
+          )
+            throw error;
           const status =
             error instanceof GitHubRequestError ? error.statusCode : null;
-          if (status !== null && status < 500 && status !== 408) throw error;
+          const rejected =
+            status !== null &&
+            status < 500 &&
+            status !== 408 &&
+            (!review || (status >= 400 && status !== 429));
+          if (rejected && !review) throw error;
+          let rejectedFor: string | null = null;
           try {
             const observed = await this.mergeState(
               owner,
@@ -6516,7 +6572,10 @@ export class GitHubService {
               requestSource,
               true,
             );
-            if (observed.pullRequest.state === "MERGED")
+            if (
+              observed.pullRequest.state === "MERGED" &&
+              matchesReview(observed.pullRequest)
+            )
               return {
                 id: observed.pullRequest.id,
                 state: observed.pullRequest.state,
@@ -6526,9 +6585,19 @@ export class GitHubService {
                 headRefOid: observed.pullRequest.headRefOid,
                 mergeCommitSha: observed.pullRequest.mergeCommit?.oid ?? null,
               };
+            if (rejected && observed.pullRequest.state !== "MERGED") {
+              rejectedFor = !matchesReview(observed.pullRequest)
+                ? "The reviewed source or target changed before GitHub could merge it."
+                : this.mergeBlockedReason(
+                    observed.pullRequest,
+                    observed.viewerPermission,
+                  );
+            }
           } catch {
             /* Keep the reservation until a fresh provider read resolves it. */
           }
+          if (rejectedFor) throw new MergeSyncNotSubmittedError(rejectedFor);
+          if (rejected) throw error;
           const uncertain =
             error instanceof Error ? error : new Error(String(error));
           Object.assign(uncertain, {

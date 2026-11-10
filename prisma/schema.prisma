@@ -839,6 +839,7 @@ model WorktreeAutoSync {
 }
 
 model WorktreeAutoMerge {
+  manualMergeReviewJson   String?
   postMergeSwitchJson      String?
   autoSync                Boolean   @default(false)
   syncStateJson           String?
@@ -2618,6 +2619,59 @@ model WorktreeSyncItem {
   @@index([status, codebaseId, createdAt])
 }
 
+// Bulk Merge snapshots survive deletion of their checkout or scope.
+model WorktreeMergeBatch {
+  id          String              @id
+  requestId   String              @unique
+  fingerprint String
+  appId       String?
+  agentId     String?
+  status      String              @default("ACTIVE")
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  finishedAt  DateTime?
+  items       WorktreeMergeItem[]
+
+  @@index([status, createdAt])
+  @@index([appId, agentId, createdAt])
+}
+
+model WorktreeMergeItem {
+  id              String             @id
+  batchId         String
+  position        Int
+  worktreeId      String
+  codebaseId      String
+  agentId         String
+  agentName       String
+  repositoryId    String
+  repositoryName  String
+  branch          String
+  folder          String
+  gitDirectory    String
+  sourceOrigin    String
+  provider        String
+  requestKey      String
+  activeRequestKey String?           @unique
+  requestNumber   Int
+  requestTitle    String
+  requestUrl      String
+  reviewedHeadSha String
+  targetBranch    String
+  settingsJson    String
+  status          String             @default("PENDING")
+  error           String?
+  postMergeError  String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  batch           WorktreeMergeBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, position])
+  @@unique([batchId, worktreeId])
+  @@unique([batchId, requestKey])
+  @@index([requestKey, status])
+}
+
 model WorktreeMove {
   operationHolderId String?
   id                String    @id
@@ -4110,6 +4164,7 @@ model SseHistorySavedFilter {
 
 // Separate from GitHub worktree automation: an MR can have Jira follow-ups without a checkout.
 model GitLabMergeOperation {
+  manualMergeReviewJson String?
   postMergeSwitchJson    String?
   autoSync              Boolean   @default(false)
   syncStateJson         String?

@@ -23,6 +23,7 @@ import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-c
 import { parseJiraKey } from "@/services/github/github.service";
 import type {
   GitHubMergeMethod,
+  GitHubPullRequestAutomationState,
   GitHubPullRequestMergeInput,
   GitHubPullRequestMergeOptions,
   GitHubPullRequestMergeResult,
@@ -51,6 +52,7 @@ import {
   managedMergeOwnsWorktree,
   MANAGED_MERGE_STATES,
   LEGACY_CODEBASE_BUSY_MESSAGE,
+  MergeSyncNotSubmittedError,
   isTransientMergeError,
   mergeConflictWorkflowOptions,
   type MergeConflictWorkflowInput,
@@ -59,9 +61,16 @@ import {
   readMergeSync,
   withMergeSyncLock,
 } from "./merge-branch-sync";
+import {
+  isUnknownMergeOutcome,
+  type BulkMergeReview,
+} from "./bulk-merge-review";
 
 const POLLING_OPERATION_ID = "server:worktree-automations";
 const POLL_SECONDS = 60;
+const MERGE_CONFIRMATION_MS = 120_000;
+// Older build admission could move an unconfirmed bulk merge to WAITING_REQUIREMENTS.
+const BULK_MERGE_UNCONFIRMED_STATES = ["MERGING", "WAITING_REQUIREMENTS"];
 const TERMINAL_JOB_STATUSES = new Set([
   "SUCCEEDED",
   "FAILED",
@@ -169,6 +178,25 @@ function mergeView(rule: {
     ),
     updatedAt: rule.updatedAt.toISOString(),
   };
+}
+
+function matchesBulkMergeReview(
+  request: {
+    headRefOid: string;
+    headRefName: string;
+    headRepositoryNameWithOwner: string | null;
+    baseRefName?: string;
+  },
+  review: BulkMergeReview,
+): boolean {
+  return (
+    request.headRefOid === review.headSha &&
+    request.headRefName === review.sourceBranch &&
+    Boolean(request.headRepositoryNameWithOwner) &&
+    `github.com/${request.headRepositoryNameWithOwner?.toLowerCase()}` ===
+      review.sourceOrigin.toLowerCase() &&
+    request.baseRefName === review.targetBranch
+  );
 }
 
 export class WorktreeAutomationService {
@@ -439,9 +467,10 @@ export class WorktreeAutomationService {
     repositoryNameWithOwner: string;
     pullRequestNumber: number;
     autoSync?: boolean;
+    manualMergeReviewJson?: string | null;
   }) {
     const { owner, name } = repositoryParts(rule.repositoryNameWithOwner);
-    return rule.autoSync
+    return rule.autoSync || rule.manualMergeReviewJson
       ? this.github.pullRequestAutomationState(
           owner,
           name,
@@ -628,6 +657,7 @@ export class WorktreeAutomationService {
   async mergePullRequest(
     input: GitHubPullRequestMergeInput,
     source: GitHubRequestSource,
+    review?: BulkMergeReview,
   ): Promise<GitHubPullRequestMergeResult> {
     const options = await this.pullRequestMergeOptions(
       input.owner,
@@ -639,7 +669,12 @@ export class WorktreeAutomationService {
     return this.withMergeLock(
       this.mergeKey(`${input.owner}/${input.name}`, input.number),
       () =>
-        this.mergePullRequestWithFollowUps(input, source, options.worktreeId),
+        this.mergePullRequestWithFollowUps(
+          input,
+          source,
+          options.worktreeId,
+          review,
+        ),
       options.worktreeId,
     );
   }
@@ -648,6 +683,7 @@ export class WorktreeAutomationService {
     input: GitHubPullRequestMergeInput,
     source: GitHubRequestSource,
     lockedWorktreeId: string | null,
+    review?: BulkMergeReview,
   ): Promise<GitHubPullRequestMergeResult> {
     const options = await this.pullRequestMergeOptions(
       input.owner,
@@ -659,6 +695,50 @@ export class WorktreeAutomationService {
     if (options.worktreeId !== lockedWorktreeId)
       throw new Error(
         "The linked worktree changed while waiting. Refresh and retry the merge.",
+      );
+    if (review) {
+      if (
+        !options.worktreeId ||
+        options.worktreeId !== input.worktreeId ||
+        !matchesBulkMergeReview(options, review)
+      )
+        throw new MergeSyncNotSubmittedError(
+          "The reviewed source checkout, commit, or target branch changed.",
+        );
+      if (!options.canMerge || options.autoMergeEnabled)
+        throw new MergeSyncNotSubmittedError(
+          options.blockedReason ??
+            (options.autoMergeEnabled
+              ? "Auto Merge is already enabled."
+              : "The pull request is no longer ready to merge."),
+        );
+      if (!options.availableMethods.includes(input.method))
+        throw new MergeSyncNotSubmittedError(
+          "The selected merge method is no longer available.",
+        );
+      const active = await (
+        await getPrismaClient()
+      ).worktreeAutoMerge.findMany({
+        where: {
+          pullRequestNumber: input.number,
+          state: { in: ["ACTIVE", "POST_MERGE", ...MANAGED_MERGE_STATES] },
+        },
+        select: { repositoryNameWithOwner: true },
+      });
+      if (
+        active.some(
+          (rule) =>
+            this.mergeKey(rule.repositoryNameWithOwner, input.number) ===
+            this.mergeKey(`${input.owner}/${input.name}`, input.number),
+        )
+      )
+        throw new MergeSyncNotSubmittedError(
+          "A merge is already in progress for this pull request.",
+        );
+    }
+    if (options.autoMergeOperation?.state === "MERGING")
+      throw new MergeSyncNotSubmittedError(
+        "A merge is already in progress for this pull request.",
       );
     validateMergeFollowUps(input, options);
     const savedUpdates =
@@ -695,6 +775,7 @@ export class WorktreeAutomationService {
       branch: options.headRefName,
       baseBranchUpdatesJson,
       postMergeSwitchJson,
+      manualMergeReviewJson: review ? JSON.stringify(review) : null,
       mergeMethod: input.method,
       commitHeadline: input.commitHeadline.trim(),
       commitBody: input.commitBody,
@@ -706,9 +787,9 @@ export class WorktreeAutomationService {
       deleteJobId: null,
       lastError: null,
     };
-    // Save unattended checkout intent before GitHub can merge, including when the
-    // request times out or this process stops immediately after submission.
-    if (postMergeSwitchJson && options.worktreeId) {
+    // Save intent before GitHub can merge. The bulk marker allows observation
+    // after a restart without treating the operation as managed Auto Merge.
+    if ((review || postMergeSwitchJson) && options.worktreeId) {
       const data = {
         ...followUpData,
         state: "MERGING",
@@ -725,19 +806,32 @@ export class WorktreeAutomationService {
     }
     let result: GitHubPullRequestMergeResult;
     try {
-      result = await this.github.mergePullRequest(input, source);
+      result = await this.github.mergePullRequest(
+        review ? { ...input, reviewedMerge: review } : input,
+        source,
+      );
     } catch (error) {
-      if (postMergeSwitchJson && options.worktreeId) {
-        await (
-          await getPrismaClient()
-        ).worktreeAutoMerge.update({
-          where: { worktreeId: options.worktreeId },
-          data: {
-            state: "ACTION_REQUIRED",
-            lastError: error instanceof Error ? error.message : String(error),
-          },
-        });
+      const unconfirmed = review && isUnknownMergeOutcome(error);
+      if ((review || postMergeSwitchJson) && options.worktreeId) {
+        try {
+          await (
+            await getPrismaClient()
+          ).worktreeAutoMerge.update({
+            where: { worktreeId: options.worktreeId },
+            data: {
+              state: unconfirmed ? "MERGING" : "ACTION_REQUIRED",
+              lastError: error instanceof Error ? error.message : String(error),
+            },
+          });
+        } catch (persistenceError) {
+          if (!unconfirmed) throw persistenceError;
+          console.error(
+            "Could not save the unconfirmed merge warning",
+            persistenceError,
+          );
+        }
         this.worktrees.publishAutomationChange(options.worktreeId);
+        if (review) this.changed();
       }
       throw error;
     }
@@ -782,6 +876,20 @@ export class WorktreeAutomationService {
         postMergeError: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  async bulkMergeFollowUp(worktreeId: string, itemId: string) {
+    const rule = await (
+      await getPrismaClient()
+    ).worktreeAutoMerge.findUnique({
+      where: { worktreeId },
+      select: { manualMergeReviewJson: true, state: true, lastError: true },
+    });
+    if (!rule?.manualMergeReviewJson) return null;
+    const review = JSON.parse(rule.manualMergeReviewJson) as BulkMergeReview;
+    return review.itemId === itemId
+      ? { state: rule.state, lastError: rule.lastError }
+      : null;
   }
 
   async configureAutoMerge(
@@ -841,6 +949,14 @@ export class WorktreeAutomationService {
         const existing = await prisma.worktreeAutoMerge.findUnique({
           where: { worktreeId: worktree.id },
         });
+        if (
+          existing?.manualMergeReviewJson &&
+          (existing.state === "POST_MERGE" ||
+            BULK_MERGE_UNCONFIRMED_STATES.includes(existing.state))
+        )
+          throw new Error(
+            "A Bulk Merge request is already in progress for this worktree.",
+          );
         const ticketKey = await this.worktrees.ticketKeyForWorktree(
           worktree.id,
           worktree.branch,
@@ -962,6 +1078,7 @@ export class WorktreeAutomationService {
             const data = {
               autoSync: true,
               syncStateJson,
+              manualMergeReviewJson: null,
               state: "SYNCING",
               repositoryNameWithOwner: input.repositoryNameWithOwner,
               pullRequestNumber: input.pullRequestNumber,
@@ -1080,6 +1197,7 @@ export class WorktreeAutomationService {
             current.state === "MERGED" ? "POST_MERGE" : "WAITING_REQUIREMENTS",
           autoSync: false,
           syncStateJson: null,
+          manualMergeReviewJson: null,
           repositoryNameWithOwner: input.repositoryNameWithOwner,
           pullRequestNumber: input.pullRequestNumber,
           branch: worktree.branch,
@@ -1238,6 +1356,16 @@ export class WorktreeAutomationService {
         );
       }
       if (state.state === "MERGED") {
+        if (
+          rule.manualMergeReviewJson &&
+          !matchesBulkMergeReview(
+            state,
+            JSON.parse(rule.manualMergeReviewJson) as BulkMergeReview,
+          )
+        )
+          throw new Error(
+            "The merged pull request differs from the Bulk Merge review.",
+          );
         if (rule.autoSync) {
           const intent = readMergeSync(rule.syncStateJson);
           if (
@@ -1269,6 +1397,17 @@ export class WorktreeAutomationService {
         where: { worktreeId },
       });
       const pullRequest = await this.pullRequestState(existing);
+      if (
+        existing.manualMergeReviewJson &&
+        (pullRequest.state !== "MERGED" ||
+          !matchesBulkMergeReview(
+            pullRequest,
+            JSON.parse(existing.manualMergeReviewJson) as BulkMergeReview,
+          ))
+      )
+        throw new Error(
+          "Confirm the reviewed Bulk Merge before retrying follow-ups.",
+        );
       if (existing.postMergeSwitchJson && pullRequest.state !== "MERGED")
         throw new Error(
           "The merge must be confirmed before retrying the checkout switch.",
@@ -1337,6 +1476,7 @@ export class WorktreeAutomationService {
     const rules = await prisma.worktreeAutoMerge.findMany({
       where: {
         branch: worktree.branch,
+        manualMergeReviewJson: null,
         state: { in: ["ACTIVE", ...MANAGED_MERGE_STATES] },
         worktree: {
           missingAt: null,
@@ -1356,6 +1496,7 @@ export class WorktreeAutomationService {
           });
           if (
             !rule ||
+            rule.manualMergeReviewJson ||
             rule.branch !== worktree.branch ||
             this.mergeKey(
               rule.repositoryNameWithOwner,
@@ -1914,6 +2055,45 @@ export class WorktreeAutomationService {
             let rule = current;
             try {
               const repository = repositoryParts(rule.repositoryNameWithOwner);
+              let reviewedRemote: GitHubPullRequestAutomationState | undefined;
+              if (rule.manualMergeReviewJson) {
+                const unconfirmed = BULK_MERGE_UNCONFIRMED_STATES.includes(
+                  rule.state,
+                );
+                if (!unconfirmed && rule.state !== "POST_MERGE") return;
+                const review = JSON.parse(
+                  rule.manualMergeReviewJson,
+                ) as BulkMergeReview;
+                reviewedRemote = await this.github.pullRequestAutomationState(
+                  repository.owner,
+                  repository.name,
+                  rule.pullRequestNumber,
+                  true,
+                );
+                if (!matchesBulkMergeReview(reviewedRemote, review))
+                  throw new Error(
+                    "The pull request differs from the Bulk Merge review. Check its status in GitHub.",
+                  );
+                if (reviewedRemote.state !== "MERGED") {
+                  if (
+                    unconfirmed &&
+                    reviewedRemote.state === "OPEN" &&
+                    Date.now() - rule.updatedAt.getTime() <
+                      MERGE_CONFIRMATION_MS
+                  )
+                    return;
+                  throw new Error(
+                    "GitHub has not confirmed the reviewed merge. Check its status in GitHub.",
+                  );
+                }
+                if (unconfirmed) {
+                  await prisma.worktreeAutoMerge.update({
+                    where: { worktreeId: rule.worktreeId },
+                    data: { state: "POST_MERGE", lastError: null },
+                  });
+                  rule = { ...rule, state: "POST_MERGE", lastError: null };
+                }
+              }
               if (
                 isDefaultWorktreeBranch(rule.worktree) &&
                 !rule.postMergeSwitchJson &&
@@ -2163,12 +2343,14 @@ export class WorktreeAutomationService {
                 return;
               }
               if (rule.postMergeSwitchJson) {
-                const confirmed = await this.github.pullRequestAutomationState(
-                  repository.owner,
-                  repository.name,
-                  rule.pullRequestNumber,
-                  true,
-                );
+                const confirmed =
+                  reviewedRemote ??
+                  (await this.github.pullRequestAutomationState(
+                    repository.owner,
+                    repository.name,
+                    rule.pullRequestNumber,
+                    true,
+                  ));
                 if (
                   confirmed.state !== "MERGED" ||
                   !confirmed.headRepositoryNameWithOwner ||
@@ -2200,7 +2382,8 @@ export class WorktreeAutomationService {
                 if (!completed) return;
               }
               if (rule.baseBranchUpdatesJson) {
-                const confirmed = await this.pullRequestState(rule);
+                const confirmed =
+                  reviewedRemote ?? (await this.pullRequestState(rule));
                 if (
                   confirmed.state !== "MERGED" ||
                   !confirmed.headRepositoryNameWithOwner
@@ -2242,7 +2425,8 @@ export class WorktreeAutomationService {
                 throw new Error("The primary worktree cannot be deleted");
               }
               if (!rule.deleteJobId) {
-                const pullRequest = await this.pullRequestState(rule);
+                const pullRequest =
+                  reviewedRemote ?? (await this.pullRequestState(rule));
                 if (pullRequest.state !== "MERGED") {
                   throw new Error("The pull request is no longer merged");
                 }
@@ -2300,8 +2484,16 @@ export class WorktreeAutomationService {
               });
             } catch (error) {
               if (
+                rule.manualMergeReviewJson &&
+                BULK_MERGE_UNCONFIRMED_STATES.includes(rule.state) &&
+                isTransientMergeError(error) &&
+                Date.now() - rule.updatedAt.getTime() < MERGE_CONFIRMATION_MS
+              )
+                return;
+              if (
                 isCodebaseBusyError(error) ||
-                (!rule.autoSync &&
+                (!rule.manualMergeReviewJson &&
+                  !rule.autoSync &&
                   rule.state !== "POST_MERGE" &&
                   rule.state !== "ACTION_REQUIRED" &&
                   isTransientMergeError(error))
