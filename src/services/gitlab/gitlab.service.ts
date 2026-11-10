@@ -988,13 +988,11 @@ export class GitLabService {
       ? "Your GitLab account cannot merge this request."
       : mr.draft
         ? "Mark this merge request ready before merging."
-        : mr.hasConflicts || mr.detailedMergeStatus === "conflict"
-          ? "Resolve merge conflicts before resuming Auto Merge."
-          : ["policies_denied", "requested_changes"].includes(
-                mr.detailedMergeStatus,
-              )
-            ? "GitLab policy or requested changes block this merge."
-            : null;
+        : ["policies_denied", "requested_changes"].includes(
+              mr.detailedMergeStatus,
+            )
+          ? "GitLab policy or requested changes block this merge."
+          : null;
     return {
       state:
         mr.state === "OPENED"
@@ -1018,6 +1016,7 @@ export class GitLabService {
         !mr.draft &&
         !mr.hasConflicts,
       blocker: permanent,
+      hasConflicts: mr.hasConflicts || mr.detailedMergeStatus === "conflict",
       nativeAutoMerge: mr.mergeWhenPipelineSucceeds,
     };
   }
@@ -1141,7 +1140,8 @@ export class GitLabService {
     const approvalState =
       mr.detailedMergeStatus === "requested_changes"
         ? "CHANGES_REQUESTED"
-        : left != null && left > 0
+        : mr.detailedMergeStatus === "not_approved" ||
+            (left != null && left > 0)
           ? "REVIEW_REQUIRED"
           : required != null && required > 0
             ? left === 0
@@ -1149,7 +1149,10 @@ export class GitLabService {
               : null
             : approval?.approved_by?.length
               ? "APPROVED"
-              : required === 0
+              : required === 0 ||
+                  (required === null &&
+                    left === null &&
+                    Array.isArray(approval?.approved_by))
                 ? "NOT_REQUIRED"
                 : null;
     return {

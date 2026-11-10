@@ -97,7 +97,8 @@ export const routes: RouteEntry[] = [
   {
     name: "action-center-pull-requests",
     path: "/dashboard/action-center",
-    scrollTo: 'main [data-slot="action-center-request-status"] >> nth=0',
+    scrollTo:
+      'main [data-slot="action-center-request-status"]:has-text("No decision") >> nth=0',
   },
 
   {
@@ -677,6 +678,11 @@ export const routes: RouteEntry[] = [
 
   // Observability
   { name: "console-logs", path: "/debugging/console-logs" },
+  {
+    name: "observability-settings",
+    path: "/debugging/console-logs",
+    clickButton: "Settings",
+  },
   { name: "analytics-events", path: "/debugging/analytics-events" },
   { name: "unified-events", path: "/debugging/unified-events" },
 
@@ -799,4 +805,10 @@ export const routes: RouteEntry[] = [
   },
   { name: "credentials", path: "/system/credentials" },
   { name: "settings", path: "/system/settings" },
+  {
+    name: "settings-server-urls",
+    path: "/system/settings",
+    readyTexts: ["Physical iOS build default"],
+    scrollTo: "#server-urls",
+  },
 ];

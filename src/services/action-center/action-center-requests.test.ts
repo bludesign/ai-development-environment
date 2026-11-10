@@ -269,6 +269,49 @@ describe("Action Center request discovery", () => {
     expect(gitlab.mergeRequests).not.toHaveBeenCalled();
   });
 
+  test("moves a GitHub request with optional approval from failed CI to ready when CI recovers", async () => {
+    github.pullRequests.mockImplementation(async (scope) => ({
+      items:
+        scope === "MINE"
+          ? [
+              request("mine", {
+                reviewDecision: "NONE",
+                pipelineStatus: "PENDING",
+              }),
+            ]
+          : [],
+      hasNextPage: false,
+      endCursor: null,
+    }));
+    const index = service();
+    await index.refresh(["GITHUB"]);
+    const updates = index as unknown as {
+      applyGitHubPipeline(event: unknown): Promise<void>;
+    };
+    for (const [pipelineStatus, reason, canMerge] of [
+      ["FAILURE", "FAILED", false],
+      ["SUCCESS", "READY_TO_MERGE", true],
+    ] as const) {
+      await updates.applyGitHubPipeline({
+        githubPipelineStatusChanged: {
+          snapshot: {
+            repositoryGithubId: "repo",
+            headSha: "sha",
+            pipelineStatus,
+            pipelines: [],
+          },
+        },
+      });
+      const row = await prisma.actionCenterRequest.findFirstOrThrow();
+      expect(row.reason).toBe(reason);
+      expect(JSON.parse(row.payloadJson).request).toMatchObject({
+        approvalStatus: "NONE",
+        pipelineStatus,
+        canMerge,
+      });
+    }
+  });
+
   test.each([
     { initial: "SUCCESS", observed: "PENDING", canMerge: false },
     { initial: "SUCCESS", observed: "FAILURE", canMerge: false },
@@ -349,7 +392,13 @@ describe("Action Center request discovery", () => {
         pipelineUrl,
         canMerge,
       });
-      expect(row.reason).toBe(canMerge ? "READY_TO_MERGE" : "ACTIVE");
+      expect(row.reason).toBe(
+        observed === "FAILURE"
+          ? "FAILED"
+          : canMerge
+            ? "READY_TO_MERGE"
+            : "ACTIVE",
+      );
       expect(notifications.recordInTransaction).toHaveBeenCalledOnce();
       expect(notifications.recordInTransaction.mock.calls[0][1]).toMatchObject({
         typeKey: "GITHUB_PULL_REQUEST_APPROVED",
@@ -669,6 +718,54 @@ describe("Action Center request discovery", () => {
       }),
     ).toMatchObject({ requiresMyApproval: true });
   });
+
+  test.each([
+    ["FAILED", "FAILED", false],
+    ["SUCCESS", "READY_TO_MERGE", true],
+  ] as const)(
+    "uses the detailed GitLab pipeline when the list omits it (%s)",
+    async (pipelineStatus, reason, canMerge) => {
+      gitlab.mergeRequests.mockResolvedValue({
+        items: [
+          {
+            id: "7",
+            iid: 7,
+            projectId: "2",
+            title: "MR",
+            state: "OPENED",
+            sha: "sha",
+            draft: false,
+            sourceBranch: "feature",
+            webUrl: "https://gitlab.example/x/y/-/merge_requests/7",
+            createdAt: now,
+            updatedAt: now,
+            approvalState: "NOT_REQUIRED",
+          },
+        ],
+        nextPage: null,
+      });
+      const pipelineUrl = "https://gitlab.example/x/y/-/pipelines/7";
+      gitlab.mergeReadiness.mockResolvedValue({
+        mr: {
+          state: "OPENED",
+          sha: "sha",
+          detailedMergeStatus: "mergeable",
+          headPipeline: { status: pipelineStatus, webUrl: pipelineUrl },
+        },
+        canMerge: true,
+      });
+      await service().refresh(["GITLAB"]);
+      const row = await prisma.actionCenterRequest.findFirstOrThrow();
+      expect(row.reason).toBe(reason);
+      expect(JSON.parse(row.payloadJson).request).toMatchObject({
+        approvalStatus: "NOT_REQUIRED",
+        requiresMyApproval: true,
+        pipelineStatus,
+        pipelineUrl,
+        canMerge,
+      });
+    },
+  );
 });
 
 describe("merge readiness", () => {

@@ -20,6 +20,8 @@ const detection = {
   localOrigins: ["http://192.168.1.2:3000"],
   publicBaseUrl: "https://aide.example.com",
 };
+const physicalIos = { type: "PHYSICAL_DEVICE", platform: "IOS" } as const;
+const simulator = { type: "SIMULATOR", platform: "IOS" } as const;
 let row: {
   id: string;
   localBaseUrlOverride: string | null;
@@ -27,6 +29,7 @@ let row: {
   proxyBaseUrl: string | null;
   defaultServerUrlKind: string;
   simulatorDefaultServerUrlKind: string | null;
+  physicalDefaultServerUrlKind: string | null;
   updatedAt: Date;
 };
 beforeEach(() => {
@@ -37,6 +40,7 @@ beforeEach(() => {
     proxyBaseUrl: null,
     defaultServerUrlKind: "LOCAL",
     simulatorDefaultServerUrlKind: null,
+    physicalDefaultServerUrlKind: null,
     updatedAt: new Date(),
   };
   const table = {
@@ -80,10 +84,10 @@ describe("shared server URL settings", () => {
     ])
       expect(() => normalizeServerOrigin(value)).toThrow("HTTP(S)");
   });
-  test("uses Local initially and lets simulators inherit or override the global choice", async () => {
+  test("applies the physical default only to iOS and preserves simulator and explicit choices", async () => {
     const service = new ServerUrlSettingsService();
     expect(
-      (await service.buildSettings("PHYSICAL_DEVICE", null, detection))
+      (await service.buildSettings(physicalIos, null, detection))
         .selectedUrlKind,
     ).toBe("LOCAL");
     await service.saveSettings(
@@ -91,74 +95,101 @@ describe("shared server URL settings", () => {
         proxyBaseUrl: "https://aide.ts.net/",
         defaultServerUrlKind: "REMOTE",
         simulatorDefaultServerUrlKind: "PROXY",
+        physicalDefaultServerUrlKind: "LOCAL",
       },
       detection,
     );
     expect(
-      (await service.buildSettings("PHYSICAL_DEVICE", null, detection))
-        .selectedBaseUrl,
-    ).toBe("https://aide.example.com");
-    expect(
-      (await service.buildSettings("SIMULATOR", null, detection))
-        .selectedBaseUrl,
-    ).toBe("https://aide.ts.net");
-    expect(
-      (await service.buildSettings("SIMULATOR", "LOCAL", detection))
+      (await service.buildSettings(physicalIos, null, detection))
         .selectedBaseUrl,
     ).toBe("http://192.168.1.2:3000");
+    expect(
+      (
+        await service.buildSettings(
+          { ...physicalIos, platform: "TVOS" },
+          null,
+          detection,
+        )
+      ).selectedBaseUrl,
+    ).toBe("https://aide.example.com");
+    expect(
+      (
+        await service.buildSettings(
+          { ...simulator, platform: "VISIONOS" },
+          null,
+          detection,
+        )
+      ).selectedBaseUrl,
+    ).toBe("https://aide.ts.net");
+    expect(
+      (await service.buildSettings(physicalIos, "PROXY", detection))
+        .selectedBaseUrl,
+    ).toBe("https://aide.ts.net");
     await service.saveSettings(
       { simulatorDefaultServerUrlKind: null },
       detection,
     );
     expect(
-      (await service.buildSettings("SIMULATOR", null, detection))
+      (await service.buildSettings(simulator, null, detection)).selectedUrlKind,
+    ).toBe("REMOTE");
+    expect(
+      (await service.buildSettings(physicalIos, null, detection))
+        .selectedUrlKind,
+    ).toBe("LOCAL");
+    await service.saveSettings(
+      { physicalDefaultServerUrlKind: null },
+      detection,
+    );
+    expect(
+      (await service.buildSettings(physicalIos, null, detection))
         .selectedUrlKind,
     ).toBe("REMOTE");
   });
-  test("rejects unavailable Proxy defaults and preserves previous settings", async () => {
-    const service = new ServerUrlSettingsService();
-    await expect(
-      service.saveSettings({ defaultServerUrlKind: "PROXY" }, detection),
-    ).rejects.toThrow("Configure a Proxy URL");
-    await service.saveSettings(
-      {
-        proxyBaseUrl: "https://aide.ts.net",
-        simulatorDefaultServerUrlKind: "PROXY",
-      },
-      detection,
-    );
-    await expect(
-      service.saveSettings({ proxyBaseUrl: null }, detection),
-    ).rejects.toThrow("Configure a Proxy URL");
-    expect(row.proxyBaseUrl).toBe("https://aide.ts.net");
-    await service.saveSettings(
-      { simulatorDefaultServerUrlKind: null, proxyBaseUrl: null },
-      detection,
-    );
-    await expect(
-      service.buildSettings("SIMULATOR", "PROXY", detection),
-    ).rejects.toThrow("not configured");
-  });
+  test.each([
+    "simulatorDefaultServerUrlKind",
+    "physicalDefaultServerUrlKind",
+  ] as const)(
+    "rejects removing a Proxy still selected by %s",
+    async (field) => {
+      const service = new ServerUrlSettingsService();
+      await expect(
+        service.saveSettings({ defaultServerUrlKind: "PROXY" }, detection),
+      ).rejects.toThrow("Configure a Proxy URL");
+      await service.saveSettings(
+        {
+          proxyBaseUrl: "https://aide.ts.net",
+          [field]: "PROXY",
+        },
+        detection,
+      );
+      await expect(
+        service.saveSettings({ proxyBaseUrl: null }, detection),
+      ).rejects.toThrow("Configure a Proxy URL");
+      expect(row.proxyBaseUrl).toBe("https://aide.ts.net");
+      await service.saveSettings(
+        { [field]: null, proxyBaseUrl: null },
+        detection,
+      );
+      await expect(
+        service.buildSettings(simulator, "PROXY", detection),
+      ).rejects.toThrow("not configured");
+    },
+  );
   test("snapshots remain stable while rebuilding a retained choice resolves updated settings", async () => {
     const service = new ServerUrlSettingsService();
     await service.saveSettings(
       { proxyBaseUrl: "https://old.ts.net" },
       detection,
     );
-    const first = await service.buildSettings("SIMULATOR", "PROXY", detection);
+    const first = await service.buildSettings(simulator, "PROXY", detection);
     await service.saveSettings(
       { proxyBaseUrl: "https://new.ts.net" },
       detection,
     );
     expect(first.selectedBaseUrl).toBe("https://old.ts.net");
     expect(
-      (
-        await service.buildSettings(
-          "SIMULATOR",
-          first.selectedUrlKind,
-          detection,
-        )
-      ).selectedBaseUrl,
+      (await service.buildSettings(simulator, first.selectedUrlKind, detection))
+        .selectedBaseUrl,
     ).toBe("https://new.ts.net");
   });
   test("publishes changes and derives all variants from the same path", async () => {
@@ -197,10 +228,16 @@ describe("shared server URL settings", () => {
           "utf8",
         ),
       );
+      db.exec(
+        readFileSync(
+          "prisma/migrations/20261110090000_physical_build_server_url/migration.sql",
+          "utf8",
+        ),
+      );
       expect(
         db
           .prepare(
-            "SELECT localBaseUrlOverride, remoteBaseUrlOverride, defaultServerUrlKind, simulatorDefaultServerUrlKind FROM ServerUrlSettings",
+            "SELECT localBaseUrlOverride, remoteBaseUrlOverride, defaultServerUrlKind, simulatorDefaultServerUrlKind, physicalDefaultServerUrlKind FROM ServerUrlSettings",
           )
           .get(),
       ).toMatchObject({
@@ -208,6 +245,7 @@ describe("shared server URL settings", () => {
         remoteBaseUrlOverride: "https://aide.example.com",
         defaultServerUrlKind: "LOCAL",
         simulatorDefaultServerUrlKind: null,
+        physicalDefaultServerUrlKind: null,
       });
       expect(
         db

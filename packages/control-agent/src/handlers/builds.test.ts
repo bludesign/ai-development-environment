@@ -39,6 +39,8 @@ import {
   downloadIosBuildArtifact,
   generateIosBuildReport,
   genericBuildDestinations,
+  inspectAgentBuildRunDestinations,
+  inspectBuildDestinations,
   physicalDestinations,
   parseXcodeDestinations,
   prepareMacCompatibilityApplication,
@@ -339,6 +341,78 @@ describe("iOS build command construction", () => {
 });
 
 describe("iOS destination and error parsing", () => {
+  test("discovers paired iOS devices without Xcode scheme discovery or launch capability advertising", async () => {
+    const folder = await mkdtemp(join(tmpdir(), "aide-ios-destinations-"));
+    temporaryDirectories.push(folder);
+    const bin = join(folder, "bin");
+    await mkdir(join(folder, "App.xcworkspace"));
+    await mkdir(bin);
+    await execute("git", ["init", "-b", "main", folder]);
+    await execute("git", [
+      "-C",
+      folder,
+      "remote",
+      "add",
+      "origin",
+      "https://github.com/example/app.git",
+    ]);
+    await writeFile(
+      join(bin, "xcrun"),
+      `#!/bin/sh
+case "$1" in
+  simctl)
+    printf '%s' '{"devices":{}}'
+    ;;
+  devicectl)
+    for argument do output="$argument"; done
+    printf '%s' '{"result":{"devices":[{"identifier":"CORE-DEVICE","hardwareProperties":{"udid":"HARDWARE-UDID","platform":"iOS","reality":"physical"},"connectionProperties":{"tunnelState":"disconnected","pairingState":"paired","transportType":"wired"},"capabilities":[]}]}}' > "$output"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+`,
+      { mode: 0o755 },
+    );
+    const originalPath = process.env.PATH;
+    process.env.PATH = `${bin}:${originalPath ?? ""}`;
+    try {
+      const signal = new AbortController().signal;
+      const expectedDevice = expect.objectContaining({
+        type: "PHYSICAL_DEVICE",
+        platformId: "IOS",
+        id: "CORE-DEVICE",
+        xcodeId: "HARDWARE-UDID",
+        available: true,
+      });
+      await expect(
+        inspectBuildDestinations(
+          payload({
+            folder,
+            gitDirectory: await realpath(join(folder, ".git")),
+          }),
+          20_000,
+          signal,
+          async () => undefined,
+        ),
+      ).resolves.toMatchObject({
+        destinations: expect.arrayContaining([
+          expect.objectContaining({ id: "generic-ios", generic: true }),
+          expectedDevice,
+        ]),
+      });
+      await expect(
+        inspectAgentBuildRunDestinations(
+          { destinationType: "PHYSICAL_DEVICE", platforms: ["IOS"] },
+          20_000,
+          signal,
+          async () => undefined,
+        ),
+      ).resolves.toMatchObject({ destinations: [expectedDevice] });
+    } finally {
+      process.env.PATH = originalPath;
+    }
+  });
   test("follows signable Xcode target dependencies", () => {
     expect(
       dependentSigningTargetNamesFromPbxProject(

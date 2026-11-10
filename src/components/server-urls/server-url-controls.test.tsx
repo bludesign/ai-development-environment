@@ -21,7 +21,11 @@ vi.mock("@/lib/control-plane-client", () => ({
 }));
 vi.mock("@/hooks/use-server-url-settings", () => ({
   useServerUrlSettings: () => ({
-    settings: { ...serverUrlFixture, simulatorDefaultServerUrlKind: "REMOTE" },
+    settings: {
+      ...serverUrlFixture,
+      simulatorDefaultServerUrlKind: "REMOTE",
+      physicalDefaultServerUrlKind: "PROXY",
+    },
     error: null,
     refresh: mocks.refresh,
   }),
@@ -92,9 +96,13 @@ test("supports keyboard selection with a name and URL and hides unconfigured Pro
   await waitFor(() => expect(change).toHaveBeenCalledWith("REMOTE"));
 });
 
-test("saves shared overrides without resetting a configured simulator default", async () => {
+test("saves shared overrides and the configured build defaults", async () => {
   mocks.request.mockResolvedValue({});
   render(<ServerUrlsSettingsCard />);
+  expect(
+    screen.getByRole("combobox", { name: "Physical iOS build default" })
+      .textContent,
+  ).toContain("Proxy");
   fireEvent.change(screen.getByLabelText("Proxy URL (optional)"), {
     target: { value: "https://new.ts.net/" },
   });
@@ -109,6 +117,7 @@ test("saves shared overrides without resetting a configured simulator default", 
           proxyBaseUrl: "https://new.ts.net/",
           defaultServerUrlKind: "LOCAL",
           simulatorDefaultServerUrlKind: "REMOTE",
+          physicalDefaultServerUrlKind: "PROXY",
         },
       }),
     ),

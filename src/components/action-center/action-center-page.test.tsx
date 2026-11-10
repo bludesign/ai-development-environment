@@ -496,6 +496,60 @@ describe("Action Center requests", () => {
     ).toContain("/actions");
     expect(screen.getByRole("button", { name: "Merge" })).toBeDefined();
   });
+  test.each([
+    ["GITHUB", "PULL_REQUEST", "NONE"],
+    ["GITLAB", "MERGE_REQUEST", "NOT_REQUIRED"],
+  ] as const)(
+    "shows a neutral no-decision badge and Merge under Needs attention for %s",
+    async (provider, resourceKind, approvalStatus) => {
+      request.mockResolvedValue({
+        actionCenter: {
+          ...page,
+          items: [
+            {
+              ...pr,
+              resourceKind,
+              request: { ...pr.request, provider, approvalStatus },
+            },
+          ],
+        },
+      } as never);
+      renderPage();
+      const attention = within(
+        await screen.findByRole("region", { name: "Needs attention" }),
+      );
+      expect(attention.getByText("No decision").className).not.toContain(
+        "amber",
+      );
+      expect(attention.getByRole("button", { name: "Merge" })).toBeDefined();
+    },
+  );
+  test("shows failed request CI under Needs attention and colors missing required approval amber", async () => {
+    request.mockResolvedValue({
+      actionCenter: {
+        ...page,
+        items: [
+          {
+            ...pr,
+            reason: "FAILED",
+            request: {
+              ...pr.request,
+              pipelineStatus: "FAILURE",
+              approvalStatus: "REVIEW_REQUIRED",
+              canMerge: false,
+            },
+          },
+        ],
+      },
+    } as never);
+    renderPage();
+    const attention = within(
+      await screen.findByRole("region", { name: "Needs attention" }),
+    );
+    expect(attention.getByRole("link", { name: "Failure" })).toBeDefined();
+    expect(attention.getByText("Not approved").className).toContain("amber");
+    expect(attention.queryByRole("button", { name: "Merge" })).toBeNull();
+  });
   test("does not offer a green merge action for blocked or draft requests", async () => {
     request.mockResolvedValue({
       actionCenter: {

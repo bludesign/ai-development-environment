@@ -370,6 +370,7 @@ function createServerServices(): ServerServices {
     worktreesService,
     jiraService,
     agentControlService,
+    workflowsService,
   ).startRuntime();
   systemStatusService.startRuntime();
   actionCenterRequests.start();

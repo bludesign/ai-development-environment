@@ -1130,6 +1130,10 @@ input ConfigureWorktreeAutoMergeInput {
   switchToDefaultBranch: Boolean = false
   "Rebase and push the linked branch before waiting for passing CI and merging."
   autoSync: Boolean = false
+  "Run this merge conflict workflow if Auto Merge branch syncing stops at a conflict."
+  conflictWorkflowId: ID
+  "Optional resource trigger choice for the selected merge conflict workflow."
+  conflictWorkflowChoice: String
   "Reviewed source revision, required when autoSync is selected."
   expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."

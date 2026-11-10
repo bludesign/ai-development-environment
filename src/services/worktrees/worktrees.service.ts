@@ -26,6 +26,7 @@ import {
   WORKTREE_COMMIT_JOB_KIND,
   WORKTREE_AUTO_SYNC_JOB_KIND,
   WORKTREE_REVIEWED_SYNC_CAPABILITY,
+  WORKTREE_REVIEWED_SYNC_FINALIZE_CAPABILITY,
   WORKTREE_DELETE_JOB_KIND,
   WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   WORKTREE_GIT_INSPECT_JOB_KIND,
@@ -3776,7 +3777,9 @@ export class WorktreesService {
     if (
       mergeGuard &&
       !capabilities(worktree.codebase.agent).includes(
-        WORKTREE_REVIEWED_SYNC_CAPABILITY,
+        phase === "FINALIZE"
+          ? WORKTREE_REVIEWED_SYNC_FINALIZE_CAPABILITY
+          : WORKTREE_REVIEWED_SYNC_CAPABILITY,
       )
     )
       throw new Error("Update the agent to use Auto Merge branch syncing");

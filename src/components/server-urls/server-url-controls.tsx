@@ -44,7 +44,7 @@ export function ServerUrlSelect({
     >
       <SelectTrigger
         id={id}
-        aria-label={t("serverUrl")}
+        aria-label={id ? undefined : t("serverUrl")}
         className="h-auto min-h-12 w-full text-left"
       >
         <SelectValue>
@@ -106,9 +106,11 @@ export function ServerUrlActionNotice({
 export function ServerUrlPicker({
   value,
   onValueChange,
+  showSettingsLink = true,
 }: {
   value: ServerUrlKind | null;
   onValueChange: (kind: ServerUrlKind) => void;
+  showSettingsLink?: boolean;
 }) {
   const { settings, error } = useServerUrlSettings();
   const t = useTranslations("serverUrls");
@@ -130,7 +132,7 @@ export function ServerUrlPicker({
           {t("proxyMissing")}
         </p>
       )}
-      <ServerUrlSettingsLink />
+      {showSettingsLink && <ServerUrlSettingsLink />}
     </div>
   );
 }
@@ -147,7 +149,13 @@ export function ServerUrlSettingsLink() {
   );
 }
 
-export function EndpointUrls({ path }: { path: string }) {
+export function EndpointUrls({
+  path,
+  showSettingsLink = true,
+}: {
+  path: string;
+  showSettingsLink?: boolean;
+}) {
   const { settings, error } = useServerUrlSettings();
   const t = useTranslations("serverUrls");
   const [copied, setCopied] = useState<string | null>(null);
@@ -200,7 +208,7 @@ export function EndpointUrls({ path }: { path: string }) {
           {copyError}
         </p>
       )}
-      <ServerUrlSettingsLink />
+      {showSettingsLink && <ServerUrlSettingsLink />}
     </div>
   );
 }

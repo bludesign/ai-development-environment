@@ -14,6 +14,8 @@ export const WORKTREE_COMMIT_JOB_KIND = "worktree.commit";
 export const WORKTREE_AUTO_SYNC_JOB_KIND = "worktree.auto-sync";
 export const WORKTREE_REVIEWED_SYNC_CAPABILITY =
   "worktree.auto-sync.reviewed-head";
+export const WORKTREE_REVIEWED_SYNC_FINALIZE_CAPABILITY =
+  "worktree.auto-sync.reviewed-finalize";
 export type WorktreeMergeSyncGuard = {
   expectedHeadSha: string;
   targetUrl: string;
@@ -1334,8 +1336,6 @@ export function worktreeAutoSyncJobPayload(value: unknown): {
       throw new Error("Invalid merge sync target SHA");
     if (!validGitBranchName(mergeGuard.targetBranch))
       throw new Error("Invalid merge sync target branch");
-    if (payload.phase !== "SYNC")
-      throw new Error("Reviewed sync requires the SYNC phase");
   }
   return {
     codebaseId: stringValue(

@@ -260,61 +260,63 @@ export type GitLabMergeOperationView = {
   updatedAt: string;
 };
 
-export type GitLabMergeOptions = {
-  canSwitchToDefaultBranch?: boolean;
-  defaultSwitchToDefaultBranch?: boolean;
-  switchToDefaultBranchName?: string | null;
-  switchToDefaultBranchUnavailableReason?: string | null;
-  canAutoMergeWithSync?: boolean;
-  autoSyncBlockedReason?: string | null;
-  defaultAutoSync?: boolean;
-  baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
-  projectId: string;
-  iid: number;
-  title: string;
-  state: string;
-  sha: string;
-  sourceBranch: string;
-  targetBranch: string;
-  mergeMethod: string;
-  squashPolicy: string;
-  squash: boolean;
-  removeSourceBranch: boolean;
-  canRemoveSourceBranch: boolean;
-  canMerge: boolean;
-  canAutoMerge: boolean;
-  canCancelAutoMerge: boolean;
-  autoMergeEnabled: boolean;
-  mergeBlockedReason: string | null;
-  autoMergeBlockedReason: string | null;
-  mergeCommitMessage: string | null;
-  squashCommitMessage: string | null;
-  worktreeId: string | null;
-  worktreeFolder: string | null;
-  canDeleteWorktree: boolean;
-  ticketKey: string | null;
-  ticketDoneStatusConfigured: boolean;
-  defaultMoveTicketToDone: boolean;
-  defaultDeleteWorktree: boolean;
-  operation: GitLabMergeOperationView | null;
-};
+export type GitLabMergeOptions =
+  import("@/services/worktrees/merge-branch-sync").MergeConflictWorkflowFields & {
+    canSwitchToDefaultBranch?: boolean;
+    defaultSwitchToDefaultBranch?: boolean;
+    switchToDefaultBranchName?: string | null;
+    switchToDefaultBranchUnavailableReason?: string | null;
+    canAutoMergeWithSync?: boolean;
+    autoSyncBlockedReason?: string | null;
+    defaultAutoSync?: boolean;
+    baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
+    projectId: string;
+    iid: number;
+    title: string;
+    state: string;
+    sha: string;
+    sourceBranch: string;
+    targetBranch: string;
+    mergeMethod: string;
+    squashPolicy: string;
+    squash: boolean;
+    removeSourceBranch: boolean;
+    canRemoveSourceBranch: boolean;
+    canMerge: boolean;
+    canAutoMerge: boolean;
+    canCancelAutoMerge: boolean;
+    autoMergeEnabled: boolean;
+    mergeBlockedReason: string | null;
+    autoMergeBlockedReason: string | null;
+    mergeCommitMessage: string | null;
+    squashCommitMessage: string | null;
+    worktreeId: string | null;
+    worktreeFolder: string | null;
+    canDeleteWorktree: boolean;
+    ticketKey: string | null;
+    ticketDoneStatusConfigured: boolean;
+    defaultMoveTicketToDone: boolean;
+    defaultDeleteWorktree: boolean;
+    operation: GitLabMergeOperationView | null;
+  };
 
-export type SubmitGitLabMergeRequestMergeInput = {
-  switchToDefaultBranch?: boolean | null;
-  autoSync?: boolean | null;
-  baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
-  projectId: string;
-  iid: number;
-  sha: string;
-  autoMerge?: boolean | null;
-  squash?: boolean | null;
-  removeSourceBranch?: boolean | null;
-  mergeCommitMessage?: string | null;
-  squashCommitMessage?: string | null;
-  worktreeId?: string | null;
-  deleteWorktree?: boolean | null;
-  moveTicketToDone?: boolean | null;
-};
+export type SubmitGitLabMergeRequestMergeInput =
+  import("@/services/worktrees/merge-branch-sync").MergeConflictWorkflowInput & {
+    switchToDefaultBranch?: boolean | null;
+    autoSync?: boolean | null;
+    baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
+    projectId: string;
+    iid: number;
+    sha: string;
+    autoMerge?: boolean | null;
+    squash?: boolean | null;
+    removeSourceBranch?: boolean | null;
+    mergeCommitMessage?: string | null;
+    squashCommitMessage?: string | null;
+    worktreeId?: string | null;
+    deleteWorktree?: boolean | null;
+    moveTicketToDone?: boolean | null;
+  };
 
 export type GitLabMergeResult = {
   ticketTransitionError?: string | null;

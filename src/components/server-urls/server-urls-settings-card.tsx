@@ -55,6 +55,9 @@ function ServerUrlsSettingsForm({ settings }: { settings: ServerUrlSettings }) {
   const [simulatorDefault, setSimulatorDefault] = useState<
     ServerUrlKind | "INHERIT"
   >(settings.simulatorDefaultServerUrlKind ?? "INHERIT");
+  const [physicalDefault, setPhysicalDefault] = useState<
+    ServerUrlKind | "INHERIT"
+  >(settings.physicalDefaultServerUrlKind ?? "INHERIT");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -73,6 +76,8 @@ function ServerUrlsSettingsForm({ settings }: { settings: ServerUrlSettings }) {
             defaultServerUrlKind: globalDefault,
             simulatorDefaultServerUrlKind:
               simulatorDefault === "INHERIT" ? null : simulatorDefault,
+            physicalDefaultServerUrlKind:
+              physicalDefault === "INHERIT" ? null : physicalDefault,
           },
           origin: window.location.origin,
         },
@@ -182,6 +187,18 @@ function ServerUrlsSettingsForm({ settings }: { settings: ServerUrlSettings }) {
                 value={simulatorDefault}
                 inherit
                 onValueChange={setSimulatorDefault}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="server-physical-default">
+                {t("physicalDefault")}
+              </Label>
+              <ServerUrlSelect
+                id="server-physical-default"
+                settings={draft}
+                value={physicalDefault}
+                inherit
+                onValueChange={setPhysicalDefault}
               />
             </div>
             <Button disabled={busy} onClick={() => void save()}>

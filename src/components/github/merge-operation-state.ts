@@ -38,6 +38,8 @@ const EMPTY: MergeOperationState = {
 // Owned by the browser session, rather than a sheet or route. Dismissing a sheet
 // or navigating must not cancel its mutation or forget an error from that work.
 const operations = new Map<string, MergeOperationState>();
+const successTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const SUCCESS_NOTICE_MS = 5_000;
 const listeners = new Map<string, Set<() => void>>();
 const errorListeners = new Set<() => void>();
 const EMPTY_ERRORS: MergeOperationErrorEntry[] = [];
@@ -102,8 +104,30 @@ export const gitlabMergeOperationKey = (request: {
 
 function publish(key: string, state: MergeOperationState) {
   operations.set(key, state);
+  if (
+    state.postMergeSwitch?.state === "COMPLETED" &&
+    !state.progressDismissed
+  ) {
+    if (!successTimers.has(key)) {
+      successTimers.set(
+        key,
+        setTimeout(() => {
+          successTimers.delete(key);
+          dismissMergeOperationProgress(key);
+        }, SUCCESS_NOTICE_MS),
+      );
+    }
+  } else {
+    clearSuccessTimer(key);
+  }
   listeners.get(key)?.forEach((listener) => listener());
   publishErrors();
+}
+
+function clearSuccessTimer(key: string) {
+  const timer = successTimers.get(key);
+  if (timer !== undefined) clearTimeout(timer);
+  successTimers.delete(key);
 }
 
 export function dismissMergeOperationError(key: string) {
@@ -138,6 +162,7 @@ export function clearMergeOperation(
     (preserveError && current.error)
   )
     return;
+  clearSuccessTimer(key);
   operations.delete(key);
   listeners.get(key)?.forEach((listener) => listener());
   publishErrors();
@@ -187,7 +212,10 @@ export async function runMergeOperation<T>(
         : previous?.postMergeSwitch,
     managedPending: false,
     refreshError: null,
-    progressDismissed: false,
+    progressDismissed:
+      action === "merge" || action === "auto"
+        ? false
+        : previous?.progressDismissed,
     followUpOperation:
       action === "merge" || action === "auto"
         ? undefined
@@ -300,6 +328,6 @@ export function clearMergeOperationProgress(key: string) {
 
 export function dismissMergeOperationProgress(key: string) {
   const state = operations.get(key);
-  if (state && !state.pending && state.postMergeSwitch?.state === "COMPLETED")
+  if (state?.postMergeSwitch?.state === "COMPLETED")
     publish(key, { ...state, progressDismissed: true });
 }

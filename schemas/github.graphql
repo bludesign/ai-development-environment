@@ -1246,6 +1246,16 @@ type GitHubPullRequestMergeOptions {
   autoSyncBlockedReason: String
   "Previously selected branch syncing setting."
   defaultAutoSync: Boolean!
+  "Enabled merge conflict workflows available to the linked worktree."
+  mergeConflictWorkflows: [Workflow!]!
+  "Previously selected merge conflict workflow."
+  defaultConflictWorkflowId: ID
+  "Previously selected merge conflict workflow trigger choice."
+  defaultConflictWorkflowChoice: String
+  "Reason a conflict workflow cannot be selected."
+  conflictWorkflowBlockedReason: String
+  "Whether the branch already has conflicts and needs a workflow to start Auto Merge."
+  autoSyncRequiresConflictWorkflow: Boolean!
   "Saved merge operation for the linked worktree."
   autoMergeOperation: WorktreeAutoMerge
   "Targeting worktrees and the reviewed destination for post-merge base updates."

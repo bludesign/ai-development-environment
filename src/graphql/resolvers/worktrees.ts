@@ -613,6 +613,8 @@ export const createWorktreeResolvers = (
         input: {
           switchToDefaultBranch?: boolean | null;
           autoSync?: boolean | null;
+          conflictWorkflowId?: string | null;
+          conflictWorkflowChoice?: string | null;
           expectedHeadSha?: string | null;
           worktreeId: string;
           repositoryNameWithOwner: string;

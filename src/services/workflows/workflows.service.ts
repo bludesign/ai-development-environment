@@ -2953,8 +2953,14 @@ export class WorkflowsService {
     return mergeSessionData(derived, sessionData);
   }
 
-  async trigger(input: TriggerWorkflowInput) {
+  async trigger(input: TriggerWorkflowInput, idempotencyKey?: string) {
     const prisma = await getPrismaClient();
+    if (idempotencyKey) {
+      const existing = await prisma.workflowRun.findUnique({
+        where: { idempotencyKey },
+      });
+      if (existing) return this.run(existing.id);
+    }
     const workflow = await prisma.workflow.findUnique({
       where: { id: input.workflowId },
       include: {
@@ -3041,7 +3047,7 @@ export class WorkflowsService {
       wantedKind,
       subjectKey,
       payload,
-      `manual:${workflow.id}:${randomUUID()}`,
+      idempotencyKey ?? `manual:${workflow.id}:${randomUUID()}`,
     );
     publishRunChanged(run.id);
     return this.run(run.id);

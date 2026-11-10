@@ -1148,6 +1148,8 @@ export function physicalDestinations(
       : [];
     const cannotLaunch =
       requireLaunch &&
+      // iOS may advertise fewer features until devicectl opens the tunnel.
+      platformId !== "IOS" &&
       Array.isArray(rawCapabilities) &&
       (!capabilityIds.includes("com.apple.coredevice.feature.installapp") ||
         !capabilityIds.includes(
@@ -1277,6 +1279,26 @@ export const inspectBuildDestinations: AgentJobHandler = async (
   const folder = await validateWorktree(input, timeoutMs, signal);
   const absolutePath = await validateSource(folder, input.source);
   const platform = input.platform ?? "IOS";
+  if (platform === "IOS") {
+    // Scheme discovery can resolve Swift packages and delay device selection.
+    // Xcode checks the selected iOS destination during build preflight.
+    const generic = genericBuildDestinations(input.action, [platform]);
+    if (input.action === "ARCHIVE")
+      return { ...successfulProcess, destinations: generic };
+    const [simulators, physical] = await Promise.all([
+      listSimulators(folder, timeoutMs, signal),
+      listPhysicalDevices(timeoutMs, signal, true),
+    ]);
+    return {
+      ...successfulProcess,
+      destinations: [
+        ...generic,
+        ...[...simulators, ...physical].filter(
+          (destination) => buildDestinationPlatform(destination) === platform,
+        ),
+      ],
+    };
+  }
   const [destinations, simulators, physical] = await Promise.all([
     xcodeDestinations(
       input.source,

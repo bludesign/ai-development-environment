@@ -470,10 +470,12 @@ export class ActionCenterService {
           request.provider === "GITHUB"
             ? `/github/pull-requests/${request.repositoryName.split("/").map(encodeURIComponent).join("/")}/${request.number}`
             : `/gitlab/merge-requests/${encodeURIComponent(request.repositoryId)}/${request.number}`;
+        const key = `${record.resourceKind}:${record.id}`;
         hydratedItems.push({
-          key: `${record.resourceKind}:${record.id}`,
+          key,
           resourceKind: record.resourceKind as ActionCenterResourceKind,
-          reason: record.reason as ActionCenterReason,
+          reason:
+            indexedReasons.get(key) ?? (record.reason as ActionCenterReason),
           resourceId: record.id,
           href,
           displayNumber: request.number,

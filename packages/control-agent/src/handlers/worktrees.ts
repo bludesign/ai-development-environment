@@ -3351,30 +3351,29 @@ async function syncReviewedBranch(
     )
       throw new Error("Stash or commit changes before Auto Merge can sync");
   };
-  if ((await head()) !== guard.expectedHeadSha)
-    throw new Error(
-      "The worktree source commit changed. Review it before resuming Auto Merge.",
-    );
-  await clean();
-  const remoteHead = (
-    await run(
-      [
-        "ls-remote",
-        "--heads",
-        "--",
-        "origin",
-        `refs/heads/${input.expectedBranch}`,
-      ],
-      "Could not read the remote source revision",
-    )
-  ).stdout
-    .trim()
-    .split(/\s+/)[0];
+  const remoteRevision = async (
+    remote: string,
+    branch: string,
+    message: string,
+  ) =>
+    (
+      await run(
+        ["ls-remote", "--heads", "--", remote, `refs/heads/${branch}`],
+        message,
+      )
+    ).stdout
+      .trim()
+      .split(/\s+/)[0];
+  const remoteHead = await remoteRevision(
+    "origin",
+    input.expectedBranch,
+    "Could not read the remote source revision",
+  );
   if (remoteHead !== guard.expectedHeadSha)
     throw new Error(
       "The remote source commit changed. Review it before resuming Auto Merge.",
     );
-  // Fetch the provider-reviewed target object without depending on shared FETCH_HEAD.
+  const syncedTargetSha = guard.targetSha;
   const targetOrigin = normalizeGitOrigin(guard.targetUrl).canonicalOrigin;
   let targetTransport =
     targetOrigin === input.expectedOrigin ? "origin" : guard.targetUrl;
@@ -3395,26 +3394,6 @@ async function syncReviewedBranch(
         targetTransport = `${source[1]}:${targetUrl.pathname.replace(/^\//, "")}`;
     }
   }
-  await run(
-    [
-      "fetch",
-      "--no-tags",
-      "--no-write-fetch-head",
-      "--",
-      targetTransport,
-      guard.targetSha,
-    ],
-    "Could not fetch the merge target",
-  );
-  const syncedTargetSha = guard.targetSha;
-  const ancestor = await git(
-    folder,
-    ["merge-base", "--is-ancestor", syncedTargetSha, "HEAD"],
-    timeoutMs,
-    signal,
-  );
-  if (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)
-    throw new Error("Could not compare the merge target");
   const result = async (outcome: string) => ({
     ...successfulProcess,
     outcome,
@@ -3438,6 +3417,152 @@ async function syncReviewedBranch(
       signal,
     ),
   });
+  const push = async () => {
+    const syncedHeadSha = await head();
+    await clean();
+    await run(
+      [
+        "push",
+        `--force-with-lease=refs/heads/${input.expectedBranch}:${guard.expectedHeadSha}`,
+        "origin",
+        `${syncedHeadSha}:refs/heads/${input.expectedBranch}`,
+      ],
+      "Auto Merge push failed; review the local and remote revisions before resuming",
+    );
+    if ((await head()) !== syncedHeadSha)
+      throw new Error("The worktree source commit changed during push");
+    return result("SYNCED");
+  };
+  if (input.phase === "FINALIZE") {
+    const hasNoConflictMarkers = async (...revisions: string[]) =>
+      (
+        await git(
+          folder,
+          [
+            "-c",
+            "core.whitespace=-blank-at-eol,-blank-at-eof,-space-before-tab",
+            "diff",
+            "--check",
+            ...revisions,
+          ],
+          timeoutMs,
+          signal,
+        )
+      ).exitCode === 0;
+    const rebasing = await rebaseInProgress(folder, timeoutMs, signal);
+    if (rebasing) {
+      const rebaseMatches = await Promise.any(
+        ["rebase-merge", "rebase-apply"].map(async (directory) => {
+          const read = (name: string) =>
+            readFile(join(input.gitDirectory, directory, name), "utf8");
+          const [original, onto] = await Promise.all([
+            read("orig-head"),
+            read("onto"),
+          ]);
+          if (
+            original.trim() !== guard.expectedHeadSha ||
+            onto.trim() !== syncedTargetSha
+          )
+            throw new Error(
+              "Rebase revisions differ from the reviewed revisions",
+            );
+          return true;
+        }),
+      ).catch(() => false);
+      if (!rebaseMatches)
+        throw new Error(
+          "The in-progress rebase does not match the reviewed revisions",
+        );
+      if (!(await hasNoConflictMarkers())) return result("UNRESOLVED");
+      await run(["add", "--all"], "Could not stage resolved conflicts");
+      if (!(await hasNoConflictMarkers("--cached")))
+        return result("UNRESOLVED");
+      const continued = await command(
+        "git",
+        ["-C", folder, "rebase", "--continue"],
+        timeoutMs,
+        signal,
+        {
+          ...process.env,
+          GIT_EDITOR: "true",
+          GIT_TERMINAL_PROMPT: "0",
+          GIT_OPTIONAL_LOCKS: "0",
+        },
+      );
+      if (continued.exitCode !== 0) return result("UNRESOLVED");
+    } else {
+      const original = await run(
+        ["rev-parse", "--verify", "ORIG_HEAD"],
+        "Could not verify the original rebase revision",
+      );
+      if (original.stdout.trim() !== guard.expectedHeadSha)
+        throw new Error(
+          "The completed rebase does not match the reviewed source revision",
+        );
+      const branchRef = `refs/heads/${input.expectedBranch}`;
+      const finished = await run(
+        ["reflog", "-1", "--format=%H%x00%gs", branchRef],
+        "Could not verify how the resolved branch was updated",
+      );
+      const [revision, operation] = finished.stdout.trim().split("\0");
+      if (
+        revision !== (await head()) ||
+        operation !== `rebase (finish): ${branchRef} onto ${syncedTargetSha}`
+      )
+        throw new Error(
+          "The resolved branch did not finish rebasing onto the reviewed target",
+        );
+    }
+    await run(
+      ["merge-base", "--is-ancestor", syncedTargetSha, "HEAD"],
+      "The resolved branch does not include the reviewed merge target",
+    );
+    const branch = await run(
+      ["symbolic-ref", "--short", "HEAD"],
+      "Could not verify the resolved branch",
+    );
+    if (
+      branch.stdout.trim() !== input.expectedBranch ||
+      (await rebaseInProgress(folder, timeoutMs, signal)) ||
+      !(await hasNoConflictMarkers(syncedTargetSha, "HEAD"))
+    )
+      return result("UNRESOLVED");
+    const currentTarget = await remoteRevision(
+      targetTransport,
+      guard.targetBranch,
+      "Could not read the remote target revision",
+    );
+    if (currentTarget !== syncedTargetSha)
+      throw new Error(
+        "The target commit changed during conflict resolution. Review it before resuming Auto Merge.",
+      );
+    return push();
+  }
+  if ((await head()) !== guard.expectedHeadSha)
+    throw new Error(
+      "The worktree source commit changed. Review it before resuming Auto Merge.",
+    );
+  await clean();
+  // Fetch the provider-reviewed target object without depending on shared FETCH_HEAD.
+  await run(
+    [
+      "fetch",
+      "--no-tags",
+      "--no-write-fetch-head",
+      "--",
+      targetTransport,
+      guard.targetSha,
+    ],
+    "Could not fetch the merge target",
+  );
+  const ancestor = await git(
+    folder,
+    ["merge-base", "--is-ancestor", syncedTargetSha, "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  if (ancestor.exitCode !== 0 && ancestor.exitCode !== 1)
+    throw new Error("Could not compare the merge target");
   if ((await head()) !== guard.expectedHeadSha)
     throw new Error("The worktree source commit changed during sync");
   await clean();
@@ -3465,20 +3590,7 @@ async function syncReviewedBranch(
       return result("CONFLICT");
     throw new Error(cleanError(rebase.stderr || "Auto Merge rebase failed"));
   }
-  const syncedHeadSha = await head();
-  await clean();
-  await run(
-    [
-      "push",
-      `--force-with-lease=refs/heads/${input.expectedBranch}:${guard.expectedHeadSha}`,
-      "origin",
-      `${syncedHeadSha}:refs/heads/${input.expectedBranch}`,
-    ],
-    "Auto Merge push failed; review the local and remote revisions before resuming",
-  );
-  if ((await head()) !== syncedHeadSha)
-    throw new Error("The worktree source commit changed during push");
-  return result("SYNCED");
+  return push();
 }
 
 export const autoSyncWorktree: AgentJobHandler = async (

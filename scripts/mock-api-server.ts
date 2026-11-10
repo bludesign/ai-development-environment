@@ -280,7 +280,7 @@ const PULL_REQUESTS: PullRequestSeed[] = [
     author: VIEWER_LOGIN,
     state: "OPEN",
     isDraft: false,
-    reviewDecision: "APPROVED",
+    reviewDecision: null,
     rollup: "SUCCESS",
     labels: ["backend", "github"],
     additions: 408,

@@ -52,6 +52,8 @@ import {
   MANAGED_MERGE_STATES,
   LEGACY_CODEBASE_BUSY_MESSAGE,
   isTransientMergeError,
+  mergeConflictWorkflowOptions,
+  type MergeConflictWorkflowInput,
   mergeSyncUnavailableReason,
   prepareMergeSync,
   readMergeSync,
@@ -561,8 +563,16 @@ export class WorktreeAutomationService {
     const autoSyncBlockedReason = await mergeSyncUnavailableReason(
       worktree?.id,
     );
+    const conflictOptions = await mergeConflictWorkflowOptions(
+      worktree?.id,
+      saved?.syncStateJson,
+    );
+    const canResolveConflicts =
+      !options.autoSyncRequiresConflictWorkflow ||
+      conflictOptions.mergeConflictWorkflows.length > 0;
     return {
       ...options,
+      ...conflictOptions,
       ...(await getPostMergeSwitchOptions(
         worktree?.id,
         `github.com/${owner.toLowerCase()}/${name.toLowerCase()}`,
@@ -570,11 +580,17 @@ export class WorktreeAutomationService {
         saved?.postMergeSwitchJson,
       )),
       canEnableAutoMerge: worktree
-        ? Boolean(options.canAutoMergeWithSync)
+        ? Boolean(options.canAutoMergeWithSync && canResolveConflicts)
         : options.canEnableAutoMerge,
       canAutoMergeWithSync:
-        !autoSyncBlockedReason && Boolean(options.canAutoMergeWithSync),
-      autoSyncBlockedReason,
+        !autoSyncBlockedReason &&
+        canResolveConflicts &&
+        Boolean(options.canAutoMergeWithSync),
+      autoSyncBlockedReason:
+        autoSyncBlockedReason ??
+        (canResolveConflicts
+          ? null
+          : conflictOptions.conflictWorkflowBlockedReason),
       defaultAutoSync: saved?.autoSync ?? false,
       autoMergeOperation: saved ? mergeView(saved) : null,
       baseBranchUpdateOptions: await mergeBaseBranchUpdateOptions(
@@ -765,21 +781,30 @@ export class WorktreeAutomationService {
     }
   }
 
-  async configureAutoMerge(input: {
-    switchToDefaultBranch?: boolean | null;
-    autoSync?: boolean | null;
-    expectedHeadSha?: string | null;
-    baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
-    worktreeId: string;
-    repositoryNameWithOwner: string;
-    pullRequestNumber: number;
-    method: GitHubMergeMethod;
-    commitHeadline: string;
-    commitBody: string;
-    authorEmail?: string | null;
-    deleteWorktree: boolean;
-    moveTicketToDone: boolean;
-  }) {
+  async configureAutoMerge(
+    input: MergeConflictWorkflowInput & {
+      switchToDefaultBranch?: boolean | null;
+      autoSync?: boolean | null;
+      expectedHeadSha?: string | null;
+      baseBranchUpdate?: MergeBaseBranchUpdateInput | null;
+      worktreeId: string;
+      repositoryNameWithOwner: string;
+      pullRequestNumber: number;
+      method: GitHubMergeMethod;
+      commitHeadline: string;
+      commitBody: string;
+      authorEmail?: string | null;
+      deleteWorktree: boolean;
+      moveTicketToDone: boolean;
+    },
+  ) {
+    if (
+      !input.autoSync &&
+      (input.conflictWorkflowId || input.conflictWorkflowChoice)
+    )
+      throw new Error(
+        "Automatic conflict resolution requires Auto sync branch.",
+      );
     return this.withMergeLock(
       this.mergeKey(input.repositoryNameWithOwner, input.pullRequestNumber),
       async () => {
@@ -891,7 +916,11 @@ export class WorktreeAutomationService {
             )
               return mergeView(existing);
             if (existing?.autoSync)
-              await cancelMergeSync(existing.syncStateJson, this.agentControl);
+              await cancelMergeSync(
+                existing.syncStateJson,
+                this.agentControl,
+                this.workflows,
+              );
             const ready = await this.github.managedMergeReadiness(
               repository.owner,
               repository.name,
@@ -918,10 +947,15 @@ export class WorktreeAutomationService {
               throw new Error("The selected merge method is not available.");
             if (!input.commitHeadline.trim())
               throw new Error("A commit message is required");
-            const syncStateJson = await prepareMergeSync(worktree.id, ready, {
-              provider: "GITHUB",
-              id: worktree.id,
-            });
+            const syncStateJson = await prepareMergeSync(
+              worktree.id,
+              ready,
+              {
+                provider: "GITHUB",
+                id: worktree.id,
+              },
+              input,
+            );
             const data = {
               autoSync: true,
               syncStateJson,
@@ -985,7 +1019,11 @@ export class WorktreeAutomationService {
           });
         }
         if (existing?.autoSync)
-          await cancelMergeSync(existing.syncStateJson, this.agentControl);
+          await cancelMergeSync(
+            existing.syncStateJson,
+            this.agentControl,
+            this.workflows,
+          );
         if (existing && retargeting) {
           const previousRepository = repositoryParts(
             existing.repositoryNameWithOwner,
@@ -1178,7 +1216,11 @@ export class WorktreeAutomationService {
       )
         throw new Error("The pull request does not match this worktree");
       if (rule.autoSync)
-        await cancelMergeSync(rule.syncStateJson, this.agentControl);
+        await cancelMergeSync(
+          rule.syncStateJson,
+          this.agentControl,
+          this.workflows,
+        );
       if (state.state === "OPEN" && state.autoMergeEnabled) {
         await this.github.disablePullRequestAutoMerge(
           {
@@ -1871,7 +1913,11 @@ export class WorktreeAutomationService {
                 rule.state !== "POST_MERGE"
               ) {
                 if (rule.autoSync)
-                  await cancelMergeSync(rule.syncStateJson, this.agentControl);
+                  await cancelMergeSync(
+                    rule.syncStateJson,
+                    this.agentControl,
+                    this.workflows,
+                  );
                 const remote = await this.github.pullRequestAutomationState(
                   repository.owner,
                   repository.name,
@@ -1962,6 +2008,7 @@ export class WorktreeAutomationService {
                   ...rule,
                   worktrees: this.worktrees,
                   agents: this.agentControl,
+                  workflows: this.workflows,
                   readiness: () =>
                     this.github.managedMergeReadiness(
                       repository.owner,

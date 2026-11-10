@@ -2413,7 +2413,7 @@ export class BuildsService {
       position,
     }));
     const server = await serverUrlSettingsService.buildSettings(
-      destination.type,
+      { type: destination.type, platform },
       input.serverUrlKind,
       { requestOrigin: input.telemetryRequestOrigin },
     );

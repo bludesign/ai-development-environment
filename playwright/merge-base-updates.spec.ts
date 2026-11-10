@@ -28,6 +28,18 @@ const mergeOptions = {
   canAutoMergeWithSync: true,
   autoSyncBlockedReason: null,
   defaultAutoSync: false,
+  mergeConflictWorkflows: [
+    {
+      id: "resolve-search-conflicts",
+      name: "Resolve search conflicts",
+      hasPlainTrigger: true,
+      triggerChoices: [{ key: "reviewed", label: "Resolve and verify" }],
+    },
+  ],
+  defaultConflictWorkflowId: null,
+  defaultConflictWorkflowChoice: null,
+  conflictWorkflowBlockedReason: null,
+  autoSyncRequiresConflictWorkflow: false,
   autoMergeOperation: null,
   autoMergeEnabled: false,
   viewerCanDisableAutoMerge: true,
@@ -101,9 +113,25 @@ for (const automatic of [false, true]) {
       await dialog
         .getByRole("checkbox", { name: "Auto sync branch", exact: true })
         .check();
-      await expect(
-        dialog.getByRole("button", { name: "Enable Auto Merge", exact: true }),
-      ).toBeEnabled();
+      await dialog
+        .getByRole("checkbox", { name: /resolve merge conflicts/i })
+        .check();
+      const submit = dialog.getByRole("button", {
+        name: "Enable Auto Merge",
+        exact: true,
+      });
+      await expect(submit).toBeDisabled();
+      await dialog
+        .getByRole("combobox", { name: "Merge conflict workflow", exact: true })
+        .click();
+      await page
+        .getByRole("option", { name: "Resolve search conflicts" })
+        .click();
+      await dialog
+        .getByRole("combobox", { name: "Merge conflict workflow trigger" })
+        .click();
+      await page.getByRole("option", { name: "Resolve and verify" }).click();
+      await expect(submit).toBeEnabled();
     }
     await expect(dialog.getByText("Update targeting worktrees")).toBeVisible();
     const first = dialog.getByRole("checkbox", { name: /search-filters/ });

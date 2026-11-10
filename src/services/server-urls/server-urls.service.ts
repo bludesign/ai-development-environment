@@ -10,6 +10,7 @@ import {
   normalizeServerOrigin,
   serverBaseUrl,
   SERVER_URL_KINDS,
+  type BuildServerUrlDestination,
   type ServerUrlKind,
   type ServerUrlSettings,
 } from "@/lib/server-urls";
@@ -26,6 +27,7 @@ export type SaveServerUrlSettingsInput = {
   proxyBaseUrl?: string | null;
   defaultServerUrlKind?: ServerUrlKind | null;
   simulatorDefaultServerUrlKind?: ServerUrlKind | null;
+  physicalDefaultServerUrlKind?: ServerUrlKind | null;
 };
 
 function optionalOrigin(value: string | null | undefined): string | null {
@@ -104,6 +106,9 @@ export class ServerUrlSettingsService {
       simulatorDefaultServerUrlKind: row.simulatorDefaultServerUrlKind
         ? kind(row.simulatorDefaultServerUrlKind)
         : null,
+      physicalDefaultServerUrlKind: row.physicalDefaultServerUrlKind
+        ? kind(row.physicalDefaultServerUrlKind)
+        : null,
       updatedAt: row.updatedAt.toISOString(),
     };
   }
@@ -128,10 +133,15 @@ export class ServerUrlSettingsService {
         input.simulatorDefaultServerUrlKind === undefined
           ? current.simulatorDefaultServerUrlKind
           : input.simulatorDefaultServerUrlKind;
+      const physicalKind =
+        input.physicalDefaultServerUrlKind === undefined
+          ? current.physicalDefaultServerUrlKind
+          : input.physicalDefaultServerUrlKind;
       if (simulatorKind) kind(simulatorKind);
+      if (physicalKind) kind(physicalKind);
       if (
         !proxyBaseUrl &&
-        (defaultKind === "PROXY" || simulatorKind === "PROXY")
+        [defaultKind, simulatorKind, physicalKind].includes("PROXY")
       ) {
         throw new Error(
           "Configure a Proxy URL or choose another default server URL before saving.",
@@ -151,6 +161,7 @@ export class ServerUrlSettingsService {
           proxyBaseUrl,
           defaultServerUrlKind: defaultKind,
           simulatorDefaultServerUrlKind: simulatorKind,
+          physicalDefaultServerUrlKind: physicalKind,
         },
       });
     });
@@ -165,13 +176,13 @@ export class ServerUrlSettingsService {
     );
   }
   async buildSettings(
-    destinationType: string,
+    destination: BuildServerUrlDestination,
     selectedKind?: ServerUrlKind | null,
     detection: ServerUrlDetection = {},
   ) {
     const settings = await this.settings(detection);
     const selectedUrlKind =
-      selectedKind ?? defaultServerUrlKind(settings, destinationType);
+      selectedKind ?? defaultServerUrlKind(settings, destination);
     return {
       localBaseUrl: settings.effectiveLocalBaseUrl,
       remoteBaseUrl: settings.effectiveRemoteBaseUrl,

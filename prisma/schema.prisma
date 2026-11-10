@@ -1908,6 +1908,7 @@ model ServerUrlSettings {
   proxyBaseUrl                  String?
   defaultServerUrlKind          String   @default("LOCAL")
   simulatorDefaultServerUrlKind String?
+  physicalDefaultServerUrlKind  String?
   createdAt                     DateTime @default(now())
   updatedAt                     DateTime @updatedAt
 }

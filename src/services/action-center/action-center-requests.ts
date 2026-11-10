@@ -18,6 +18,8 @@ import { mapIntegrationRequests } from "@/services/integration-request";
 import type { PollingService } from "@/services/polling";
 import type { NotificationsService } from "@/services/notifications";
 
+import { FAILED_REQUEST_PIPELINE_STATUSES } from "./request-pipeline-status";
+
 export type ActionCenterRequestView = {
   behindCount?: number | null;
   needsRebase?: boolean;
@@ -55,9 +57,27 @@ export function actionCenterMergeReady(
   );
 }
 
+function requestReason(request: ActionCenterRequestView) {
+  if (
+    FAILED_REQUEST_PIPELINE_STATUSES.includes(
+      request.pipelineStatus.toUpperCase(),
+    )
+  )
+    return "FAILED";
+  // A requested reviewer can coexist with optional repository approval.
+  if (
+    request.canMerge &&
+    ["NONE", "NOT_REQUIRED"].includes(request.approvalStatus.toUpperCase())
+  )
+    return "READY_TO_MERGE";
+  if (request.requiresMyApproval) return "REVIEW_REQUIRED";
+  return request.canMerge ? "READY_TO_MERGE" : "ACTIVE";
+}
+
 type Candidate = {
   approvalRevision?: number;
   lastKnownApprovalStatus?: string;
+  providerCanMerge?: boolean;
   id: string;
   label: string;
   createdAt: string;
@@ -290,8 +310,9 @@ export class ActionCenterRequests {
       request.pipelineStatus = change.snapshot.pipelineStatus;
       request.pipelineUrl =
         change.snapshot.pipelines[0]?.url ?? request.pipelineUrl;
+      candidate.providerCanMerge ??= request.canMerge;
       request.canMerge = actionCenterMergeReady(
-        request.canMerge,
+        candidate.providerCanMerge,
         request.pipelineStatus,
         request.approvalStatus,
         request.draft,
@@ -300,11 +321,7 @@ export class ActionCenterRequests {
         where: { id: row.id, accountKey, payloadJson: row.payloadJson },
         data: {
           payloadJson: JSON.stringify(candidate),
-          reason: request.requiresMyApproval
-            ? "REVIEW_REQUIRED"
-            : request.canMerge
-              ? "READY_TO_MERGE"
-              : "ACTIVE",
+          reason: requestReason(request),
         },
       });
     }
@@ -401,6 +418,7 @@ export class ActionCenterRequests {
                 state.approvalStatus ?? request.approvalStatus;
               return {
                 ...current,
+                providerCanMerge: state.canMerge,
                 request: {
                   ...request,
                   approvalStatus,
@@ -520,11 +538,7 @@ export class ActionCenterRequests {
         provider,
         accountKey,
         resourceKind,
-        reason: request.requiresMyApproval
-          ? "REVIEW_REQUIRED"
-          : request.canMerge
-            ? "READY_TO_MERGE"
-            : "ACTIVE",
+        reason: requestReason(request),
         isMine: request.isMine,
         requiresMyApproval: request.requiresMyApproval,
         payloadJson: JSON.stringify(candidate),
@@ -704,6 +718,7 @@ export class ActionCenterRequests {
                 createdAt: pr.createdAt,
                 updatedAt: pr.updatedAt ?? pr.createdAt,
                 worktreeId: pr.worktreeId,
+                providerCanMerge: state.canMerge,
                 request,
               });
             }
@@ -760,6 +775,17 @@ export class ActionCenterRequests {
                     state.mr,
                     state.canMerge,
                   );
+                  const sameHead = state.mr.sha === mr.sha;
+                  const headPipeline = sameHead
+                    ? (state.mr.headPipeline ?? mr.headPipeline)
+                    : mr.headPipeline;
+                  const approvalStatus =
+                    sameHead && state.mr.detailedMergeStatus === "not_approved"
+                      ? "REVIEW_REQUIRED"
+                      : sameHead &&
+                          state.mr.detailedMergeStatus === "requested_changes"
+                        ? "CHANGES_REQUESTED"
+                        : (mr.approvalState ?? "UNKNOWN");
                   const request: ActionCenterRequestView = {
                     provider: "GITLAB",
                     repositoryId: mr.projectId,
@@ -769,18 +795,18 @@ export class ActionCenterRequests {
                     headSha: mr.sha,
                     url: mr.webUrl,
                     draft: mr.draft,
-                    pipelineStatus: mr.headPipeline?.status ?? "NONE",
-                    pipelineUrl: mr.headPipeline?.webUrl ?? null,
-                    approvalStatus: mr.approvalState ?? "UNKNOWN",
+                    pipelineStatus: headPipeline?.status ?? "NONE",
+                    pipelineUrl: headPipeline?.webUrl ?? null,
+                    approvalStatus,
                     behindCount: state.mr.behindCount ?? null,
                     needsRebase: state.mr.detailedMergeStatus === "need_rebase",
                     isMine: scope === "MINE",
                     requiresMyApproval:
                       scope === "REVIEW_REQUESTED" && !approved,
                     canMerge: actionCenterMergeReady(
-                      blockedReason === null && state.mr.sha === mr.sha,
-                      mr.headPipeline?.status ?? "NONE",
-                      mr.approvalState ?? "UNKNOWN",
+                      blockedReason === null && sameHead,
+                      headPipeline?.status ?? "NONE",
+                      approvalStatus,
                       mr.draft,
                     ),
                     mergeBlockedReason: blockedReason,

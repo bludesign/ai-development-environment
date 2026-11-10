@@ -2884,7 +2884,10 @@ export class GitHubService {
           }
         }
         result.set(pr.id, {
-          approvalStatus: node.reviewDecision ?? undefined,
+          approvalStatus:
+            node.reviewDecision === undefined
+              ? undefined
+              : reviewDecision(node.reviewDecision),
           behindCount,
           needsRebase: node.mergeStateStatus === "BEHIND",
           viewerHasApproved: review === "APPROVED",
@@ -6048,12 +6051,14 @@ export class GitHubService {
       canAutoMergeWithSync:
         state.pullRequest.state === "OPEN" &&
         !state.pullRequest.isDraft &&
-        state.pullRequest.mergeable !== "CONFLICTING" &&
         Boolean(
           state.viewerPermission &&
           ["ADMIN", "MAINTAIN", "WRITE"].includes(state.viewerPermission),
         ) &&
         state.availableMethods.length > 0,
+      autoSyncRequiresConflictWorkflow:
+        state.pullRequest.mergeable === "CONFLICTING" ||
+        state.pullRequest.mergeStateStatus === "DIRTY",
       canMerge: blockedReason === null,
       canEnableAutoMerge:
         state.pullRequest.state === "OPEN" &&
@@ -6140,9 +6145,7 @@ export class GitHubService {
       : !state.viewerPermission ||
           !["ADMIN", "MAINTAIN", "WRITE"].includes(state.viewerPermission)
         ? "Your GitHub account cannot merge this request."
-        : pr.mergeable === "CONFLICTING"
-          ? "Resolve merge conflicts before resuming Auto Merge."
-          : null;
+        : null;
     return {
       state: pr.mergedAt ? "MERGED" : pr.state,
       headSha: pr.headRefOid,
@@ -6157,6 +6160,8 @@ export class GitHubService {
         !this.mergeBlockedReason(pr, state.viewerPermission) &&
         state.availableMethods.length > 0,
       blocker: permanent,
+      hasConflicts:
+        pr.mergeable === "CONFLICTING" || pr.mergeStateStatus === "DIRTY",
       nativeAutoMerge: Boolean(pr.autoMergeRequest),
     };
   }

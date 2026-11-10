@@ -310,13 +310,17 @@ export function createDebuggingToolGroup(
       name: "update_server_url_settings",
       title: "Update server URL settings",
       description:
-        "Configure shared HTTP(S) origins and global or simulator defaults.",
+        "Configure shared HTTP(S) origins and global, simulator, or physical iOS build defaults.",
       inputSchema: z.object({
         localBaseUrlOverride: z.string().nullable().optional(),
         remoteBaseUrlOverride: z.string().nullable().optional(),
         proxyBaseUrl: z.string().nullable().optional(),
         defaultServerUrlKind: z.enum(["LOCAL", "REMOTE", "PROXY"]).optional(),
         simulatorDefaultServerUrlKind: z
+          .enum(["LOCAL", "REMOTE", "PROXY"])
+          .nullable()
+          .optional(),
+        physicalDefaultServerUrlKind: z
           .enum(["LOCAL", "REMOTE", "PROXY"])
           .nullable()
           .optional(),

@@ -1149,6 +1149,7 @@ describe("GitHub service", () => {
             mergeable: "MERGEABLE",
             mergeStateStatus: "CLEAN",
             headRefOid: "head",
+            reviewDecision: null,
             repository: { viewerPermission: "WRITE", squashMergeAllowed: true },
             reviews: { nodes: [{ state: "APPROVED" }] },
           })),
@@ -1166,6 +1167,7 @@ describe("GitHub service", () => {
     );
     expect(states.size).toBe(26);
     expect(states.get("0")).toMatchObject({
+      approvalStatus: "NONE",
       viewerHasApproved: true,
       canMerge: true,
     });

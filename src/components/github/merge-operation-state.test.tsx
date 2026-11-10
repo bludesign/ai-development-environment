@@ -22,6 +22,7 @@ afterEach(() => {
   cleanup();
   clearMergeOperation(first);
   clearMergeOperation(second);
+  vi.useRealTimers();
 });
 
 test("retains a pending merge and its failure across navigation without sharing another request's state", async () => {
@@ -109,5 +110,32 @@ test("dismissing a completed progress card preserves the result and trigger stat
   await act(async () => {
     await runMergeOperation(first, "retry", async () => merged);
   });
-  expect(view.result.current.progress).toHaveLength(1);
+  expect(view.result.current.progress).toHaveLength(0);
+});
+
+test("expires only the completed switch banner across navigation and refresh", async () => {
+  vi.useFakeTimers();
+  const merged = { state: "MERGED" };
+  const pending = { branch: "main", state: "PENDING", lastError: null };
+  const completed = { ...pending, state: "COMPLETED" };
+  await runMergeOperation(first, "merge", async () => merged);
+  const view = renderHook(() => useMergeOperationProgress());
+  act(() => recordPostMergeSwitch(first, pending));
+  act(() => vi.advanceTimersByTime(5_000));
+  expect(view.result.current[0]?.status).toEqual(pending);
+  act(() => recordPostMergeSwitch(first, completed));
+  act(() => vi.advanceTimersByTime(4_999));
+  act(() => recordPostMergeSwitch(first, { ...completed }));
+  expect(view.result.current[0]?.status).toEqual(completed);
+  view.unmount();
+  act(() => vi.advanceTimersByTime(1));
+
+  const next = renderHook(() => ({
+    operation: useMergeOperation(first),
+    progress: useMergeOperationProgress(),
+  }));
+  act(() => recordPostMergeSwitch(first, { ...completed }));
+  expect(next.result.current.progress).toHaveLength(0);
+  expect(next.result.current.operation.result).toBe(merged);
+  expect(next.result.current.operation.postMergeSwitch).toEqual(completed);
 });

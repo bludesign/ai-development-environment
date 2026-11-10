@@ -63,9 +63,13 @@ async function fixture(conflict = false) {
       targetSha,
     },
   };
-  const run = () =>
+  const run = (phase = "SYNC", reviewedTargetSha = targetSha) =>
     autoSyncWorktree(
-      payload,
+      {
+        ...payload,
+        phase,
+        mergeGuard: { ...payload.mergeGuard, targetSha: reviewedTargetSha },
+      },
       10_000,
       new AbortController().signal,
       async () => undefined,
@@ -79,6 +83,7 @@ async function fixture(conflict = false) {
     folder,
     linked,
     sourceRemote,
+    targetRemote,
     expectedHeadSha,
     targetSha,
     originalBase,
@@ -160,6 +165,63 @@ describe("reviewed Auto Merge sync", () => {
     expect((await git(f.linked, "status", "--porcelain")).stdout).toContain(
       "UU README.md",
     );
+  });
+  test("continues and pushes a resolved rebase against the pinned target", async () => {
+    const f = await fixture(true);
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await expect(f.run("FINALIZE", f.originalBase)).rejects.toThrow(
+      "does not match the reviewed revisions",
+    );
+    const result = await f.run("FINALIZE");
+    expect(result).toMatchObject({
+      outcome: "SYNCED",
+      previousHeadSha: f.expectedHeadSha,
+      syncedTargetSha: f.targetSha,
+    });
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(result.syncedHeadSha);
+  });
+  test("keeps unresolved markers out of the remote branch", async () => {
+    const f = await fixture(true);
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    expect((await f.run("FINALIZE")).outcome).toBe("UNRESOLVED");
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
+    expect((await git(f.linked, "status", "--porcelain")).stdout).toContain(
+      "UU README.md",
+    );
+  });
+  test("accepts a workflow that already continued the reviewed rebase", async () => {
+    const f = await fixture(true);
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await git(f.linked, "add", "README.md");
+    await git(f.linked, "-c", "core.editor=true", "rebase", "--continue");
+    expect((await f.run("FINALIZE")).outcome).toBe("SYNCED");
+  });
+  test("does not push after the target branch changed during conflict resolution", async () => {
+    const f = await fixture(true);
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await git(
+      f.targetRemote,
+      "update-ref",
+      "refs/heads/release",
+      f.originalBase,
+    );
+    await expect(f.run("FINALIZE")).rejects.toThrow("target commit changed");
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
   });
   test("refuses to sync a dirty worktree", async () => {
     const f = await fixture();
