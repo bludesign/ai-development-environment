@@ -203,6 +203,13 @@ export function MergeSyncFields({
       <p className="text-xs text-muted-foreground">
         {unavailableReason ?? t("autoSyncBranchDescription")}
       </p>
+      {!checked &&
+        !unavailableReason &&
+        conflictWorkflow?.options?.autoSyncRequiresConflictWorkflow && (
+          <p className="text-xs text-muted-foreground">
+            {t("conflictWorkflowRequired")}
+          </p>
+        )}
       {checked && conflictWorkflow && (
         <ConflictWorkflowFields
           {...conflictWorkflow}

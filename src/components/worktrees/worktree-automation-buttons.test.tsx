@@ -465,6 +465,34 @@ describe("Auto Merge form state", () => {
     expect(screen.getByRole("dialog")).toBeDefined();
   });
 
+  test("requires sync and a workflow to resume Auto Merge with conflicts", async () => {
+    const { props, worktree, options } = fixture();
+    worktree.autoMerge = {
+      ...worktree.autoMerge!,
+      pullRequestNumber: worktree.pullRequest!.number,
+      state: "ACTION_REQUIRED",
+    };
+    request.mockResolvedValue({
+      githubPullRequestMergeOptions: {
+        ...options,
+        canEnableAutoMerge: false,
+        canAutoMergeWithSync: true,
+        autoSyncRequiresConflictWorkflow: true,
+        mergeConflictWorkflows: [
+          { id: "resolve", name: "Resolve conflicts", hasPlainTrigger: true },
+        ],
+      },
+    } as never);
+    render(<AutoMergeButton {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Auto Merge paused" }));
+    await screen.findByDisplayValue("Saved headline");
+    const resume = screen.getByRole("button", { name: "Resume Auto Merge" });
+    expect(resume.hasAttribute("disabled")).toBe(true);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Auto sync branch" }));
+    expect(resume.hasAttribute("disabled")).toBe(true);
+  });
+
   test("keeps checkbox and text edits across refreshes and mergeability changes", async () => {
     const { worktree, props } = fixture();
     const { rerender } = render(<AutoMergeButton {...props} />);

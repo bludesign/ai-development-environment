@@ -635,13 +635,16 @@ function GitHubAutoMergeButton({
   }
 
   const postMerge = pullRequest?.state === "MERGED" && Boolean(currentRule);
+  const conflictWorkflowValid =
+    conflictWorkflow.valid &&
+    (autoSync || !options?.autoSyncRequiresConflictWorkflow);
 
   const save = async () => {
     if (
       !pullRequest ||
       !method ||
       !headline.trim() ||
-      (!postMerge && !conflictWorkflow.valid) ||
+      (!postMerge && !conflictWorkflowValid) ||
       (!postMerge && moveTicketToDone && !options?.ticketDoneStatusConfigured)
     )
       return;
@@ -948,7 +951,7 @@ function GitHubAutoMergeButton({
                 ) ||
                 !method ||
                 !headline.trim() ||
-                (!postMerge && !conflictWorkflow.valid) ||
+                (!postMerge && !conflictWorkflowValid) ||
                 (!postMerge &&
                   moveTicketToDone &&
                   !options?.ticketDoneStatusConfigured) ||

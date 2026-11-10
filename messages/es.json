@@ -2605,6 +2605,7 @@
       "ACTION_REQUIRED": "Acción necesaria",
       "CANCELED": "Cancelada",
       "SYNCING": "Sincronizando rama",
+      "RESOLVING": "Ejecutando el flujo de trabajo para conflictos de fusión",
       "WAITING_CI": "Esperando CI",
       "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
       "MERGING": "Fusionando"

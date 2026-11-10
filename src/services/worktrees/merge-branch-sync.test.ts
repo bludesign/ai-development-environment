@@ -15,6 +15,7 @@ const db = vi.hoisted(() => ({
   gitLabMergeOperation: { findFirst: vi.fn() },
   agentJob: { findFirst: vi.fn() },
   workflow: { findMany: vi.fn() },
+  workflowRun: { findUnique: vi.fn() },
 }));
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient: async () => db }));
 import {
@@ -150,6 +151,7 @@ beforeEach(() => {
   db.worktreeAutoMerge.findFirst.mockResolvedValue(null);
   db.gitLabMergeOperation.findFirst.mockResolvedValue(null);
   db.agentJob.findFirst.mockResolvedValue(null);
+  db.workflowRun.findUnique.mockResolvedValue(null);
 });
 
 function enableConflictWorkflow(f: ReturnType<typeof fixture>) {
@@ -338,18 +340,38 @@ describe("managed branch sync", () => {
     expect(f.workflows.trigger).not.toHaveBeenCalled();
     expect(f.merge).not.toHaveBeenCalled();
   });
-  test("stops a running conflict workflow when the target moves", async () => {
+  test.each<[string, Partial<MergeSyncReadiness>]>([
+    ["the target moves", { targetSha: "d".repeat(40) }],
+    ["the request closes", { state: "CLOSED" }],
+    ["the request is retargeted", { targetBranch: "other" }],
+    ["native Auto Merge is enabled", { nativeAutoMerge: true }],
+  ])(
+    "stops a running conflict workflow when %s",
+    async (_reason, readiness) => {
+      const f = fixture();
+      await startConflictedSync(f);
+      await f.tick();
+      f.ready = { ...f.ready, ...readiness };
+      expect(await f.tick()).toBe(false);
+      expect(f.row.state).toBe("ACTION_REQUIRED");
+      expect(f.workflows.lifecycle).toHaveBeenCalledExactlyOnceWith(
+        "resolution-run",
+        "CANCEL",
+        { ignoreMissing: true },
+      );
+      expect(f.worktrees.createAutoSyncJob).toHaveBeenCalledTimes(1);
+    },
+  );
+  test("stops the conflict workflow before accepting an external merge", async () => {
     const f = fixture();
     await startConflictedSync(f);
     await f.tick();
-    f.ready = { ...f.ready, targetSha: "d".repeat(40) };
-    await f.tick();
-    expect(f.row.state).toBe("ACTION_REQUIRED");
-    expect(f.workflows.lifecycle).toHaveBeenCalledExactlyOnceWith(
-      "resolution-run",
-      "CANCEL",
-    );
-    expect(f.worktrees.createAutoSyncJob).toHaveBeenCalledTimes(1);
+    f.ready = { ...f.ready, state: "MERGED" };
+    f.workflows.lifecycle.mockRejectedValueOnce(new Error("Cancel failed"));
+    expect(await f.tick()).toBe(false);
+    expect(f.row.state).toBe("RESOLVING");
+    expect(await f.tick()).toBe(true);
+    expect(f.workflows.lifecycle).toHaveBeenCalledTimes(2);
   });
   test.each(["before", "after"])(
     "pauses if the target moves %s finalizing the conflict",
@@ -422,6 +444,25 @@ describe("managed branch sync", () => {
       f.agents as unknown as AgentControlService,
     );
     expect(f.agents.cancelJob).toHaveBeenCalledWith("job");
+  });
+  test("cancels a conflict workflow started before its ID was saved", async () => {
+    const f = fixture();
+    await startConflictedSync(f);
+    db.workflowRun.findUnique.mockResolvedValue({ id: "resolution-run" });
+    await cancelMergeSync(
+      f.row.syncStateJson,
+      f.agents as unknown as AgentControlService,
+      f.workflows,
+    );
+    expect(db.workflowRun.findUnique).toHaveBeenCalledExactlyOnceWith({
+      where: { idempotencyKey: "auto-merge-conflict:job" },
+      select: { id: true },
+    });
+    expect(f.workflows.lifecycle).toHaveBeenCalledExactlyOnceWith(
+      "resolution-run",
+      "CANCEL",
+      { ignoreMissing: true },
+    );
   });
   test("temporary agent unavailability preserves the dispatch request", async () => {
     const f = fixture();

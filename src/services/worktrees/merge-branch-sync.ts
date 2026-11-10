@@ -133,6 +133,9 @@ const MANUAL_CONFLICT =
 const CONFLICT_TARGET_CHANGED =
   "The target commit changed during conflict resolution. Review it before resuming Auto Merge.";
 
+const conflictWorkflowRunKey = (jobId: string) =>
+  `auto-merge-conflict:${jobId}`;
+
 export function readMergeSync(value: string | null): SyncIntent {
   const parsed = JSON.parse(value ?? "null") as SyncIntent | null;
   if (
@@ -410,6 +413,24 @@ export async function advanceMergeSync(input: {
       ready.sourceBranch === intent.sourceBranch &&
       ready.targetOrigin === intent.targetOrigin &&
       ready.targetBranch === intent.targetBranch;
+    const stopConflictSync = async () => {
+      if (!intent.conflictWorkflow && !intent.conflictResolution) return true;
+      try {
+        await cancelMergeSync(
+          input.syncStateJson,
+          input.agents,
+          input.workflows,
+        );
+        return true;
+      } catch (error) {
+        // Keep reconciling until the resolver or finalization job is canceled.
+        await save(
+          state,
+          error instanceof Error ? error.message : String(error),
+        );
+        return false;
+      }
+    };
     try {
       let ready = await input.readiness();
       if (!identityMatches(ready))
@@ -421,7 +442,7 @@ export async function advanceMergeSync(input: {
           throw new Error(
             "A different source commit was merged. Review the follow-ups manually.",
           );
-        return true;
+        return stopConflictSync();
       }
       if (ready.state !== "OPEN")
         throw new Error("The request closed without merging.");
@@ -462,13 +483,7 @@ export async function advanceMergeSync(input: {
             : ready.targetSha !== intent.conflictResolution.targetSha
               ? CONFLICT_TARGET_CHANGED
               : null);
-        if (blocker) {
-          await input.workflows.lifecycle(
-            intent.conflictResolution.runId,
-            "CANCEL",
-          );
-          throw new Error(blocker);
-        }
+        if (blocker) throw new Error(blocker);
         const run = await input.workflows.run(intent.conflictResolution.runId);
         if (!run)
           throw new Error("The merge conflict workflow run is missing.");
@@ -503,10 +518,8 @@ export async function advanceMergeSync(input: {
           (!job || !TERMINAL.has(job.status)) &&
           (ready.blocker ||
             ready.targetSha !== intent.conflictResolution?.targetSha)
-        ) {
-          if (job) await input.agents.cancelJob(job.id);
+        )
           throw new Error(ready.blocker ?? CONFLICT_TARGET_CHANGED);
-        }
         if (!job) {
           if (ready.headSha !== intent.headSha)
             throw new Error(
@@ -572,7 +585,7 @@ export async function advanceMergeSync(input: {
           if (ready.targetSha !== result.syncedTargetSha)
             throw new Error(CONFLICT_TARGET_CHANGED);
           await validateConflictWorkflow(worktree, intent.conflictWorkflow);
-          const key = `auto-merge-conflict:${job.id}`;
+          const key = conflictWorkflowRunKey(job.id);
           const run = await input.workflows.trigger(
             {
               workflowId: intent.conflictWorkflow.id,
@@ -595,7 +608,7 @@ export async function advanceMergeSync(input: {
         }
         if (result?.outcome === "UNRESOLVED")
           throw new Error(
-            "The merge conflict workflow did not fully resolve the rebase.",
+            "The merge conflict workflow did not fully resolve the rebase. Resolve and stage every conflict, then finish and push the rebase before resuming Auto Merge.",
           );
         if (result?.outcome === "PREPARATION_CONFLICT")
           throw new Error(
@@ -700,16 +713,17 @@ export async function advanceMergeSync(input: {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const transient = isTransientMergeError(error);
-      await save(
+      const next =
         error instanceof MergeSyncNotSubmittedError
           ? "WAITING_REQUIREMENTS"
           : state === "MERGING"
             ? "MERGING"
             : transient
               ? state
-              : "ACTION_REQUIRED",
-        message,
-      );
+              : "ACTION_REQUIRED";
+      if (next === "ACTION_REQUIRED" && !(await stopConflictSync()))
+        return false;
+      await save(next, message);
       return false;
     }
   });
@@ -735,6 +749,17 @@ export async function cancelMergeSync(
         })
       : null;
   if (job && !TERMINAL.has(job.status)) await agents.cancelJob(job.id);
-  if (intent.conflictResolution && !intent.conflictResolution.finalizing)
-    await workflows?.lifecycle(intent.conflictResolution.runId, "CANCEL");
+  if (!workflows || intent.conflictResolution?.finalizing) return;
+  let runId = intent.conflictResolution?.runId;
+  if (!runId && intent.conflictWorkflow && job?.status === "SUCCEEDED") {
+    // A restart can occur after the workflow is created and before its ID is saved.
+    const prisma = await getPrismaClient();
+    const run = await prisma.workflowRun.findUnique({
+      where: { idempotencyKey: conflictWorkflowRunKey(job.id) },
+      select: { id: true },
+    });
+    runId = run?.id;
+  }
+  if (runId)
+    await workflows.lifecycle(runId, "CANCEL", { ignoreMissing: true });
 }

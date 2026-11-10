@@ -358,6 +358,24 @@ describe("WorktreeAutomationService", () => {
     );
   });
 
+  test("rejects a conflicting pull request without sync before retargeting", async () => {
+    const f = retargetFixture();
+    f.github.pullRequestMergeOptions.mockImplementation(async () => ({
+      canMerge: false,
+      blockedReason: null,
+      canAutoMergeWithSync: true,
+      autoSyncRequiresConflictWorkflow: true,
+      availableMethods: ["SQUASH"],
+    }));
+
+    await expect(f.automation.configureAutoMerge(f.input)).rejects.toThrow(
+      "Enable Auto sync branch and select a workflow",
+    );
+    expect(f.upsert).not.toHaveBeenCalled();
+    expect(f.github.pullRequestAutomationState).toHaveBeenCalledOnce();
+    expect(f.current().pullRequestNumber).toBe(17);
+  });
+
   test("waits for the previous PR worker before retargeting its worktree", async () => {
     const f = retargetFixture();
     const reached = Promise.withResolvers<void>();

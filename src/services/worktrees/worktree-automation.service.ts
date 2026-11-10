@@ -580,7 +580,10 @@ export class WorktreeAutomationService {
         saved?.postMergeSwitchJson,
       )),
       canEnableAutoMerge: worktree
-        ? Boolean(options.canAutoMergeWithSync && canResolveConflicts)
+        ? Boolean(
+            options.canAutoMergeWithSync &&
+            !options.autoSyncRequiresConflictWorkflow,
+          )
         : options.canEnableAutoMerge,
       canAutoMergeWithSync:
         !autoSyncBlockedReason &&
@@ -1018,6 +1021,25 @@ export class WorktreeAutomationService {
             return { ...mergeView(rule), ticketTransitionError };
           });
         }
+        const choices = await this.github.pullRequestMergeOptions(
+          repository.owner,
+          repository.name,
+          input.pullRequestNumber,
+          "WORKTREE_AUTOMATION",
+        );
+        if (choices.autoSyncRequiresConflictWorkflow)
+          throw new Error(
+            "Enable Auto sync branch and select a workflow to use Auto Merge for this conflicting pull request.",
+          );
+        if (
+          !choices.canAutoMergeWithSync ||
+          !choices.availableMethods.includes(input.method)
+        )
+          throw new Error(
+            "This pull request cannot use Auto Merge with the selected merge method.",
+          );
+        if (!input.commitHeadline.trim())
+          throw new Error("A commit message is required");
         if (existing?.autoSync)
           await cancelMergeSync(
             existing.syncStateJson,
@@ -1040,21 +1062,6 @@ export class WorktreeAutomationService {
               "WORKTREE_AUTOMATION",
             );
         }
-        const choices = await this.github.pullRequestMergeOptions(
-          repository.owner,
-          repository.name,
-          input.pullRequestNumber,
-          "WORKTREE_AUTOMATION",
-        );
-        if (
-          !choices.canAutoMergeWithSync ||
-          !choices.availableMethods.includes(input.method)
-        )
-          throw new Error(
-            "This pull request cannot use Auto Merge with the selected merge method.",
-          );
-        if (!input.commitHeadline.trim())
-          throw new Error("A commit message is required");
         // A native request can merge without consulting local build protection.
         // Linked worktrees therefore use the managed worker even without syncing.
         const current = await this.github.pullRequestAutomationState(

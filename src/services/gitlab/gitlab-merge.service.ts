@@ -1064,10 +1064,19 @@ export class GitLabMergeService {
         state: { in: ACTIVE_STATES },
       },
     });
-    for (const row of rows)
+    for (const candidate of rows)
       await this.locked(
-        `${row.instanceUrl}:${row.projectId}:${row.iid}`,
+        `${candidate.instanceUrl}:${candidate.projectId}:${candidate.iid}`,
         async () => {
+          const row = await prisma.gitLabMergeOperation.findUnique({
+            where: { id: candidate.id },
+          });
+          if (
+            !row?.autoMerge ||
+            row.mergeConfirmedAt ||
+            !ACTIVE_STATES.includes(row.state)
+          )
+            return;
           let remote = await this.gitlab.mergeRequestState(
             row.projectId,
             row.iid,
@@ -1097,6 +1106,12 @@ export class GitLabMergeService {
               );
           }
           if (remote.state === "MERGED") {
+            if (row.autoSync)
+              await cancelMergeSync(
+                row.syncStateJson,
+                this.agents,
+                this.workflows,
+              );
             await this.observe(row, remote);
           } else if (!row.autoSync) {
             await prisma.gitLabMergeOperation.update({
@@ -1247,18 +1262,24 @@ export class GitLabMergeService {
               current.lastError === LEGACY_CODEBASE_BUSY_MESSAGE &&
               Boolean(current.mergeConfirmedAt);
             if (!ACTIVE_STATES.includes(current.state) && !recoverBusy) return;
-            if (current.instanceUrl !== instanceUrl) {
-              await prisma.gitLabMergeOperation.update({
-                where: { id: row.id },
-                data: {
-                  state: "ACTION_REQUIRED",
-                  lastError:
-                    "The configured GitLab instance or credentials changed.",
-                },
-              });
-              return;
-            }
             try {
+              if (current.instanceUrl !== instanceUrl) {
+                if (current.autoSync && !current.mergeConfirmedAt)
+                  await cancelMergeSync(
+                    current.syncStateJson,
+                    this.agents,
+                    this.workflows,
+                  );
+                await prisma.gitLabMergeOperation.update({
+                  where: { id: row.id },
+                  data: {
+                    state: "ACTION_REQUIRED",
+                    lastError:
+                      "The configured GitLab instance or credentials changed.",
+                  },
+                });
+                return;
+              }
               if (
                 current.autoMerge &&
                 current.worktreeId &&

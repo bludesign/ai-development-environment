@@ -2605,6 +2605,7 @@
       "ACTION_REQUIRED": "Action requise",
       "CANCELED": "Annulée",
       "SYNCING": "Synchronisation de la branche",
+      "RESOLVING": "Exécution du workflow de résolution des conflits de fusion",
       "WAITING_CI": "En attente de la CI",
       "WAITING_REQUIREMENTS": "En attente des conditions de fusion",
       "MERGING": "Fusion en cours"

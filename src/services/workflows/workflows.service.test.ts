@@ -1334,6 +1334,17 @@ describe("workflow runtime lifecycle guards", () => {
     expect(prisma.workflowRunEvent.create).not.toHaveBeenCalled();
   });
 
+  test("can idempotently cancel a deleted workflow run", async () => {
+    prisma.workflowRun.findUnique.mockResolvedValue(null);
+    const service = new WorkflowsService(new WorkflowEventsService());
+    await expect(
+      service.lifecycle("deleted-run", "CANCEL", { ignoreMissing: true }),
+    ).resolves.toBeNull();
+    await expect(service.lifecycle("deleted-run", "CANCEL")).rejects.toThrow(
+      "Workflow run not found",
+    );
+  });
+
   test("cancels linked simulator jobs after closing the run and retries cleanup on repeated cancellation", async () => {
     const run = { status: "WAITING", worktreeId: null };
     prisma.workflowRun.findUnique.mockResolvedValue(run);

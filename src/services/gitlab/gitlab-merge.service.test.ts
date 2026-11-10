@@ -5,6 +5,7 @@ import { GitLabRequestError } from "./gitlab.service";
 import type { WorktreesService } from "@/services/worktrees";
 import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
+import type { WorkflowsService } from "@/services/workflows";
 import type { GitLabMergeOptions, GitLabMergeRequestView } from "./types";
 
 vi.mock("@/services/operation-locks/operation-locks.service", () => ({
@@ -144,11 +145,13 @@ function setup() {
     registerConnectionHandler: vi.fn(),
     getJob: vi.fn().mockResolvedValue({ id: "job-1", status: "RUNNING" }),
   };
+  const workflows = { lifecycle: vi.fn() };
   const service = new GitLabMergeService(
     gitlab as unknown as GitLabService,
     worktrees as unknown as WorktreesService,
     jira as unknown as JiraService,
     agents as unknown as AgentControlService,
+    workflows as unknown as WorkflowsService,
   );
   vi.spyOn(service, "wake").mockImplementation(() => {});
   vi.spyOn(service, "options").mockResolvedValue({ ...options });
@@ -162,7 +165,7 @@ function setup() {
       ticketKey: "AIDE-145",
       ticketDoneStatusConfigured: true,
     });
-  return { service, gitlab, jira, worktrees, agents, context };
+  return { service, gitlab, jira, worktrees, agents, context, workflows };
 }
 
 function setupPrimarySwitch(
@@ -757,6 +760,52 @@ test("instance changes pause pending operations", async () => {
   expect(database.row?.state).toBe("ACTION_REQUIRED");
   expect(database.row?.lastError).toContain("instance");
 });
+
+test.each(["the instance changes", "the build guard observes a merge"])(
+  "cancels the conflict resolver when %s",
+  async (event) => {
+    const { service, gitlab, workflows } = setup();
+    const waiting = { ...mr, mergeWhenPipelineSucceeds: true };
+    gitlab.mergeMergeRequestDirect.mockResolvedValue(waiting);
+    gitlab.mergeRequestState.mockResolvedValue(waiting);
+    await service.submit({ ...input, autoMerge: true });
+    Object.assign(database.row!, {
+      autoSync: true,
+      state: "RESOLVING",
+      syncStateJson: JSON.stringify({
+        version: 1,
+        headSha: mr.sha,
+        sourceOrigin: "gitlab.test/fork/repo",
+        targetOrigin: "gitlab.test/team/repo",
+        targetBranch: mr.targetBranch,
+        agentId: "agent",
+        gitDirectory: "/git/w1",
+        conflictResolution: { runId: "resolver", finalizing: false },
+      }),
+    });
+    if (event === "the instance changes") {
+      gitlab.getSettings.mockResolvedValue({
+        configured: true,
+        baseUrl: "https://another.test",
+      });
+      await service.reconcile();
+      expect(database.row?.state).toBe("ACTION_REQUIRED");
+    } else {
+      database.worktree.findUnique.mockResolvedValue({
+        branch: mr.sourceBranch,
+        codebase: { repository: { canonicalOrigin: "gitlab.test/fork/repo" } },
+      });
+      gitlab.mergeRequestState.mockResolvedValue({ ...mr, state: "MERGED" });
+      await service.adoptNativeAutoMergeForWorktree("w1");
+      expect(database.row?.state).toBe("POST_MERGE");
+    }
+    expect(workflows.lifecycle).toHaveBeenCalledExactlyOnceWith(
+      "resolver",
+      "CANCEL",
+      { ignoreMissing: true },
+    );
+  },
+);
 
 test("refuses cleanup when the linked checkout no longer matches the fork source", async () => {
   const { service, worktrees, jira } = setup();
