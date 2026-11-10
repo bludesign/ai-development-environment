@@ -14,7 +14,9 @@ import {
 
 registerWorktreeFixtures();
 
-async function fixture(conflict = false) {
+async function fixture(
+  conflict: "none" | "content" | "modify-delete" = "none",
+) {
   const folder = await repository();
   const sourceRemote = await localRemote(),
     targetRemote = await localRemote();
@@ -27,7 +29,7 @@ async function fixture(conflict = false) {
   temporaryDirectories.push(linked);
   await git(folder, "worktree", "add", "-b", "feature", linked);
   await writeFile(
-    join(linked, conflict ? "README.md" : "feature.txt"),
+    join(linked, conflict === "none" ? "feature.txt" : "README.md"),
     "feature change\n",
   );
   await git(linked, "add", "--all");
@@ -36,10 +38,12 @@ async function fixture(conflict = false) {
   const expectedHeadSha = (
     await git(linked, "rev-parse", "HEAD")
   ).stdout.trim();
-  await writeFile(
-    join(folder, conflict ? "README.md" : "target.txt"),
-    "target change\n",
-  );
+  if (conflict === "modify-delete") await git(folder, "rm", "README.md");
+  else
+    await writeFile(
+      join(folder, conflict === "content" ? "README.md" : "target.txt"),
+      "target change\n",
+    );
   await git(folder, "add", "--all");
   await git(folder, "commit", "-m", "Advance target");
   await git(folder, "push", targetUrl, "main:release");
@@ -63,9 +67,13 @@ async function fixture(conflict = false) {
       targetSha,
     },
   };
-  const run = () =>
+  const run = (phase = "SYNC", reviewedTargetSha = targetSha) =>
     autoSyncWorktree(
-      payload,
+      {
+        ...payload,
+        phase,
+        mergeGuard: { ...payload.mergeGuard, targetSha: reviewedTargetSha },
+      },
       10_000,
       new AbortController().signal,
       async () => undefined,
@@ -79,6 +87,7 @@ async function fixture(conflict = false) {
     folder,
     linked,
     sourceRemote,
+    targetRemote,
     expectedHeadSha,
     targetSha,
     originalBase,
@@ -150,7 +159,7 @@ describe("reviewed Auto Merge sync", () => {
     ).toBe(f.originalBase);
   });
   test("leaves conflicts for manual resolution without pushing", async () => {
-    const f = await fixture(true);
+    const f = await fixture("content");
     expect((await f.run()).outcome).toBe("CONFLICT");
     expect(
       (
@@ -160,6 +169,107 @@ describe("reviewed Auto Merge sync", () => {
     expect((await git(f.linked, "status", "--porcelain")).stdout).toContain(
       "UU README.md",
     );
+  });
+  test("continues and pushes a resolved rebase against the pinned target", async () => {
+    const f = await fixture("content");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await expect(f.run("FINALIZE", f.originalBase)).rejects.toThrow(
+      "does not match the reviewed revisions",
+    );
+    await git(f.linked, "add", "README.md");
+    const result = await f.run("FINALIZE");
+    expect(result).toMatchObject({
+      outcome: "SYNCED",
+      previousHeadSha: f.expectedHeadSha,
+      syncedTargetSha: f.targetSha,
+    });
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(result.syncedHeadSha);
+  });
+  test("keeps unresolved markers out of the remote branch", async () => {
+    const f = await fixture("content");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await git(f.linked, "add", "README.md");
+    expect((await f.run("FINALIZE")).outcome).toBe("UNRESOLVED");
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
+  });
+  test("leaves a modify/delete conflict unmerged until explicitly staged", async () => {
+    const f = await fixture("modify-delete");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    expect((await f.run("FINALIZE")).outcome).toBe("UNRESOLVED");
+    expect((await git(f.linked, "status", "--porcelain")).stdout).toContain(
+      "DU README.md",
+    );
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
+  });
+  test("accepts a workflow that already continued the reviewed rebase", async () => {
+    const f = await fixture("content");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await git(f.linked, "add", "README.md");
+    await git(f.linked, "-c", "core.editor=true", "rebase", "--continue");
+    expect((await f.run("FINALIZE")).outcome).toBe("SYNCED");
+  });
+  test("does not push after the target branch changed during conflict resolution", async () => {
+    const f = await fixture("content");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await git(f.linked, "add", "README.md");
+    await git(
+      f.targetRemote,
+      "update-ref",
+      "refs/heads/release",
+      f.originalBase,
+    );
+    await expect(f.run("FINALIZE")).rejects.toThrow("target commit changed");
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
+  });
+  test("does not push a commit added during the final target check", async () => {
+    const f = await fixture("content");
+    expect((await f.run()).outcome).toBe("CONFLICT");
+    await writeFile(join(f.linked, "README.md"), "target and feature\n");
+    await git(f.linked, "add", "README.md");
+    const wrapper = join(f.folder, ".git", "concurrent-ssh");
+    await writeFile(
+      wrapper,
+      `#!/bin/sh
+for argument do command="$argument"; done
+case "$command" in
+  *"'${f.targetRemote}'")
+    git -C '${f.linked}' commit --allow-empty -m 'Concurrent change' >&2 || exit 1
+    ;;
+esac
+exec sh -c "$command"
+`,
+      { mode: 0o755 },
+    );
+    await git(f.folder, "config", "core.sshCommand", wrapper);
+
+    await expect(f.run("FINALIZE")).rejects.toThrow("changed before push");
+    expect(
+      (await git(f.linked, "log", "-1", "--format=%s")).stdout.trim(),
+    ).toBe("Concurrent change");
+    expect(
+      (
+        await git(f.sourceRemote, "rev-parse", "refs/heads/feature")
+      ).stdout.trim(),
+    ).toBe(f.expectedHeadSha);
   });
   test("refuses to sync a dirty worktree", async () => {
     const f = await fixture();

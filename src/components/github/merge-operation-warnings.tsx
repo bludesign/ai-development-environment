@@ -35,17 +35,18 @@ export function MergeOperationWarnings({
   const progress = useMergeOperationProgress().filter((entry) =>
     included(entry.key),
   );
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selected = [...errors, ...progress].find(
-    (entry) => entry.key === selectedKey,
-  );
+  const [selection, setSelection] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
+  const selected = selection && included(selection.key) ? selection : null;
   const target = selected
     ? (JSON.parse(selected.key) as ["github" | "gitlab", string, number])
     : null;
   const close = (open: boolean) => {
-    if (!open) setSelectedKey(null);
+    if (!open) setSelection(null);
   };
-  if (!errors.length && !progress.length) return null;
+  if (!errors.length && !progress.length && !selected) return null;
   return (
     <div className="space-y-2">
       {progress.map((entry) => (
@@ -56,7 +57,7 @@ export function MergeOperationWarnings({
               <PostMergeSwitchProgress operationKey={entry.key} />
             </div>
             <Button
-              onClick={() => setSelectedKey(entry.key)}
+              onClick={() => setSelection(entry)}
               size="sm"
               variant="outline"
             >
@@ -83,7 +84,7 @@ export function MergeOperationWarnings({
               <p>{entry.error}</p>
             </div>
             <Button
-              onClick={() => setSelectedKey(entry.key)}
+              onClick={() => setSelection(entry)}
               size="sm"
               variant="outline"
             >
@@ -100,9 +101,9 @@ export function MergeOperationWarnings({
           </AlertDescription>
         </Alert>
       ))}
-      {target?.[0] === "github" && (
+      {selected && target?.[0] === "github" && (
         <MergePullRequestButton
-          key={selected!.key}
+          key={selected.key}
           pullRequest={{
             repositoryNameWithOwner: target[1],
             number: target[2],
@@ -113,13 +114,13 @@ export function MergeOperationWarnings({
           showTrigger={false}
         />
       )}
-      {target?.[0] === "gitlab" && (
+      {selected && target?.[0] === "gitlab" && (
         <MergeRequestDialog
-          key={selected!.key}
+          key={selected.key}
           mergeRequest={{
             projectId: target[1],
             iid: target[2],
-            title: selected!.label,
+            title: selected.label,
           }}
           open
           onOpenChange={close}

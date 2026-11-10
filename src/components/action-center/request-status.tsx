@@ -17,6 +17,25 @@ import { cn } from "@/lib/utils";
 import type { ActionCenterItem } from "./types";
 import { useActionCenter } from "./action-center-provider";
 
+function approvalBadge(status: string) {
+  switch (status.toUpperCase()) {
+    case "APPROVED":
+      return { label: "approved", variant: "success" } as const;
+    case "NONE":
+    case "NOT_REQUIRED":
+      return { label: "noDecision", variant: "outline" } as const;
+    case "CHANGES_REQUESTED":
+      return { label: "changesRequested", variant: "destructive" } as const;
+    case "REVIEW_REQUIRED":
+    case "NOT_APPROVED":
+    case "PENDING":
+    case "DISMISSED":
+      return { label: "notApproved", variant: "outline" } as const;
+    default:
+      return { label: "approvalUnknown", variant: "outline" } as const;
+  }
+}
+
 export function RequestStatus({
   item,
   compact = false,
@@ -29,7 +48,7 @@ export function RequestStatus({
   const t = useTranslations("actionCenter");
   const request = item.request;
   if (!request) return null;
-  const approved = request.approvalStatus === "APPROVED";
+  const approval = approvalBadge(request.approvalStatus);
   const pipelineVariant =
     request.pipelineStatus === "SUCCESS"
       ? "success"
@@ -67,10 +86,13 @@ export function RequestStatus({
         pipeline
       )}
       <Badge
-        className={cn(badgeClassName, !approved && warning)}
-        variant={approved ? "success" : "outline"}
+        className={cn(
+          badgeClassName,
+          approval.label === "notApproved" && warning,
+        )}
+        variant={approval.variant}
       >
-        {t(approved ? "approved" : "notApproved")}
+        {t(approval.label)}
       </Badge>
       {children}
       {(request.needsRebase || (request.behindCount ?? 0) > 0) && (

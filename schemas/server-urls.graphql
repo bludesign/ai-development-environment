@@ -27,6 +27,8 @@ type ServerUrlSettings {
   defaultServerUrlKind: ServerUrlKind!
   "Optional simulator build default. Null inherits the global default."
   simulatorDefaultServerUrlKind: ServerUrlKind
+  "Optional physical iOS build default. Null inherits the global default."
+  physicalDefaultServerUrlKind: ServerUrlKind
   "ISO timestamp of the last saved settings change."
   updatedAt: String!
 }
@@ -42,6 +44,8 @@ input SaveServerUrlSettingsInput {
   defaultServerUrlKind: ServerUrlKind
   "Simulator default. Null inherits the global default."
   simulatorDefaultServerUrlKind: ServerUrlKind
+  "Physical iOS build default. Null inherits the global default."
+  physicalDefaultServerUrlKind: ServerUrlKind
 }
 "A notification that shared settings changed; refetch with the client's origin."
 type ServerUrlSettingsChange {

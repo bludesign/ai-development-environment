@@ -431,6 +431,27 @@ export function registerTelemetryPageTests(
     }
 
     if (section === "controls") {
+      test("shows one Server URLs settings link for both ingestion endpoints", async () => {
+        render(<TelemetryPage view="CONSOLE" />);
+        await screen.findByText("Checkout completed");
+        fireEvent.click(screen.getByTitle("Settings"));
+
+        const dialog = within(
+          await screen.findByRole("dialog", { name: "Observability settings" }),
+        );
+        expect(
+          dialog.getAllByRole("link", {
+            name: "Manage server URLs in Settings",
+          }),
+        ).toHaveLength(1);
+        expect(
+          dialog.getAllByText(/\/api\/telemetry\/console-logs$/).length,
+        ).toBeGreaterThan(0);
+        expect(
+          dialog.getAllByText(/\/api\/telemetry\/analytics-events$/).length,
+        ).toBeGreaterThan(0);
+      });
+
       test("keeps query-wide selection when one loaded row is excluded", async () => {
         render(<TelemetryPage view="CONSOLE" />);
         await screen.findByText("Checkout completed");

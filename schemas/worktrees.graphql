@@ -618,6 +618,187 @@ extend type Mutation {
   ): WorktreeSyncBatch!
 }
 
+"Source control provider for a Bulk Merge item."
+enum WorktreeMergeProvider {
+  "A GitHub pull request."
+  GITHUB
+  "A GitLab merge request."
+  GITLAB
+}
+
+"Whether a Bulk Merge batch is still processing rows."
+enum WorktreeMergeBatchStatus {
+  "At least one row is still awaiting submission, confirmation or follow-ups."
+  ACTIVE
+  "Every row has a retained final outcome."
+  COMPLETED
+}
+
+"Progress or final outcome for one Bulk Merge row."
+enum WorktreeMergeItemStatus {
+  "The row is waiting for its turn."
+  PENDING
+  "The provider submission is in progress or its outcome is being verified."
+  SUBMITTING
+  "The provider confirmed the reviewed merge. Follow-ups may still be running."
+  MERGED
+  "The row could not submit because its reviewed request or readiness changed."
+  SKIPPED
+  "The row failed before the provider confirmed a merge."
+  FAILED
+  "The outcome could not be verified. Review the provider before retrying."
+  ATTENTION_REQUIRED
+}
+
+"A linked worktree and the currently reviewed provider merge settings."
+type WorktreeMergeCandidate {
+  "Identifier of the linked checkout."
+  worktreeId: ID!
+  "Display name of the checkout repository."
+  repositoryName: String!
+  "Display name of the agent that owns the checkout."
+  agentName: String!
+  "The checkout's current source branch."
+  branch: String!
+  "Local checkout path."
+  folder: String!
+  "Provider for the linked request."
+  provider: WorktreeMergeProvider!
+  "Opaque provider request key used to prevent duplicate selection."
+  requestKey: String!
+  "Provider-scoped pull or merge request number."
+  requestNumber: Int!
+  "Title of the linked request."
+  requestTitle: String!
+  "Provider URL for the linked request."
+  requestUrl: String!
+  "The GitHub target repository in owner/name form."
+  repositoryNameWithOwner: String
+  "The GitLab target project identifier."
+  projectId: ID
+  "Provider source commit shown by the current merge options."
+  reviewedHeadSha: String
+  "Provider target branch shown by the current merge options."
+  reviewedTargetBranch: String
+  "Why the candidate cannot be selected, when applicable."
+  blockedReason: String
+  "Immediate GitHub merge options, when available."
+  githubOptions: GitHubPullRequestMergeOptions
+  "Immediate GitLab merge options, when available."
+  gitlabOptions: GitLabMergeOptions
+}
+
+"A retained Bulk Merge submission, in selection order."
+type WorktreeMergeBatch {
+  "Stable identifier of this submission."
+  id: ID!
+  "App scope, or null for the global worktrees page."
+  appId: ID
+  "Global agent focus at submission time, if any."
+  agentId: ID
+  "Current state of the batch."
+  status: WorktreeMergeBatchStatus!
+  "Selected worktrees and outcomes in submission order."
+  items: [WorktreeMergeItem!]!
+  "ISO 8601 submission timestamp."
+  createdAt: String!
+  "ISO 8601 timestamp of the last progress change."
+  updatedAt: String!
+  "ISO 8601 timestamp when all rows reached a final outcome."
+  finishedAt: String
+}
+
+"A snapshotted worktree and its outcome, retained after local cleanup."
+type WorktreeMergeItem {
+  "Stable identifier of this batch row."
+  id: ID!
+  "Original checkout identifier, retained after deletion."
+  worktreeId: ID!
+  "Repository display name captured at submission."
+  repositoryName: String!
+  "Agent display name captured at submission."
+  agentName: String!
+  "Reviewed source branch."
+  branch: String!
+  "Checkout path captured at submission."
+  folder: String!
+  "Provider for the reviewed request."
+  provider: WorktreeMergeProvider!
+  "Opaque identifier shared by checkouts linked to the same provider request."
+  requestKey: String!
+  "Provider-scoped pull or merge request number."
+  requestNumber: Int!
+  "Request title captured at submission."
+  requestTitle: String!
+  "Provider URL captured at submission."
+  requestUrl: String!
+  "Current progress or final outcome."
+  status: WorktreeMergeItemStatus!
+  "Reason the merge was skipped, failed, or needs review."
+  error: String
+  "A follow-up problem after the provider confirmed the merge."
+  postMergeError: String
+  "ISO 8601 timestamp when the provider submission started."
+  startedAt: String
+  "ISO 8601 timestamp of the row's final outcome."
+  finishedAt: String
+}
+
+"Frozen review and immediate merge settings for one row. Set exactly one provider input."
+input WorktreeMergeItemInput {
+  "Checkout selected to own the merge and its follow-ups."
+  worktreeId: ID!
+  "Opaque request key from the reviewed candidate."
+  requestKey: String!
+  "Exact provider source commit reviewed before submission."
+  reviewedHeadSha: String!
+  "Exact target branch reviewed before submission."
+  reviewedTargetBranch: String!
+  "Immediate GitHub merge settings. Set this for a GitHub row."
+  github: MergeGitHubPullRequestInput
+  "Immediate GitLab merge settings. Set this for a GitLab row."
+  gitlab: SubmitGitLabMergeRequestMergeInput
+}
+
+"A reviewed selection of immediate merges to submit in order."
+input StartWorktreeMergeBatchInput {
+  "Idempotency identifier for this exact ordered submission and scope."
+  requestId: ID!
+  "App scope, or null for the global worktrees page."
+  appId: ID
+  "Global agent focus, if any."
+  agentId: ID
+  "Reviewed requests and merge settings in submission order."
+  items: [WorktreeMergeItemInput!]!
+}
+
+extend type Query {
+  "Load linked requests and their merge options for the current page scope."
+  worktreeMergeCandidates(
+    "Limit candidates to repositories attached to this app."
+    appId: ID
+    "Limit candidates to checkouts on the focused agent."
+    agentId: ID
+  ): [WorktreeMergeCandidate!]!
+  "Load active Bulk Merge batches and the most recent completed batch for this exact page scope."
+  worktreeMergeBatches(
+    "App scope, or null for the global worktrees page."
+    appId: ID
+    "Global agent focus, if any."
+    agentId: ID
+  ): [WorktreeMergeBatch!]!
+  "Load the retained progress of one Bulk Merge batch."
+  worktreeMergeBatch("Stable batch identifier." id: ID!): WorktreeMergeBatch
+}
+
+extend type Mutation {
+  "Persist and start a background Bulk Merge batch."
+  startWorktreeMergeBatch(
+    "Reviewed rows and the scope where the batch was submitted."
+    input: StartWorktreeMergeBatchInput!
+  ): WorktreeMergeBatch!
+}
+
 "Optional metadata that can load independently of the saved worktrees."
 enum WorktreeEnrichmentKind {
   "Refresh GitHub pull requests and their pipeline status."
@@ -1130,6 +1311,10 @@ input ConfigureWorktreeAutoMergeInput {
   switchToDefaultBranch: Boolean = false
   "Rebase and push the linked branch before waiting for passing CI and merging."
   autoSync: Boolean = false
+  "Run this merge conflict workflow if Auto Merge branch syncing stops at a conflict."
+  conflictWorkflowId: ID
+  "Optional resource trigger choice for the selected merge conflict workflow."
+  conflictWorkflowChoice: String
   "Reviewed source revision, required when autoSync is selected."
   expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."

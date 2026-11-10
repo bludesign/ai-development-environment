@@ -192,6 +192,23 @@ describe("JiraSettingsPage", () => {
       lastError: null,
     };
 
+    test("omits the settings link inside Settings while keeping webhook URLs", async () => {
+      mockWebhook(unconfigured);
+      render(<JiraSettingsPage embedded />);
+
+      expect(
+        await screen.findByDisplayValue(
+          "http://127.0.0.1:3000/api/public/jira/webhook",
+        ),
+      ).toBeDefined();
+      expect(
+        screen.getAllByText(/\/api\/public\/jira\/webhook$/),
+      ).not.toHaveLength(0);
+      expect(
+        screen.queryByRole("link", { name: "Manage server URLs in Settings" }),
+      ).toBeNull();
+    });
+
     test("offers the copyable URL and generates a secret shown once", async () => {
       mockWebhook(unconfigured);
 

@@ -336,6 +336,18 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
             ? [
                 {
                   type: "PHYSICAL_DEVICE",
+                  id: "device-older-qa-iphone",
+                  name: "Older QA iPhone",
+                  platform: "iOS",
+                  platformId: "IOS",
+                  osVersion: "26.0",
+                  state: "Connected",
+                  available: false,
+                  unavailableReason:
+                    "This device does not currently support app installation and launch",
+                },
+                {
+                  type: "PHYSICAL_DEVICE",
                   id: "device-apple-vision",
                   name: "QA Apple Vision Pro",
                   deviceType: "Apple Vision Pro",

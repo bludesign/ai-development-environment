@@ -26,8 +26,10 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
+  MERGE_CONFLICT_WORKFLOW_FIELDS,
   MergeSyncFields,
   MergeSyncStatus,
+  useMergeConflictWorkflow,
 } from "@/components/github/merge-sync-fields";
 import type {
   GitLabMergeOptions,
@@ -61,6 +63,7 @@ import {
 
 const OPTIONS_FIELDS = `${BASE_BRANCH_UPDATE_FIELDS} ${POST_MERGE_SWITCH_OPTION_FIELDS} projectId iid title state sha sourceBranch targetBranch mergeMethod squashPolicy squash removeSourceBranch
   canRemoveSourceBranch canMerge canAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync canCancelAutoMerge autoMergeEnabled mergeBlockedReason autoMergeBlockedReason
+  ${MERGE_CONFLICT_WORKFLOW_FIELDS}
   mergeCommitMessage squashCommitMessage worktreeId worktreeFolder canDeleteWorktree ticketKey ticketDoneStatusConfigured
   defaultMoveTicketToDone defaultDeleteWorktree operation { ${GITLAB_MERGE_OPERATION_FIELDS} }`;
 const RESULT_FIELDS = `mergeRequest { ${GITLAB_MERGE_REQUEST_FIELDS} } operation { ${GITLAB_MERGE_OPERATION_FIELDS} } postMergeError ticketTransitionError`;
@@ -127,6 +130,8 @@ export function MergeRequestDialog({
   const [moveTicketToDone, setMoveTicketToDone] = useState(false);
   const [switchToDefaultBranch, setSwitchToDefaultBranch] = useState(false);
   const [autoSync, setAutoSync] = useState(false);
+  const { load: loadConflictWorkflow, ...conflictWorkflow } =
+    useMergeConflictWorkflow(autoSync, options);
 
   const load = useCallback(
     async (replaceOutcome = false) => {
@@ -150,8 +155,16 @@ export function MergeRequestDialog({
         if (generation.current !== current) return;
         const next = data.gitlabMergeRequestMergeOptions;
         setLoadedOptions({ key: operationKey, value: next });
-        clearMergeOperation(operationKey, !replaceOutcome, operationAtLoad);
+        const previousSwitch = operationAtLoad.postMergeSwitch;
+        const nextSwitch = next.operation?.postMergeSwitch;
+        if (
+          previousSwitch?.state !== "COMPLETED" ||
+          nextSwitch?.state !== "COMPLETED" ||
+          previousSwitch.branch !== nextSwitch.branch
+        )
+          clearMergeOperation(operationKey, !replaceOutcome, operationAtLoad);
         setAutoSync(next.defaultAutoSync ?? false);
+        loadConflictWorkflow(next);
         setSwitchToDefaultBranch(
           Boolean(
             next.canSwitchToDefaultBranch && next.defaultSwitchToDefaultBranch,
@@ -183,7 +196,13 @@ export function MergeRequestDialog({
         if (generation.current === current) setLoading(false);
       }
     },
-    [mergeRequest.iid, mergeRequest.projectId, operationKey, worktreeId],
+    [
+      loadConflictWorkflow,
+      mergeRequest.iid,
+      mergeRequest.projectId,
+      operationKey,
+      worktreeId,
+    ],
   );
 
   const cancelLoad = useCallback(() => {
@@ -224,9 +243,13 @@ export function MergeRequestDialog({
   const managedPending = Boolean(
     operation?.autoMerge &&
     !confirmed &&
-    ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
-      operation.state,
-    ),
+    [
+      "SYNCING",
+      "RESOLVING",
+      "WAITING_CI",
+      "WAITING_REQUIREMENTS",
+      "MERGING",
+    ].includes(operation.state),
   );
   const autoMergeEnabled =
     managedPending ||
@@ -251,7 +274,10 @@ export function MergeRequestDialog({
       return;
     if (
       (action === "merge" || action === "auto") &&
-      (confirmed || invalidMessages || invalidFollowUp)
+      (confirmed ||
+        invalidMessages ||
+        invalidFollowUp ||
+        (action === "auto" && !conflictWorkflow.valid))
     )
       return;
     setError(null);
@@ -284,7 +310,9 @@ export function MergeRequestDialog({
                 iid: reviewedOptions.iid,
                 sha: reviewedOptions.sha,
                 autoMerge: action === "auto",
-                ...(action === "auto" && autoSync ? { autoSync: true } : {}),
+                ...(action === "auto" && autoSync
+                  ? { autoSync: true, ...conflictWorkflow.input }
+                  : {}),
                 squash,
                 removeSourceBranch: reviewedOptions.canRemoveSourceBranch
                   ? removeSourceBranch
@@ -584,6 +612,7 @@ export function MergeRequestDialog({
                     onChange={setAutoSync}
                     disabled={disabled}
                     unavailableReason={options.autoSyncBlockedReason}
+                    conflictWorkflow={conflictWorkflow.fields}
                   />
                   <MergeFollowUpFields
                     options={options}
@@ -695,7 +724,8 @@ export function MergeRequestDialog({
                       ? options.canAutoMergeWithSync
                       : options.canAutoMerge) ||
                     invalidMessages ||
-                    invalidFollowUp
+                    invalidFollowUp ||
+                    !conflictWorkflow.valid
                   }
                   variant="outline"
                   onClick={() => void perform("auto")}

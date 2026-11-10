@@ -30,6 +30,7 @@ type Target =
 const watchers = new Map<string, Promise<void>>();
 const ACTIVE_OPERATION_STATES = new Set([
   "SYNCING",
+  "RESOLVING",
   "WAITING_CI",
   "WAITING_REQUIREMENTS",
   "MERGING",

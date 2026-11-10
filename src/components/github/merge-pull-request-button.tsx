@@ -31,7 +31,12 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
-import { MergeSyncFields, MergeSyncStatus } from "./merge-sync-fields";
+import {
+  MERGE_CONFLICT_WORKFLOW_FIELDS,
+  MergeSyncFields,
+  MergeSyncStatus,
+  useMergeConflictWorkflow,
+} from "./merge-sync-fields";
 import type {
   GitHubMergeMethod,
   GitHubPullRequestMergeOptions,
@@ -120,6 +125,8 @@ export function MergePullRequestButton({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [autoSync, setAutoSync] = useState(false);
+  const { load: loadConflictWorkflow, ...conflictWorkflow } =
+    useMergeConflictWorkflow(autoSync, options);
   const [refresh, setRefresh] = useState(0);
   const [owner = "", name = ""] = pullRequest.repositoryNameWithOwner.split(
     "/",
@@ -187,6 +194,7 @@ export function MergePullRequestButton({
             defaultCommitBody
             canMerge
             headRefOid canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync
+            ${MERGE_CONFLICT_WORKFLOW_FIELDS}
             autoMergeOperation { autoSync state lastError ${POST_MERGE_SWITCH_FIELDS} }
             blockedReason
           }
@@ -204,6 +212,7 @@ export function MergePullRequestButton({
           const next = data.githubPullRequestMergeOptions;
           setLoadedOptions({ key: operationKey, value: next });
           setAutoSync(next.defaultAutoSync ?? false);
+          loadConflictWorkflow(next);
           setSwitchToDefaultBranch(
             Boolean(
               next.canSwitchToDefaultBranch &&
@@ -246,6 +255,7 @@ export function MergePullRequestButton({
     };
   }, [
     name,
+    loadConflictWorkflow,
     open,
     operationKey,
     owner,
@@ -261,9 +271,13 @@ export function MergePullRequestButton({
     : savedOperation;
   const activeManaged = Boolean(
     operation &&
-    ["SYNCING", "WAITING_CI", "WAITING_REQUIREMENTS", "MERGING"].includes(
-      operation.state,
-    ),
+    [
+      "SYNCING",
+      "RESOLVING",
+      "WAITING_CI",
+      "WAITING_REQUIREMENTS",
+      "MERGING",
+    ].includes(operation.state),
   );
 
   const merge = async () => {
@@ -271,6 +285,7 @@ export function MergePullRequestButton({
       !options ||
       !method ||
       !(autoSync ? options?.canAutoMergeWithSync : options?.canMerge) ||
+      !conflictWorkflow.valid ||
       !commitHeadline.trim() ||
       mergeOperation.result?.state === "MERGED" ||
       merging ||
@@ -294,6 +309,7 @@ export function MergePullRequestButton({
                   repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
                   pullRequestNumber: pullRequest.number,
                   autoSync: true,
+                  ...conflictWorkflow.input,
                   expectedHeadSha: options.headRefOid,
                   method,
                   commitHeadline,
@@ -533,6 +549,7 @@ export function MergePullRequestButton({
                     onChange={setAutoSync}
                     disabled={merging}
                     unavailableReason={options.autoSyncBlockedReason}
+                    conflictWorkflow={conflictWorkflow.fields}
                   />
                   <div>
                     <Label className="mb-1.5 block" htmlFor="merge-method">
@@ -680,6 +697,7 @@ export function MergePullRequestButton({
                       !(autoSync
                         ? options?.canAutoMergeWithSync
                         : options?.canMerge) ||
+                      !conflictWorkflow.valid ||
                       !method ||
                       !commitHeadline.trim())))
               }

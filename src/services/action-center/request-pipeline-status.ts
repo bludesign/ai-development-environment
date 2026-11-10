@@ -1,0 +1,7 @@
+export const FAILED_REQUEST_PIPELINE_STATUSES = [
+  "FAILURE",
+  "FAILED",
+  "ERROR",
+  "TIMED_OUT",
+  "STARTUP_FAILURE",
+];

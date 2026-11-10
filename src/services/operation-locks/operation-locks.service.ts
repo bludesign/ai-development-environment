@@ -407,23 +407,32 @@ export async function withMergeReservation<T>(
       "mergeOutcomeUnknown" in error &&
       error.mergeOutcomeUnknown,
     );
-    if (uncertain)
-      await prisma.operationHolder.update({
-        where: {
-          ownerKind_ownerId: { ownerKind: "MERGE_SUBMISSION", ownerId },
-        },
-        data: {
-          resultJson: JSON.stringify({
-            outcome: "UNKNOWN",
-            origin: normalizeOperationOrigin(origin),
-            branch,
-            mergeRecovery:
-              error && typeof error === "object" && "mergeRecovery" in error
-                ? error.mergeRecovery
-                : recovery,
-          }),
-        },
-      });
+    if (uncertain) {
+      try {
+        await prisma.operationHolder.update({
+          where: {
+            ownerKind_ownerId: { ownerKind: "MERGE_SUBMISSION", ownerId },
+          },
+          data: {
+            resultJson: JSON.stringify({
+              outcome: "UNKNOWN",
+              origin: normalizeOperationOrigin(origin),
+              branch,
+              mergeRecovery:
+                error && typeof error === "object" && "mergeRecovery" in error
+                  ? error.mergeRecovery
+                  : recovery,
+            }),
+          },
+        });
+      } catch (persistenceError) {
+        // SUBMITTING is already durable. Preserve the outcome for the caller.
+        console.error(
+          "Could not update the merge reservation:",
+          persistenceError,
+        );
+      }
+    }
     throw error;
   } finally {
     if (!uncertain) {

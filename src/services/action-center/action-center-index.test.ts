@@ -406,6 +406,13 @@ describe("request visibility in the mixed index", () => {
         surface: "FULL",
       });
       expect(full.totalCount).toBe(3);
+      const failed = ["FAILED", "FAILURE", "ERROR", "TIMED_OUT"].includes(
+        pipelineStatus,
+      );
+      expect(full.needsAttentionCount).toBe(failed ? 1 : 0);
+      expect(
+        full.rows.find(({ resourceId }) => resourceId === "mine")?.reason,
+      ).toBe(failed ? "FAILED" : "ACTIVE");
       const all = await queryActionCenterIndex(prisma, {
         first: 50,
         cursor: null,

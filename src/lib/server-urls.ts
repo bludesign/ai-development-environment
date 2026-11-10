@@ -1,7 +1,16 @@
+import type {
+  BuildDestinationType,
+  BuildPlatform,
+} from "@ai-development-environment/agent-contract/builds";
 import { isLoopback } from "./public-origin";
 
 export const SERVER_URL_KINDS = ["LOCAL", "REMOTE", "PROXY"] as const;
 export type ServerUrlKind = (typeof SERVER_URL_KINDS)[number];
+
+export type BuildServerUrlDestination = {
+  type: BuildDestinationType;
+  platform: BuildPlatform;
+};
 
 export type ServerUrlSettings = {
   localBaseUrlOverride: string | null;
@@ -13,13 +22,14 @@ export type ServerUrlSettings = {
   effectiveRemoteBaseUrl: string;
   defaultServerUrlKind: ServerUrlKind;
   simulatorDefaultServerUrlKind: ServerUrlKind | null;
+  physicalDefaultServerUrlKind: ServerUrlKind | null;
   updatedAt: string;
 };
 
 export const SERVER_URL_SETTINGS_FIELDS = `
   localBaseUrlOverride remoteBaseUrlOverride proxyBaseUrl
   detectedLocalBaseUrl detectedRemoteBaseUrl effectiveLocalBaseUrl effectiveRemoteBaseUrl
-  defaultServerUrlKind simulatorDefaultServerUrlKind updatedAt
+  defaultServerUrlKind simulatorDefaultServerUrlKind physicalDefaultServerUrlKind updatedAt
 `;
 
 export function normalizeServerOrigin(value: string): string {
@@ -94,11 +104,22 @@ export function serverUrlActionProblem(
 
 export function defaultServerUrlKind(
   settings: ServerUrlSettings,
-  destinationType?: string,
+  destination?: BuildServerUrlDestination,
 ): ServerUrlKind {
-  return destinationType === "SIMULATOR"
-    ? (settings.simulatorDefaultServerUrlKind ?? settings.defaultServerUrlKind)
-    : settings.defaultServerUrlKind;
+  if (destination?.type === "SIMULATOR") {
+    return (
+      settings.simulatorDefaultServerUrlKind ?? settings.defaultServerUrlKind
+    );
+  }
+  if (
+    destination?.type === "PHYSICAL_DEVICE" &&
+    destination.platform === "IOS"
+  ) {
+    return (
+      settings.physicalDefaultServerUrlKind ?? settings.defaultServerUrlKind
+    );
+  }
+  return settings.defaultServerUrlKind;
 }
 
 export function serverBaseUrl(

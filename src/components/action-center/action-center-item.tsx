@@ -125,17 +125,18 @@ export function ActionCenterItem({
       ? runLabels.phase(item.phase)
       : formatEnumLabel(item.phase)
     : null;
-  const reasonBadge = (
-    <Badge
-      className={cn(
-        compact && "h-4 px-1.5 py-0 text-[9px] leading-none",
-        reasonClass(item.reason),
-      )}
-      variant={item.reason === "FAILED" ? "destructive" : "outline"}
-    >
-      {t(`reasons.${item.reason}`)}
-    </Badge>
-  );
+  const reasonBadge =
+    item.request && item.reason === "FAILED" ? null : (
+      <Badge
+        className={cn(
+          compact && "h-4 px-1.5 py-0 text-[9px] leading-none",
+          reasonClass(item.reason),
+        )}
+        variant={item.reason === "FAILED" ? "destructive" : "outline"}
+      >
+        {t(`reasons.${item.reason}`)}
+      </Badge>
+    );
 
   const acknowledgeFailure = async () => {
     setAcknowledging(true);

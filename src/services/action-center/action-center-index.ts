@@ -1,5 +1,7 @@
 import type { PrismaClient } from "@/generated/prisma/client";
 
+import { FAILED_REQUEST_PIPELINE_STATUSES } from "./request-pipeline-status";
+
 export type ActionCenterIndexCursor = {
   scope?: string;
   priority: number;
@@ -19,6 +21,11 @@ type ActionCenterCountRow = {
   totalCount: number | bigint;
   needsAttentionCount: number | bigint;
 };
+
+const FAILED_REQUEST_PIPELINE_SQL = `
+  UPPER(COALESCE(json_extract(request.payloadJson, '$.request.pipelineStatus'), 'NONE'))
+  IN (${FAILED_REQUEST_PIPELINE_STATUSES.map((status) => `'${status}'`).join(", ")})
+`;
 
 const CANDIDATES_SQL = `
   WITH agent_candidates AS (
@@ -161,14 +168,15 @@ const CANDIDATES_SQL = `
   ),
   request_candidates AS (
     SELECT request.resourceKind, request.id AS resourceId, request.resourceKind || ':' || request.id AS key,
-      request.reason, strftime('%Y-%m-%dT%H:%M:%fZ', request.updatedAt) AS updatedAt, NULL AS failureFingerprint
+      CASE WHEN ${FAILED_REQUEST_PIPELINE_SQL} THEN 'FAILED' ELSE request.reason END AS reason,
+      strftime('%Y-%m-%dT%H:%M:%fZ', request.updatedAt) AS updatedAt, NULL AS failureFingerprint
     FROM ActionCenterRequest AS request CROSS JOIN request_settings AS settings
     WHERE (request.isMine = 1 OR request.requiresMyApproval = 1)
       AND (settings.ageDays = 0 OR julianday(request.createdAt) >= julianday(?) - settings.ageDays)
       AND (CASE WHEN ? = 0 THEN 1 ELSE
         ((settings.showMine = 1 AND request.isMine = 1) OR (settings.showReviews = 1 AND request.requiresMyApproval = 1))
         AND (
-          UPPER(COALESCE(json_extract(request.payloadJson, '$.request.pipelineStatus'), 'NONE')) IN ('FAILURE', 'FAILED', 'ERROR', 'TIMED_OUT', 'STARTUP_FAILURE')
+          ${FAILED_REQUEST_PIPELINE_SQL}
           OR (
             (settings.hideUnapproved = 0 OR UPPER(COALESCE(json_extract(request.payloadJson, '$.request.approvalStatus'), 'UNKNOWN')) IN ('APPROVED', 'NONE', 'NOT_REQUIRED'))
             AND (settings.hideRunning = 0 OR UPPER(COALESCE(json_extract(request.payloadJson, '$.request.pipelineStatus'), 'NONE')) NOT IN ('EXPECTED', 'QUEUED', 'PENDING', 'PREPARING', 'IN_PROGRESS', 'RUNNING', 'CREATED', 'SCHEDULED', 'WAITING_FOR_RESOURCE', 'WAITING_FOR_CALLBACK', 'CANCELING'))

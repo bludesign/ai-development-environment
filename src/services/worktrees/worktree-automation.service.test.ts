@@ -87,6 +87,7 @@ function retargetFixture() {
     state: "WAITING_REQUIREMENTS",
     autoSync: false,
     syncStateJson: null,
+    manualMergeReviewJson: null,
     postMergeSwitchJson: null,
     baseBranchUpdatesJson: null,
     repositoryNameWithOwner: "acme/widgets",
@@ -115,7 +116,10 @@ function retargetFixture() {
   );
   const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
   getPrismaClient.mockResolvedValue({
-    worktree: { findFirst: vi.fn().mockResolvedValue(worktree) },
+    worktree: {
+      findFirst: vi.fn().mockResolvedValue(worktree),
+      findUnique: vi.fn().mockResolvedValue(worktree),
+    },
     worktreeAutoMerge: {
       findUnique: vi.fn(async () => ({ ...rule })),
       findMany: vi.fn(async () => [{ ...rule, worktree }]),
@@ -130,6 +134,7 @@ function retargetFixture() {
   });
   const remote = {
     state: "OPEN",
+    baseRefName: "main",
     headRefName: worktree.branch,
     headRefOid: worktree.headSha,
     headRepositoryNameWithOwner: "acme/widgets",
@@ -209,6 +214,48 @@ describe("WorktreeAutomationService", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  test.each([
+    ["MERGING", "main"],
+    ["MERGING", "retargeted"],
+    ["WAITING_REQUIREMENTS", "main"],
+  ])(
+    "preserves a saved Bulk Merge through build admission and checks the reviewed target (%s, %s)",
+    async (state, target) => {
+      const f = retargetFixture();
+      await f.upsert({
+        update: {
+          state,
+          updatedAt: new Date(),
+          moveTicketToDone: true,
+          ticketKey: "APP-17",
+          manualMergeReviewJson: JSON.stringify({
+            itemId: "batch-item",
+            headSha: f.worktree.headSha,
+            sourceBranch: f.worktree.branch,
+            sourceOrigin: f.worktree.codebase.repository.canonicalOrigin,
+            targetBranch: "main",
+          }),
+        },
+      });
+      await f.automation.adoptNativeAutoMergeForWorktree(f.worktree.id);
+      expect(f.current().state).toBe(state);
+      await f.reconcile();
+      expect(f.current().state).toBe(state);
+      expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+      expect(f.jira.transitionTicketToConfiguredDone).not.toHaveBeenCalled();
+
+      Object.assign(f.remote, { state: "MERGED", baseRefName: target });
+      await f.reconcile();
+      expect(f.github.mergePullRequest).not.toHaveBeenCalled();
+      expect(f.current().state).toBe(
+        target === "main" ? "COMPLETED" : "ACTION_REQUIRED",
+      );
+      expect(f.jira.transitionTicketToConfiguredDone).toHaveBeenCalledTimes(
+        target === "main" ? 1 : 0,
+      );
+    },
+  );
 
   test("reconciles immediately when an Auto Sync job completes", async () => {
     const { completionObserver, polling } = dependencies();
@@ -356,6 +403,24 @@ describe("WorktreeAutomationService", () => {
         update: expect.not.objectContaining({ pauseReason: expect.anything() }),
       }),
     );
+  });
+
+  test("rejects a conflicting pull request without sync before retargeting", async () => {
+    const f = retargetFixture();
+    f.github.pullRequestMergeOptions.mockImplementation(async () => ({
+      canMerge: false,
+      blockedReason: null,
+      canAutoMergeWithSync: true,
+      autoSyncRequiresConflictWorkflow: true,
+      availableMethods: ["SQUASH"],
+    }));
+
+    await expect(f.automation.configureAutoMerge(f.input)).rejects.toThrow(
+      "Enable Auto sync branch and select a workflow",
+    );
+    expect(f.upsert).not.toHaveBeenCalled();
+    expect(f.github.pullRequestAutomationState).toHaveBeenCalledOnce();
+    expect(f.current().pullRequestNumber).toBe(17);
   });
 
   test("waits for the previous PR worker before retargeting its worktree", async () => {

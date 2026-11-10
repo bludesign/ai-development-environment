@@ -24,6 +24,12 @@ import {
 import type { WorktreesService } from "@/services/worktrees";
 import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
+import type { WorkflowsService } from "@/services/workflows";
+import {
+  isUnknownMergeOutcome,
+  type BulkMergeReview,
+  unknownMergeOutcome,
+} from "@/services/worktrees/bulk-merge-review";
 import {
   advancePostMergeSwitch,
   getPostMergeSwitchOptions,
@@ -41,6 +47,7 @@ import {
   MANAGED_MERGE_STATES,
   LEGACY_CODEBASE_BUSY_MESSAGE,
   isTransientMergeError,
+  mergeConflictWorkflowOptions,
   mergeSyncUnavailableReason,
   prepareMergeSync,
   withMergeSyncLock,
@@ -150,6 +157,7 @@ export class GitLabMergeService {
     private readonly worktrees: WorktreesService,
     private readonly jira: JiraService,
     private readonly agents: AgentControlService,
+    private readonly workflows?: WorkflowsService,
   ) {
     gitlab.setMergeCoordinator(this);
     agents.registerCompletionObserver(async (job) => {
@@ -327,6 +335,15 @@ export class GitLabMergeService {
     const autoSyncBlockedReason = await mergeSyncUnavailableReason(
       context.worktree?.id,
     );
+    const conflictOptions = await mergeConflictWorkflowOptions(
+      context.worktree?.id,
+      saved?.syncStateJson,
+    );
+    const autoSyncRequiresConflictWorkflow =
+      mr.hasConflicts || mr.detailedMergeStatus === "conflict";
+    const canResolveConflicts =
+      !autoSyncRequiresConflictWorkflow ||
+      conflictOptions.mergeConflictWorkflows.length > 0;
     const managed = Boolean(
       saved?.autoMerge &&
       saved.worktreeId &&
@@ -354,6 +371,8 @@ export class GitLabMergeService {
         )
       : null;
     return {
+      ...conflictOptions,
+      autoSyncRequiresConflictWorkflow,
       ...(await getPostMergeSwitchOptions(
         mr.state === "MERGED"
           ? (saved?.worktreeId ?? null)
@@ -367,8 +386,12 @@ export class GitLabMergeService {
         canMerge &&
         mr.state === "OPENED" &&
         !mr.draft &&
-        !mr.hasConflicts,
-      autoSyncBlockedReason,
+        canResolveConflicts,
+      autoSyncBlockedReason:
+        autoSyncBlockedReason ??
+        (canResolveConflicts
+          ? null
+          : conflictOptions.conflictWorkflowBlockedReason),
       defaultAutoSync: saved?.autoSync ?? false,
       projectId,
       iid,
@@ -443,8 +466,16 @@ export class GitLabMergeService {
 
   async submit(
     input: SubmitGitLabMergeRequestMergeInput,
+    review?: BulkMergeReview,
   ): Promise<GitLabMergeResult> {
     const instanceUrl = await this.instance();
+    if (
+      review &&
+      (review.instanceUrl !== instanceUrl || input.autoMerge || input.autoSync)
+    )
+      throw new MergeSyncNotSubmittedError(
+        "The reviewed GitLab instance or merge settings changed.",
+      );
     return this.locked(
       `${instanceUrl}:${input.projectId}:${input.iid}`,
       async () => {
@@ -456,6 +487,29 @@ export class GitLabMergeService {
         );
         const saved = await this.record(input.projectId, input.iid);
         if (
+          review &&
+          (!options.canMerge ||
+            options.sha !== review.headSha ||
+            options.sourceBranch !== review.sourceBranch ||
+            options.targetBranch !== review.targetBranch ||
+            options.worktreeId !== input.worktreeId ||
+            saved?.mergeConfirmedAt ||
+            (saved && ACTIVE_STATES.includes(saved.state)))
+        )
+          throw new MergeSyncNotSubmittedError(
+            options.mergeBlockedReason ??
+              "The reviewed GitLab request, worktree or merge readiness changed.",
+          );
+        if (
+          review &&
+          input.removeSourceBranch === false &&
+          !options.canRemoveSourceBranch &&
+          options.removeSourceBranch
+        )
+          throw new MergeSyncNotSubmittedError(
+            "GitLab now requires deleting the source branch. Review the merge settings again.",
+          );
+        if (
           saved?.mergeConfirmedAt ||
           (saved && ACTIVE_STATES.includes(saved.state))
         )
@@ -466,6 +520,13 @@ export class GitLabMergeService {
           );
         if (input.autoSync && !input.autoMerge)
           throw new Error("Branch syncing requires Auto Merge.");
+        if (
+          !input.autoSync &&
+          (input.conflictWorkflowId || input.conflictWorkflowChoice)
+        )
+          throw new Error(
+            "Automatic conflict resolution requires Auto sync branch.",
+          );
         if (
           input.autoSync
             ? !options.canAutoMergeWithSync
@@ -500,6 +561,16 @@ export class GitLabMergeService {
           input.iid,
         );
         const context = await this.context(mr, input.worktreeId);
+        if (
+          review &&
+          (mr.sha !== review.headSha ||
+            mr.sourceBranch !== review.sourceBranch ||
+            mr.targetBranch !== review.targetBranch ||
+            context.sourceOrigin !== review.sourceOrigin)
+        )
+          throw new MergeSyncNotSubmittedError(
+            "The reviewed GitLab source or target changed.",
+          );
         const preparedSwitch = await preparePostMergeSwitch(
           options.worktreeId,
           {
@@ -531,6 +602,7 @@ export class GitLabMergeService {
           ? (input.removeSourceBranch ?? options.removeSourceBranch)
           : options.removeSourceBranch;
         const data = {
+          manualMergeReviewJson: review ? JSON.stringify(review) : null,
           state: "PREPARING",
           autoSync: false,
           syncStateJson: null as string | null,
@@ -564,7 +636,11 @@ export class GitLabMergeService {
             );
           return withMergeSyncLock(options.worktreeId, async () => {
             if (saved?.autoSync)
-              await cancelMergeSync(saved.syncStateJson, this.agents);
+              await cancelMergeSync(
+                saved.syncStateJson,
+                this.agents,
+                this.workflows,
+              );
             const ready = await this.gitlab.managedMergeReadiness(
               input.projectId,
               input.iid,
@@ -581,6 +657,7 @@ export class GitLabMergeService {
               options.worktreeId!,
               ready,
               { provider: "GITLAB", id: saved?.id ?? "new" },
+              input,
             );
             const managedData = {
               ...data,
@@ -698,14 +775,23 @@ export class GitLabMergeService {
           },
           update: data,
         });
+        let providerResponded = false;
         try {
-          const remote = await this.gitlab.mergeMergeRequestDirect({
-            ...input,
-            squash,
-            removeSourceBranch,
-          });
+          const mergeInput = { ...input, squash, removeSourceBranch };
+          const remote = await (review
+            ? this.gitlab.mergeMergeRequestDirect(mergeInput, review)
+            : this.gitlab.mergeMergeRequestDirect(mergeInput));
+          providerResponded = true;
           row = await this.observe(row, remote);
         } catch (error) {
+          if (review && error instanceof MergeSyncNotSubmittedError) {
+            row = await prisma.gitLabMergeOperation.update({
+              where: { id: row.id },
+              data: { state: "ACTION_REQUIRED", lastError: error.message },
+            });
+            this.changed(row);
+            throw error;
+          }
           // A timeout can occur after GitLab accepted the merge. Resolve from fresh state, never resubmit.
           try {
             row = await this.observe(
@@ -728,7 +814,8 @@ export class GitLabMergeService {
               error.statusCode &&
               error.statusCode >= 400 &&
               error.statusCode < 500 &&
-              error.statusCode !== 429
+              error.statusCode !== 429 &&
+              (!review || !isUnknownMergeOutcome(error))
             ) {
               await prisma.gitLabMergeOperation.update({
                 where: { id: row.id },
@@ -736,13 +823,21 @@ export class GitLabMergeService {
               });
             }
             this.wake();
-            throw error;
+            throw review && providerResponded
+              ? unknownMergeOutcome(error)
+              : error;
           }
         }
-        if (row.mergeConfirmedAt) await this.followUps(row);
-        this.changed(row);
-        this.wake();
-        return this.result(input.projectId, input.iid);
+        try {
+          if (row.mergeConfirmedAt) await this.followUps(row);
+          this.changed(row);
+          this.wake();
+          return await this.result(input.projectId, input.iid);
+        } catch (error) {
+          if (!review || isUnknownMergeOutcome(error)) throw error;
+          this.wake();
+          throw unknownMergeOutcome(error);
+        }
       },
     );
   }
@@ -775,7 +870,7 @@ export class GitLabMergeService {
       });
     }
     if (!this.matchesReviewedSource(row, mr)) {
-      if (mr.mergeWhenPipelineSucceeds) {
+      if (mr.mergeWhenPipelineSucceeds && !row.manualMergeReviewJson) {
         await this.gitlab.cancelAutoMergeDirect(row.projectId, row.iid);
         const fresh = await this.gitlab.mergeRequestState(
           row.projectId,
@@ -791,8 +886,9 @@ export class GitLabMergeService {
         where: { id: row.id },
         data: {
           state: "ACTION_REQUIRED",
-          lastError:
-            "The source commit changed. Review the new commit before enabling auto-merge again.",
+          lastError: row.manualMergeReviewJson
+            ? "The reviewed GitLab source or target changed. Check the merge request in GitLab."
+            : "The source commit changed. Review the new commit before enabling auto-merge again.",
         },
       });
     }
@@ -829,11 +925,33 @@ export class GitLabMergeService {
     row: GitLabMergeOperation,
     mr: GitLabMergeRequestView,
   ) {
+    const review = row.manualMergeReviewJson
+      ? (JSON.parse(row.manualMergeReviewJson) as BulkMergeReview)
+      : null;
     return (
       row.sha === mr.sha &&
       row.branch === mr.sourceBranch &&
-      row.sourceProjectId === (mr.sourceProjectId ?? null)
+      row.sourceProjectId === (mr.sourceProjectId ?? null) &&
+      (!review || review.targetBranch === mr.targetBranch)
     );
+  }
+
+  async bulkMergeFollowUp(
+    instanceUrl: string,
+    projectId: string,
+    iid: number,
+    itemId: string,
+  ) {
+    const row = await (
+      await getPrismaClient()
+    ).gitLabMergeOperation.findUnique({
+      where: { instanceUrl_projectId_iid: { instanceUrl, projectId, iid } },
+    });
+    if (!row?.manualMergeReviewJson) return null;
+    const review = JSON.parse(row.manualMergeReviewJson) as BulkMergeReview;
+    return review.itemId === itemId
+      ? { state: row.state, lastError: row.lastError }
+      : null;
   }
 
   private async followUps(row: GitLabMergeOperation) {
@@ -1034,10 +1152,19 @@ export class GitLabMergeService {
         state: { in: ACTIVE_STATES },
       },
     });
-    for (const row of rows)
+    for (const candidate of rows)
       await this.locked(
-        `${row.instanceUrl}:${row.projectId}:${row.iid}`,
+        `${candidate.instanceUrl}:${candidate.projectId}:${candidate.iid}`,
         async () => {
+          const row = await prisma.gitLabMergeOperation.findUnique({
+            where: { id: candidate.id },
+          });
+          if (
+            !row?.autoMerge ||
+            row.mergeConfirmedAt ||
+            !ACTIVE_STATES.includes(row.state)
+          )
+            return;
           let remote = await this.gitlab.mergeRequestState(
             row.projectId,
             row.iid,
@@ -1067,6 +1194,12 @@ export class GitLabMergeService {
               );
           }
           if (remote.state === "MERGED") {
+            if (row.autoSync)
+              await cancelMergeSync(
+                row.syncStateJson,
+                this.agents,
+                this.workflows,
+              );
             await this.observe(row, remote);
           } else if (!row.autoSync) {
             await prisma.gitLabMergeOperation.update({
@@ -1118,7 +1251,7 @@ export class GitLabMergeService {
     return this.locked(`${instanceUrl}:${projectId}:${iid}`, async () => {
       let row = await this.record(projectId, iid);
       if (row?.autoSync && !row.mergeConfirmedAt) {
-        await cancelMergeSync(row.syncStateJson, this.agents);
+        await cancelMergeSync(row.syncStateJson, this.agents, this.workflows);
       }
       let failure: unknown;
       try {
@@ -1217,18 +1350,24 @@ export class GitLabMergeService {
               current.lastError === LEGACY_CODEBASE_BUSY_MESSAGE &&
               Boolean(current.mergeConfirmedAt);
             if (!ACTIVE_STATES.includes(current.state) && !recoverBusy) return;
-            if (current.instanceUrl !== instanceUrl) {
-              await prisma.gitLabMergeOperation.update({
-                where: { id: row.id },
-                data: {
-                  state: "ACTION_REQUIRED",
-                  lastError:
-                    "The configured GitLab instance or credentials changed.",
-                },
-              });
-              return;
-            }
             try {
+              if (current.instanceUrl !== instanceUrl) {
+                if (current.autoSync && !current.mergeConfirmedAt)
+                  await cancelMergeSync(
+                    current.syncStateJson,
+                    this.agents,
+                    this.workflows,
+                  );
+                await prisma.gitLabMergeOperation.update({
+                  where: { id: row.id },
+                  data: {
+                    state: "ACTION_REQUIRED",
+                    lastError:
+                      "The configured GitLab instance or credentials changed.",
+                  },
+                });
+                return;
+              }
               if (
                 current.autoMerge &&
                 current.worktreeId &&
@@ -1240,7 +1379,11 @@ export class GitLabMergeService {
                 });
                 if (worktree && isDefaultWorktreeBranch(worktree)) {
                   if (current.autoSync)
-                    await cancelMergeSync(current.syncStateJson, this.agents);
+                    await cancelMergeSync(
+                      current.syncStateJson,
+                      this.agents,
+                      this.workflows,
+                    );
                   const remote = await this.gitlab.mergeRequestState(
                     current.projectId,
                     current.iid,
@@ -1369,6 +1512,7 @@ export class GitLabMergeService {
                   worktreeId: current.worktreeId!,
                   worktrees: this.worktrees,
                   agents: this.agents,
+                  workflows: this.workflows,
                   readiness: () =>
                     this.gitlab.managedMergeReadiness(
                       current.projectId,

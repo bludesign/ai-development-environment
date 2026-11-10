@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -13,6 +14,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import {
   clearMergeOperation,
   githubMergeOperationKey,
+  recordPostMergeSwitch,
 } from "./merge-operation-state";
 import { MergeOperationWarnings } from "./merge-operation-warnings";
 import { MergePullRequestButton } from "./merge-pull-request-button";
@@ -22,9 +24,37 @@ const request = { repositoryNameWithOwner: "acme/widgets", number: 19 };
 
 afterEach(async () => {
   cleanup();
+  vi.useRealTimers();
   await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
   clearMergeOperation(githubMergeOperationKey(request));
   vi.mocked(controlPlaneRequest).mockReset();
+});
+
+test("keeps an open details dialog after the completed switch banner expires", async () => {
+  vi.useFakeTimers();
+  vi.mocked(controlPlaneRequest).mockResolvedValue({
+    githubPullRequestMergeOptions: {
+      availableMethods: [],
+      commitEmails: [],
+      defaultCommitHeadline: "Improve API",
+      defaultCommitBody: "",
+      canMerge: false,
+    },
+  } as never);
+  const key = githubMergeOperationKey(request);
+  const pending = { branch: "main", state: "PENDING", lastError: null };
+  recordPostMergeSwitch(key, pending);
+  render(<MergeOperationWarnings provider="github" />);
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  const dialog = screen.getByRole("dialog");
+
+  act(() => recordPostMergeSwitch(key, { ...pending, state: "COMPLETED" }));
+  await act(() => vi.advanceTimersByTimeAsync(5_000));
+
+  expect(screen.queryByText("Details")).toBeNull();
+  expect(screen.getByRole("dialog")).toBe(dialog);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });
 
 test("keeps a merge warning reviewable after refreshing removes the originating row", async () => {

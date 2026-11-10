@@ -3043,8 +3043,14 @@ function SettingsDialog({
             Endpoint addresses are configured in Settings.
           </DialogDescription>
         </DialogHeader>
-        <EndpointUrls path="/api/telemetry/console-logs" />
-        <EndpointUrls path="/api/telemetry/analytics-events" />
+        <EndpointUrls
+          path="/api/telemetry/console-logs"
+          showSettingsLink={false}
+        />
+        <EndpointUrls
+          path="/api/telemetry/analytics-events"
+          showSettingsLink={false}
+        />
         <ServerUrlSettingsLink />
         <DialogFooter>
           <Button onClick={() => onOpenChange(false)} variant="outline">

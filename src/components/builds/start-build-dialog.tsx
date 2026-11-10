@@ -919,17 +919,20 @@ function StartBuildDialog({
     pendingPlatforms.length > 0 &&
     pendingPlatforms.every((entry) => {
       const draft = draftFor(entry);
-      if (!draft?.destination || draft.destination.available === false)
-        return false;
-      if (draft.action === "ARCHIVE" && !draft.destination.generic)
-        return false;
+      if (!draft) return false;
+      const { destination } = draft;
+      if (!destination || destination.available === false) return false;
+      if (draft.action === "ARCHIVE" && !destination.generic) return false;
       if (draft.action === "TEST_WITHOUT_BUILDING" && !draft.priorBuildId)
         return false;
       return availableServerUrls.some(
         ({ kind }) =>
           kind ===
           (draft.serverUrlKindOverride ??
-            defaultServerUrlKind(serverUrls, draft.destination?.type)),
+            defaultServerUrlKind(serverUrls, {
+              type: destination.type,
+              platform: entry,
+            })),
       );
     });
 
@@ -1054,7 +1057,10 @@ function StartBuildDialog({
             draft.action === "ARCHIVE" ? draft.exportSettings : null,
           serverUrlKind:
             draft.serverUrlKindOverride ??
-            defaultServerUrlKind(serverUrls, draft.destination!.type),
+            defaultServerUrlKind(serverUrls, {
+              type: draft.destination!.type,
+              platform: entry,
+            }),
         };
       });
       const commonInput = {
@@ -1381,7 +1387,7 @@ function StartBuildDialog({
                           setDestinationId(value);
                         }}
                       />
-                      {!destinationsLoading && !destinations.length && (
+                      {!destinationsLoading && !filteredDestinations.length && (
                         <p className="text-xs text-muted-foreground">
                           {t("noCompatibleDevices")}
                         </p>
@@ -1765,7 +1771,10 @@ function StartBuildDialog({
                 settings={serverUrls}
                 value={
                   serverUrlKindOverride ??
-                  defaultServerUrlKind(serverUrls, destinationType)
+                  defaultServerUrlKind(serverUrls, {
+                    type: destinationType,
+                    platform,
+                  })
                 }
                 onValueChange={(kind) => {
                   if (kind !== "INHERIT") setServerUrlKindOverride(kind);

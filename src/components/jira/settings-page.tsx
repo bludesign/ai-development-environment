@@ -122,7 +122,7 @@ function CopyField({
  * API token as every other Jira call, and falls back to minting a bare signing
  * secret for sites where that token's user is not a Jira admin.
  */
-function JiraWebhookCard() {
+function JiraWebhookCard({ embedded }: { embedded: boolean }) {
   const t = useTranslations("jiraSettings");
   const tc = useTranslations("common");
   const locale = useLocale();
@@ -285,8 +285,12 @@ function JiraWebhookCard() {
           <ServerUrlPicker
             value={webhookServerKind}
             onValueChange={setWebhookServerKind}
+            showSettingsLink={false}
           />
-          <EndpointUrls path="/api/public/jira/webhook" />
+          <EndpointUrls
+            path="/api/public/jira/webhook"
+            showSettingsLink={!embedded}
+          />
           <ServerUrlActionNotice kind={webhookServerKind} publicHost />
           <Input
             disabled={busy || credentialsReadOnly}
@@ -788,7 +792,9 @@ export function JiraSettingsPage({
           </Card>
         </form>
       )}
-      {!loading && settings?.tokenConfigured && <JiraWebhookCard />}
+      {!loading && settings?.tokenConfigured && (
+        <JiraWebhookCard embedded={embedded} />
+      )}
       <ConfirmationDialog
         actionLabel={tc("continue")}
         cancelLabel={tc("cancel")}

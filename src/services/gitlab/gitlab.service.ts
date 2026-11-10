@@ -31,7 +31,11 @@ import {
   recoverMergeReservations,
   withMergeReservation,
 } from "@/services/operation-locks/operation-locks.service";
-import type { MergeSyncReadiness } from "@/services/worktrees/merge-branch-sync";
+import {
+  MergeSyncNotSubmittedError,
+  type MergeSyncReadiness,
+} from "@/services/worktrees/merge-branch-sync";
+import type { BulkMergeReview } from "@/services/worktrees/bulk-merge-review";
 import { mapIntegrationRequests } from "@/services/integration-request";
 import {
   CREDENTIALS,
@@ -988,13 +992,11 @@ export class GitLabService {
       ? "Your GitLab account cannot merge this request."
       : mr.draft
         ? "Mark this merge request ready before merging."
-        : mr.hasConflicts || mr.detailedMergeStatus === "conflict"
-          ? "Resolve merge conflicts before resuming Auto Merge."
-          : ["policies_denied", "requested_changes"].includes(
-                mr.detailedMergeStatus,
-              )
-            ? "GitLab policy or requested changes block this merge."
-            : null;
+        : ["policies_denied", "requested_changes"].includes(
+              mr.detailedMergeStatus,
+            )
+          ? "GitLab policy or requested changes block this merge."
+          : null;
     return {
       state:
         mr.state === "OPENED"
@@ -1018,6 +1020,7 @@ export class GitLabService {
         !mr.draft &&
         !mr.hasConflicts,
       blocker: permanent,
+      hasConflicts: mr.hasConflicts || mr.detailedMergeStatus === "conflict",
       nativeAutoMerge: mr.mergeWhenPipelineSucceeds,
     };
   }
@@ -1141,7 +1144,8 @@ export class GitLabService {
     const approvalState =
       mr.detailedMergeStatus === "requested_changes"
         ? "CHANGES_REQUESTED"
-        : left != null && left > 0
+        : mr.detailedMergeStatus === "not_approved" ||
+            (left != null && left > 0)
           ? "REVIEW_REQUIRED"
           : required != null && required > 0
             ? left === 0
@@ -1149,7 +1153,10 @@ export class GitLabService {
               : null
             : approval?.approved_by?.length
               ? "APPROVED"
-              : required === 0
+              : required === 0 ||
+                  (required === null &&
+                    left === null &&
+                    Array.isArray(approval?.approved_by))
                 ? "NOT_REQUIRED"
                 : null;
     return {
@@ -1288,8 +1295,12 @@ export class GitLabService {
     method?: string;
     query?: Query;
     body?: unknown;
+    timeoutMs?: number;
   }): Promise<RawResponse<T>> {
     const url = this.endpoint(input.baseUrl, input.path, input.query);
+    const timeoutMs =
+      input.timeoutMs ??
+      (!input.method || input.method === "GET" ? 30_000 : null);
     const response = await fetch(url, {
       method: input.method ?? "GET",
       headers: {
@@ -1303,10 +1314,7 @@ export class GitLabService {
       cache: "no-store",
       redirect: "manual",
       // Keep the deadline active through response.text(), including slow bodies.
-      signal:
-        !input.method || input.method === "GET"
-          ? AbortSignal.timeout(30_000)
-          : undefined,
+      signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
     });
     const metadata = parseGitLabRateLimitHeaders(response.headers);
     if (response.status >= 300 && response.status < 400) {
@@ -1592,9 +1600,14 @@ export class GitLabService {
     source: GitLabRequestSource;
     body?: unknown;
     invalidateProjectId?: string;
+    expectedBaseUrl?: string;
   }): Promise<T> {
     this.invalidatePendingGets();
     const connection = await this.connection();
+    if (input.expectedBaseUrl && connection.baseUrl !== input.expectedBaseUrl)
+      throw new MergeSyncNotSubmittedError(
+        "The configured GitLab instance changed before merging.",
+      );
     const endpoint = this.endpoint(connection.baseUrl, input.path).toString();
     const startedAt = Date.now();
     try {
@@ -1603,6 +1616,7 @@ export class GitLabService {
         path: input.path,
         method: input.method,
         body: input.body,
+        timeoutMs: input.expectedBaseUrl ? 30_000 : undefined,
       });
       await Promise.all([
         this.recordRateLimit(response.rateLimit),
@@ -2880,21 +2894,31 @@ export class GitLabService {
     return (await this.mergeCoordinator.submit({ ...input, sha })).mergeRequest;
   }
 
-  async mergeMergeRequestDirect(input: {
-    projectId: string;
-    iid: number;
-    squash?: boolean | null;
-    removeSourceBranch?: boolean | null;
-    autoMerge?: boolean | null;
-    sha?: string | null;
-    mergeCommitMessage?: string | null;
-    squashCommitMessage?: string | null;
-  }): Promise<GitLabMergeRequestView> {
+  async mergeMergeRequestDirect(
+    input: {
+      projectId: string;
+      iid: number;
+      squash?: boolean | null;
+      removeSourceBranch?: boolean | null;
+      autoMerge?: boolean | null;
+      sha?: string | null;
+      mergeCommitMessage?: string | null;
+      squashCommitMessage?: string | null;
+    },
+    review?: BulkMergeReview,
+  ): Promise<GitLabMergeRequestView> {
     const mr = await this.mergeRequestState(input.projectId, input.iid);
     if (!mr.sourceProjectId)
       throw new Error("The merge request source project is unavailable.");
     const source = await this.mergeProject(mr.sourceProjectId);
     const sourceOrigin = normalizeGitOrigin(source.web_url).canonicalOrigin;
+    const matchesReview = (request: GitLabMergeRequestView) =>
+      !review ||
+      (sourceOrigin === review.sourceOrigin &&
+        request.sourceProjectId === mr.sourceProjectId &&
+        request.sourceBranch === review.sourceBranch &&
+        request.targetBranch === review.targetBranch &&
+        request.sha === review.headSha);
     await recoverMergeReservations(
       sourceOrigin,
       mr.sourceBranch,
@@ -2918,6 +2942,18 @@ export class GitLabService {
       mr.sourceBranch,
       async (reservation) => {
         const fresh = await this.mergeRequestState(input.projectId, input.iid);
+        if (
+          review &&
+          (!matchesReview(fresh) ||
+            fresh.state !== "OPENED" ||
+            fresh.draft ||
+            fresh.hasConflicts ||
+            fresh.mergeWhenPipelineSucceeds ||
+            fresh.detailedMergeStatus !== "mergeable")
+        )
+          throw new MergeSyncNotSubmittedError(
+            "The reviewed GitLab source, target or merge readiness changed.",
+          );
         if (
           fresh.sourceProjectId !== mr.sourceProjectId ||
           fresh.sourceBranch !== mr.sourceBranch ||
@@ -2943,21 +2979,41 @@ export class GitLabService {
                 input.squashCommitMessage?.trim() || undefined,
             },
             invalidateProjectId: input.projectId,
+            expectedBaseUrl: review?.instanceUrl,
           });
-          return mapMergeRequest(data);
+          const merged = mapMergeRequest(data);
+          if (review && (merged.state !== "MERGED" || !matchesReview(merged)))
+            throw new Error("GitLab did not confirm the reviewed merge.");
+          return merged;
         } catch (error) {
+          if (error instanceof MergeSyncNotSubmittedError) throw error;
           const status =
             error instanceof GitLabRequestError ? error.statusCode : null;
-          if (status !== null && status < 500 && status !== 408) throw error;
+          const rejected =
+            status !== null &&
+            status < 500 &&
+            status !== 408 &&
+            (!review || (status >= 400 && status !== 429));
+          if (rejected && !review) throw error;
+          let staleReview = false;
           try {
             const observed = await this.mergeRequestState(
               input.projectId,
               input.iid,
             );
-            if (observed.state === "MERGED") return observed;
+            if (observed.state === "MERGED" && matchesReview(observed))
+              return observed;
+            staleReview = Boolean(
+              review && status === 409 && !matchesReview(observed),
+            );
           } catch {
             /* Keep the reservation until provider state can be verified. */
           }
+          if (staleReview)
+            throw new MergeSyncNotSubmittedError(
+              "The reviewed GitLab source or target changed.",
+            );
+          if (rejected) throw error;
           const uncertain =
             error instanceof Error ? error : new Error(String(error));
           Object.assign(uncertain, {

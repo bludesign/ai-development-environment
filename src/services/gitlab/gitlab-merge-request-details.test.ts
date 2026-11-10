@@ -134,13 +134,20 @@ describe("GitLab merge request metadata", () => {
       expected: "NOT_REQUIRED",
       left: 0,
     },
+    {
+      approval: { approved_by: [] },
+      expected: "NOT_REQUIRED",
+      left: null,
+    },
   ])(
     "reports $expected without treating a partial approval as completion",
     async ({ approval, expected, left }) => {
       const { service } = setup({ approval });
       const { items } = await service.mergeRequests({ scope: "MINE" });
       expect(items[0].approvalState).toBe(expected);
-      expect(items[0].approvalsRequired).toBe(approval.approvals_required);
+      expect(items[0].approvalsRequired).toBe(
+        approval.approvals_required ?? null,
+      );
       expect(items[0].approvalsLeft).toBe(left);
     },
   );

@@ -39,6 +39,8 @@ import type {
   WorktreesService,
 } from "@/services/worktrees";
 import { createWorktreeResolvers } from "./resolvers/worktrees";
+import { createWorktreeMergeResolvers } from "./resolvers/worktree-merge";
+import type { WorktreeMergeService } from "@/services/worktrees/worktree-merge.service";
 import { createSkillResolvers } from "./resolvers/skills";
 import type { SkillsService } from "@/services/skills";
 import type { BuildsService } from "@/services/builds";
@@ -106,6 +108,7 @@ export const createSchema = (
   toolsService: ToolsService,
   worktreesService: WorktreesService,
   worktreeAutomationService: WorktreeAutomationService,
+  worktreeMergeService: WorktreeMergeService,
   buildDataService: BuildDataService,
   simulatorsService: SimulatorsService,
   skillsService: SkillsService,
@@ -150,6 +153,7 @@ export const createSchema = (
     createCodebaseResolvers(codebasesService),
     createToolsResolvers(toolsService),
     createWorktreeResolvers(worktreesService, worktreeAutomationService),
+    createWorktreeMergeResolvers(worktreeMergeService),
     createSkillResolvers(skillsService),
     createBuildResolvers(buildsService),
     createIosDeviceResolvers(iosDevicesService),

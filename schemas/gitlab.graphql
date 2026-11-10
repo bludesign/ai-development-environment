@@ -1307,6 +1307,16 @@ type GitLabMergeOptions {
   autoSyncBlockedReason: String
   "Previously selected branch syncing setting."
   defaultAutoSync: Boolean!
+  "Enabled merge conflict workflows available to the linked worktree."
+  mergeConflictWorkflows: [Workflow!]!
+  "Previously selected merge conflict workflow."
+  defaultConflictWorkflowId: ID
+  "Previously selected merge conflict workflow trigger choice."
+  defaultConflictWorkflowChoice: String
+  "Reason a conflict workflow cannot be selected."
+  conflictWorkflowBlockedReason: String
+  "Whether the branch already has conflicts and needs a workflow to start Auto Merge."
+  autoSyncRequiresConflictWorkflow: Boolean!
   "Targeting worktrees and the reviewed destination for post-merge base updates."
   baseBranchUpdateOptions: MergeBaseBranchUpdateOptions
   "Numeric GitLab target project identifier."
@@ -1385,6 +1395,10 @@ input SubmitGitLabMergeRequestMergeInput {
   switchToDefaultBranch: Boolean = false
   "Rebase and push the linked branch before waiting for passing CI and merging."
   autoSync: Boolean = false
+  "Run this merge conflict workflow if Auto Merge branch syncing stops at a conflict."
+  conflictWorkflowId: ID
+  "Optional resource trigger choice for the selected merge conflict workflow."
+  conflictWorkflowChoice: String
   "Selected targeting worktrees to update only after the merge is confirmed."
   baseBranchUpdate: MergeBaseBranchUpdateInput
   "Numeric GitLab target project identifier."

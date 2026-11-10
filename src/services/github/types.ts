@@ -616,49 +616,50 @@ export type GitHubPullRequestDetail = GitHubPullRequestView & {
   worktreeHighlightColor: string | null;
 };
 
-export type GitHubPullRequestMergeOptions = {
-  state?: "OPEN" | "CLOSED" | "MERGED";
-  canSwitchToDefaultBranch?: boolean;
-  defaultSwitchToDefaultBranch?: boolean;
-  switchToDefaultBranchName?: string | null;
-  switchToDefaultBranchUnavailableReason?: string | null;
-  baseRefName?: string;
-  canAutoMergeWithSync?: boolean;
-  autoSyncBlockedReason?: string | null;
-  defaultAutoSync?: boolean;
-  autoMergeOperation?: {
-    worktreeId?: string;
-    postMergeSwitch?:
-      | import("@/services/worktrees/post-merge-switch").PostMergeSwitchStatus
-      | null;
-    autoSync: boolean;
-    state: string;
-    lastError: string | null;
-  } | null;
-  baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
-  defaultMethod: GitHubMergeMethod | null;
-  defaultMoveTicketToDone: boolean;
-  defaultDeleteWorktree: boolean;
-  headRefName: string;
-  headRepositoryNameWithOwner: string | null;
-  worktreeId: string | null;
-  worktreeFolder: string | null;
-  canDeleteWorktree: boolean;
-  ticketKey: string | null;
-  ticketDoneStatusConfigured: boolean;
-  availableMethods: GitHubMergeMethod[];
-  commitEmails: string[];
-  defaultCommitEmail: string | null;
-  defaultCommitHeadline: string;
-  defaultCommitBody: string;
-  canMerge: boolean;
-  canEnableAutoMerge: boolean;
-  autoMergeEnabled: boolean;
-  viewerCanDisableAutoMerge: boolean;
-  mergeStateStatus: string;
-  headRefOid: string;
-  blockedReason: string | null;
-};
+export type GitHubPullRequestMergeOptions =
+  import("@/services/worktrees/merge-branch-sync").MergeConflictWorkflowFields & {
+    state?: "OPEN" | "CLOSED" | "MERGED";
+    canSwitchToDefaultBranch?: boolean;
+    defaultSwitchToDefaultBranch?: boolean;
+    switchToDefaultBranchName?: string | null;
+    switchToDefaultBranchUnavailableReason?: string | null;
+    baseRefName?: string;
+    canAutoMergeWithSync?: boolean;
+    autoSyncBlockedReason?: string | null;
+    defaultAutoSync?: boolean;
+    autoMergeOperation?: {
+      worktreeId?: string;
+      postMergeSwitch?:
+        | import("@/services/worktrees/post-merge-switch").PostMergeSwitchStatus
+        | null;
+      autoSync: boolean;
+      state: string;
+      lastError: string | null;
+    } | null;
+    baseBranchUpdateOptions?: MergeBaseBranchUpdateOptions | null;
+    defaultMethod: GitHubMergeMethod | null;
+    defaultMoveTicketToDone: boolean;
+    defaultDeleteWorktree: boolean;
+    headRefName: string;
+    headRepositoryNameWithOwner: string | null;
+    worktreeId: string | null;
+    worktreeFolder: string | null;
+    canDeleteWorktree: boolean;
+    ticketKey: string | null;
+    ticketDoneStatusConfigured: boolean;
+    availableMethods: GitHubMergeMethod[];
+    commitEmails: string[];
+    defaultCommitEmail: string | null;
+    defaultCommitHeadline: string;
+    defaultCommitBody: string;
+    canMerge: boolean;
+    canEnableAutoMerge: boolean;
+    autoMergeEnabled: boolean;
+    viewerCanDisableAutoMerge: boolean;
+    mergeStateStatus: string;
+    headRefOid: string;
+    blockedReason: string | null;
+  };
 
 export type GitHubPullRequestAutomationState = {
   baseRefName?: string;

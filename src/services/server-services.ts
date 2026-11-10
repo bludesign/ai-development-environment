@@ -28,6 +28,7 @@ import {
   WorktreeAutomationService,
   WorktreesService,
 } from "@/services/worktrees";
+import { WorktreeMergeService } from "@/services/worktrees/worktree-merge.service";
 import { SkillsService } from "@/services/skills";
 import { TelemetryService } from "@/services/telemetry";
 import { SigningAssetsService } from "@/services/signing-assets";
@@ -78,6 +79,7 @@ export type ServerServices = {
   toolsService: ToolsService;
   worktreesService: WorktreesService;
   worktreeAutomationService: WorktreeAutomationService;
+  worktreeMergeService: WorktreeMergeService;
   skillsService: SkillsService;
   telemetryService: TelemetryService;
   signingAssetsService: SigningAssetsService;
@@ -365,12 +367,22 @@ function createServerServices(): ServerServices {
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
   worktreesService.syncBatches.startRuntime(pollingService);
-  new GitLabMergeService(
+  const gitLabMergeService = new GitLabMergeService(
     gitLabService,
     worktreesService,
     jiraService,
     agentControlService,
-  ).startRuntime();
+    workflowsService,
+  );
+  gitLabMergeService.startRuntime();
+  const worktreeMergeService = new WorktreeMergeService(
+    gitHubService,
+    gitLabService,
+    worktreeAutomationService,
+    gitLabMergeService,
+    pollingService,
+  );
+  worktreeMergeService.startRuntime();
   systemStatusService.startRuntime();
   actionCenterRequests.start();
   return {
@@ -394,6 +406,7 @@ function createServerServices(): ServerServices {
     cacheServerService,
     worktreesService,
     worktreeAutomationService,
+    worktreeMergeService,
     skillsService,
     telemetryService,
     signingAssetsService,

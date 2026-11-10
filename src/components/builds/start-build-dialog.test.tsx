@@ -316,6 +316,7 @@ describe("StartBuildDialog", () => {
     urlSettings = {
       ...serverUrlFixture,
       simulatorDefaultServerUrlKind: "REMOTE",
+      physicalDefaultServerUrlKind: "PROXY",
     };
     render(
       <StartBuildButton codebaseId="codebase-1" worktreeId="worktree-1" />,
@@ -325,21 +326,21 @@ describe("StartBuildDialog", () => {
     const selector = screen.getByRole("combobox", { name: "Server URL" });
     await waitFor(() => expect(selector.textContent).toContain("Remote"));
     fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
-    expect(selector.textContent).toContain("Local");
+    expect(selector.textContent).toContain("Proxy");
     fireEvent.click(screen.getByRole("tab", { name: "Simulator" }));
     expect(selector.textContent).toContain("Remote");
     selector.focus();
     fireEvent.keyDown(selector, { key: "ArrowDown" });
-    fireEvent.click(await screen.findByRole("option", { name: /Proxy/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Local/ }));
     fireEvent.click(screen.getByRole("tab", { name: "Physical Device" }));
-    expect(selector.textContent).toContain("Proxy");
+    expect(selector.textContent).toContain("Local");
     const start = screen.getByRole("button", { name: "Start Build" });
     await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
     fireEvent.click(start);
     await waitFor(() =>
       expect(request).toHaveBeenCalledWith(
         expect.stringContaining("mutation StartIosBuild"),
-        { input: expect.objectContaining({ serverUrlKind: "PROXY" }) },
+        { input: expect.objectContaining({ serverUrlKind: "LOCAL" }) },
       ),
     );
   });

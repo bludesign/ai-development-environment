@@ -392,6 +392,28 @@ test.describe("app screenshots", () => {
         await expect(
           page.getByRole("button", { name: "Run on QA Phone", exact: true }),
         ).toBeVisible();
+        const unavailable = page.getByRole("menuitemcheckbox", {
+          name: /Older QA iPhone/,
+        });
+        await expect(unavailable).toBeDisabled();
+        const reason = unavailable.getByText(
+          "This device does not currently support app installation and launch",
+        );
+        await expect(reason).toBeVisible();
+        expect(
+          await reason.evaluate((element) => {
+            const range = document.createRange();
+            range.selectNodeContents(element);
+            const box = element.getBoundingClientRect();
+            const lines = Array.from(range.getClientRects());
+            return (
+              lines.length > 1 &&
+              lines.every(
+                (line) => line.right <= box.right && line.bottom <= box.bottom,
+              )
+            );
+          }),
+        ).toBe(true);
       }
       if (route.destinationPicker === "start-platforms") {
         const dialog = page.getByRole("dialog");

@@ -9,5 +9,6 @@ export const serverUrlFixture: ServerUrlSettings = {
   proxyBaseUrl: "https://aide.example.ts.net",
   defaultServerUrlKind: "LOCAL",
   simulatorDefaultServerUrlKind: null,
+  physicalDefaultServerUrlKind: null,
   updatedAt: "2026-09-29T12:00:00.000Z",
 };

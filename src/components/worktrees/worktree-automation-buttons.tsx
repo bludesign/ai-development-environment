@@ -22,8 +22,10 @@ import {
 } from "@/components/github/merge-operation-state";
 import { MergePullRequestButton } from "@/components/github/merge-pull-request-button";
 import {
+  MERGE_CONFLICT_WORKFLOW_FIELDS,
   MergeSyncFields,
   MergeSyncStatus,
+  useMergeConflictWorkflow,
 } from "@/components/github/merge-sync-fields";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { isActiveGitLabPipeline } from "@/components/gitlab/pipeline-format";
@@ -525,6 +527,8 @@ function GitHubAutoMergeButton({
   const [method, setMethod] = useState<GitHubMergeMethod | "">("");
   const [headline, setHeadline] = useState("");
   const [autoSync, setAutoSync] = useState(false);
+  const { load: loadConflictWorkflow, ...conflictWorkflow } =
+    useMergeConflictWorkflow(autoSync, options);
   const [body, setBody] = useState("");
   const [authorEmail, setAuthorEmail] = useState(DEFAULT_EMAIL);
   const [selectedWorktreeIds, setSelectedWorktreeIds] = useState<string[]>([]);
@@ -560,6 +564,7 @@ function GitHubAutoMergeButton({
           availableMethods commitEmails defaultCommitEmail
           defaultCommitHeadline defaultCommitBody canMerge
           canEnableAutoMerge autoMergeEnabled viewerCanDisableAutoMerge canAutoMergeWithSync autoSyncBlockedReason defaultAutoSync
+          ${MERGE_CONFLICT_WORKFLOW_FIELDS}
           mergeStateStatus headRefOid blockedReason
         }
       }`,
@@ -570,6 +575,7 @@ function GitHubAutoMergeButton({
           const next = data.githubPullRequestMergeOptions;
           setOptions(next);
           setAutoSync(next.defaultAutoSync ?? false);
+          loadConflictWorkflow(next);
           setSwitchToDefaultBranch(
             Boolean(
               next.canSwitchToDefaultBranch &&
@@ -597,7 +603,13 @@ function GitHubAutoMergeButton({
       active = false;
       window.clearTimeout(timer);
     };
-  }, [open, repositoryName, pullRequestNumber, worktree.id]);
+  }, [
+    loadConflictWorkflow,
+    open,
+    repositoryName,
+    pullRequestNumber,
+    worktree.id,
+  ]);
 
   if (
     pullRequest &&
@@ -623,12 +635,16 @@ function GitHubAutoMergeButton({
   }
 
   const postMerge = pullRequest?.state === "MERGED" && Boolean(currentRule);
+  const conflictWorkflowValid =
+    conflictWorkflow.valid &&
+    (autoSync || !options?.autoSyncRequiresConflictWorkflow);
 
   const save = async () => {
     if (
       !pullRequest ||
       !method ||
       !headline.trim() ||
+      (!postMerge && !conflictWorkflowValid) ||
       (!postMerge && moveTicketToDone && !options?.ticketDoneStatusConfigured)
     )
       return;
@@ -677,7 +693,11 @@ function GitHubAutoMergeButton({
           input: {
             worktreeId: worktree.id,
             ...(autoSync
-              ? { autoSync: true, expectedHeadSha: options?.headRefOid }
+              ? {
+                  autoSync: true,
+                  expectedHeadSha: options?.headRefOid,
+                  ...conflictWorkflow.input,
+                }
               : {}),
             repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
             pullRequestNumber: pullRequest.number,
@@ -812,6 +832,7 @@ function GitHubAutoMergeButton({
                     onChange={setAutoSync}
                     disabled={busy || postMerge}
                     unavailableReason={options.autoSyncBlockedReason}
+                    conflictWorkflow={conflictWorkflow.fields}
                   />
                   <div>
                     <Label className="mb-1.5 block">{tp("mergeType")}</Label>
@@ -922,6 +943,7 @@ function GitHubAutoMergeButton({
                   currentRule?.autoSync &&
                   [
                     "SYNCING",
+                    "RESOLVING",
                     "WAITING_CI",
                     "WAITING_REQUIREMENTS",
                     "MERGING",
@@ -929,6 +951,7 @@ function GitHubAutoMergeButton({
                 ) ||
                 !method ||
                 !headline.trim() ||
+                (!postMerge && !conflictWorkflowValid) ||
                 (!postMerge &&
                   moveTicketToDone &&
                   !options?.ticketDoneStatusConfigured) ||

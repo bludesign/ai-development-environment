@@ -5,6 +5,7 @@ export type WorktreeAutoMergeStatus =
 
 const ACTIVE_MANAGED_STATES = new Set([
   "SYNCING",
+  "RESOLVING",
   "WAITING_CI",
   "WAITING_REQUIREMENTS",
   "MERGING",
