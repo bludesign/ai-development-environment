@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -19,6 +20,7 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { buildDestinationState } from "./build-format";
 import { destinationPlatform, type BuildDestination } from "./types";
 
@@ -69,9 +71,15 @@ function DestinationLabel({ destination }: { destination: BuildDestination }) {
         <span className="block truncate text-xs text-muted-foreground">
           {detail ? `${detail} · ` : ""}
           {buildDestinationState(destination, t)}
-          {destination.unavailableReason &&
-            ` · ${destination.unavailableReason}`}
         </span>
+      )}
+      {destination.unavailableReason && (
+        <Badge
+          variant="destructive"
+          className="mt-1 block h-auto max-w-full rounded-md text-left leading-snug wrap-anywhere whitespace-normal text-foreground"
+        >
+          {destination.unavailableReason}
+        </Badge>
       )}
     </span>
   );
@@ -102,7 +110,10 @@ export function DestinationRow({
       role={multiple ? "menuitemcheckbox" : "option"}
       aria-selected={multiple ? undefined : selected}
       aria-disabled={disabled}
-      className="flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+      className={cn(
+        "flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left outline-hidden hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed",
+        !destination.unavailableReason && "disabled:opacity-50",
+      )}
       disabled={disabled}
       onClick={onSelect}
       type="button"
@@ -204,7 +215,10 @@ export function BuildDestinationPicker({
                 key={destination.id}
                 value={destination.id}
                 disabled={destination.available === false}
-                className="py-1.5"
+                className={cn(
+                  "py-1.5",
+                  destination.unavailableReason && "data-disabled:opacity-100",
+                )}
               >
                 <DestinationLabel destination={destination} />
               </DropdownMenuRadioItem>
