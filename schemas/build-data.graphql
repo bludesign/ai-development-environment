@@ -62,6 +62,8 @@ enum BuildDataEntryKind {
   SHARED_CACHE
   "Represents the device support option."
   DEVICE_SUPPORT
+  "Agent-managed Gradle project cache for an Android build."
+  GRADLE_PROJECT
 }
 
 "Values supported for derived data delete source."

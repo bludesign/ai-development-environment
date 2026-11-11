@@ -62,8 +62,10 @@ test.describe("app screenshots", () => {
   for (const route of routes) {
     test(route.name, async ({ page }, testInfo) => {
       test.skip(
-        route.desktopOnly === true &&
-          !testInfo.project.name.startsWith("desktop"),
+        (route.desktopOnly === true &&
+          !testInfo.project.name.startsWith("desktop")) ||
+          (route.mobileOnly === true &&
+            !testInfo.project.name.startsWith("mobile")),
       );
       if (!route.anonymous) {
         await page.setExtraHTTPHeaders({
@@ -485,6 +487,57 @@ test.describe("app screenshots", () => {
         await expect(
           page.getByRole("combobox", { name: "Default destination type" }),
         ).toContainText("Simulator");
+      }
+      if (route.buildWorkflow === "android-configuration") {
+        await page
+          .getByRole("tab", { name: "Android App", exact: true })
+          .click();
+        await page
+          .getByRole("button", {
+            name: "Edit Android configuration",
+            exact: true,
+          })
+          .click();
+        await expect(page.getByLabel("Gradle project path")).toHaveValue(
+          "android",
+        );
+        await expect(page.getByLabel("Application module")).toHaveValue(":app");
+        await expect(page.getByLabel("Build variant")).toHaveValue("qaDebug");
+        await expect(
+          page
+            .getByRole("dialog")
+            .getByRole("button", { name: "Save", exact: true }),
+        ).toBeEnabled();
+      }
+      if (route.buildWorkflow === "android-start") {
+        await page.getByRole("button", { name: "Build", exact: true }).click();
+        const dialog = page.getByRole("dialog");
+        await expect(
+          dialog.getByText("Android QA Debug", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          dialog.getByRole("button", {
+            name: "Start Android build",
+            exact: true,
+          }),
+        ).toBeEnabled();
+      }
+      if (route.buildWorkflow === "android-run") {
+        await page.getByRole("button", { name: "Run", exact: true }).click();
+        await expect(
+          page.getByRole("menuitemcheckbox", { name: /Pixel_9_QA/ }),
+        ).toBeVisible();
+        await expect(
+          page.getByRole("menuitemcheckbox", { name: /Connected Pixel/ }),
+        ).toBeVisible();
+      }
+      if (route.buildWorkflow === "android-install") {
+        await page
+          .getByRole("button", { name: "Install on Android", exact: true })
+          .click();
+        await expect(
+          page.getByText(/open it from your downloads/),
+        ).toBeVisible();
       }
       if (route.transferWorkflow) {
         await openRepositoryTransfer(page, route.transferWorkflow);

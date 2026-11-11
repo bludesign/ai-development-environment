@@ -2484,7 +2484,12 @@ describe("build workflow persistence", () => {
     });
     expect(result).toEqual({ items: [rows[0]], nextCursor: "latest-failed" });
     expect(findMany.mock.calls[0][0]).toMatchObject({
-      where: { configurationId: "configuration-1" },
+      where: {
+        OR: [
+          { configurationId: "configuration-1" },
+          { androidConfigurationId: "configuration-1" },
+        ],
+      },
       cursor: { id: "cursor" },
       skip: 1,
       take: 2,
@@ -2566,6 +2571,7 @@ describe("build workflow persistence", () => {
     expect(active).toHaveBeenCalledWith({
       where: {
         repositoryId: "repo-1",
+        androidConfigurationId: null,
         status: { in: ["QUEUED", "PREPARING", "RUNNING"] },
       },
     });

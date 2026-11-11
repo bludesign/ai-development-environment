@@ -39,12 +39,18 @@ type Worktree = {
   agentId: string;
   agentName: string;
   enabled: boolean;
+  appleEnabled: boolean;
+  androidEnabled: boolean;
   repositoryId: string;
 };
 type Repository = {
   id: string;
   name: string;
   iosAppProject: { id: string } | null;
+  androidAppProject?: {
+    id: string;
+    androidConfigurations: Array<{ id: string }>;
+  } | null;
   latestBuild: BuildRecord | null;
 };
 type Data = {
@@ -80,33 +86,47 @@ export function AppBuildLauncher({ appId }: { appId: string }) {
       try {
         const data = await controlPlaneRequest<Data>(
           `query AppBuildWorktrees($appId: ID!) {
-        app(id: $appId) { repositories { id name iosAppProject { id } latestBuild { ${BUILD_LIST_FIELDS} } } }
+        app(id: $appId) { repositories { id name iosAppProject { id } androidAppProject { id androidConfigurations { id } } latestBuild { ${BUILD_LIST_FIELDS} } } }
         worktreeOverview(appId: $appId) { agents { agent { id name connectionStatus capabilities } codebases { repository { id } codebase { id } worktrees { id folder branch availability } } } }
       }`,
           { appId },
           { signal },
         );
         if (signal?.aborted) return;
-        setRepositories(
-          (data.app?.repositories ?? []).filter(
-            (repository) => repository.iosAppProject,
-          ),
+        const buildRepositories = (data.app?.repositories ?? []).filter(
+          (repository) =>
+            repository.iosAppProject || repository.androidAppProject,
         );
+        const byId = new Map(
+          buildRepositories.map((repository) => [repository.id, repository]),
+        );
+        setRepositories(buildRepositories);
         setWorktrees(
           data.worktreeOverview.agents.flatMap(({ agent, codebases }) =>
-            codebases.flatMap((group) =>
-              group.worktrees.map((tree) => ({
+            codebases.flatMap((group) => {
+              const repository = byId.get(group.repository.id);
+              const appleEnabled = Boolean(
+                repository?.iosAppProject &&
+                agent.capabilities.includes("ios.build.run"),
+              );
+              const androidEnabled = Boolean(
+                repository?.androidAppProject?.androidConfigurations.length &&
+                agent.capabilities.includes("android.build.run"),
+              );
+              return group.worktrees.map((tree) => ({
                 ...tree,
                 codebaseId: group.codebase.id,
                 repositoryId: group.repository.id,
                 agentId: agent.id,
                 agentName: agent.name,
+                appleEnabled,
+                androidEnabled,
                 enabled:
                   agent.connectionStatus === "ONLINE" &&
-                  agent.capabilities.includes("ios.build.run") &&
+                  (appleEnabled || androidEnabled) &&
                   tree.availability === "AVAILABLE",
-              })),
-            ),
+              }));
+            }),
           ),
         );
         setError(null);
@@ -217,6 +237,8 @@ function RepositoryBuildCard({
             </SelectContent>
           </Select>
           <StartBuildButton
+            androidEnabled={selected?.androidEnabled}
+            appleEnabled={selected?.appleEnabled}
             codebaseId={selected?.codebaseId ?? ""}
             worktreeId={selected?.id ?? ""}
             disabled={!selected}

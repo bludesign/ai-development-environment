@@ -3307,6 +3307,11 @@ export class WorkflowsService {
       payload,
     ) as Record<string, unknown>;
     if (trigger.kind === "SIMULATOR_OPERATION_RESULT") {
+      if (
+        (config.platform ?? "APPLE") !==
+        (getSessionValue(payload, "simulatorOperation.platform") ?? "APPLE")
+      )
+        return false;
       const matchingPaths = {
         agentId: "agent.id",
         operation: "simulatorOperation.operation",

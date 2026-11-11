@@ -15,6 +15,9 @@ function disposition(filename: string): string {
 
 function failure(error: unknown): Response {
   const message = error instanceof Error ? error.message : String(error);
+  if (message === "A signed download link is required for this APK") {
+    return new Response(message, { status: 403 });
+  }
   if (/not found/i.test(message)) {
     return new Response("Artifact not found", { status: 404 });
   }
@@ -42,7 +45,9 @@ async function respond(
     ) {
       return new Response("This download link has expired", { status: 403 });
     }
-    const artifact = await materializeArtifact(buildId, artifactId);
+    const artifact = await materializeArtifact(buildId, artifactId, {
+      authorized: Boolean(token),
+    });
     const headers: Record<string, string> = {
       "accept-ranges": "bytes",
       "cache-control": "private, no-store",

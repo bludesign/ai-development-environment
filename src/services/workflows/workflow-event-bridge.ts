@@ -247,7 +247,8 @@ export class WorkflowEventBridge {
       simulatorCompletionStatuses.has(job.status) &&
       !isWorkflowSimulatorJob(job)
     ) {
-      const { simulatorId, operation, error } = summarizeSimulatorJob(job);
+      const { simulatorId, operation, error, platform } =
+        summarizeSimulatorJob(job);
       await this.record(
         "SIMULATOR_OPERATION_RESULT",
         job.agentId,
@@ -258,6 +259,7 @@ export class WorkflowEventBridge {
           simulatorOperation: {
             jobId: job.id,
             operation,
+            ...(platform ? { platform } : {}),
             status: job.status,
             error,
           },

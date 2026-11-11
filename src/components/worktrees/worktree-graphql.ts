@@ -33,7 +33,7 @@ const worktreeFields = (pipelineFields: string) => `
   gitLabPipelines { ${pipelineFields} }
   latestBuild {
     id status action destinationType destination outOfDate createdAt
-    artifacts { id kind }
+    artifacts { id kind checksum metadata }
   }
 `;
 

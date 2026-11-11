@@ -66,6 +66,8 @@ import {
   inspectSimulator,
   performSimulatorAction,
   simulatorAgentSupports,
+  simulatorHref,
+  simulatorPlatform,
   type SimulatorAction,
   type SimulatorActionInput,
   type SimulatorDetails,
@@ -88,6 +90,11 @@ export function SimulatorDetailPage({
   const { agents } = useActiveAgent();
   const agent = agents.find(({ id }) => id === agentId);
   const agentName = agent?.name ?? t("owningAgent");
+  const platform = simulatorPlatform(simulatorId);
+  const android = platform === "ANDROID";
+  const fleetHref = android
+    ? "/system/simulators?platform=ANDROID"
+    : "/system/simulators";
   const [details, setDetails] = useState<SimulatorDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -103,7 +110,7 @@ export function SimulatorDetailPage({
   const simulator = details?.simulator;
   const canAct = Boolean(
     agent &&
-    simulatorAgentSupports(agent, "action") &&
+    simulatorAgentSupports(agent, "action", platform) &&
     !loading &&
     !loadError &&
     !busy,
@@ -171,9 +178,16 @@ export function SimulatorDetailPage({
         controller.signal,
       );
       if (controller.signal.aborted) return false;
-      if (action === "DELETE") router.push("/system/simulators");
-      else if (inspectAfter) await load();
-      else setNotice(t("finderOpened", { agent: agentName }));
+      if (action === "DELETE") router.push(fleetHref);
+      else if (android && action === "RENAME" && input?.name) {
+        router.replace(simulatorHref(agentId, `android:${input.name}`));
+      } else if (inspectAfter) await load();
+      else
+        setNotice(
+          t(android ? "emulatorFolderOpened" : "finderOpened", {
+            agent: agentName,
+          }),
+        );
       return true;
     } catch (value) {
       if (!controller.signal.aborted) {
@@ -205,7 +219,7 @@ export function SimulatorDetailPage({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <Button asChild className="-ml-2 mb-2" size="sm" variant="ghost">
-            <Link href="/system/simulators">
+            <Link href={fleetHref}>
               <ArrowLeft /> {t("title")}
             </Link>
           </Button>
@@ -283,7 +297,10 @@ export function SimulatorDetailPage({
                     "",
                   ) ?? "—"}
                 </DetailItem>
-                <DetailItem label={t("identifier")} mono>
+                <DetailItem
+                  label={t(android ? "emulatorIdentifier" : "identifier")}
+                  mono
+                >
                   {simulator.id}
                 </DetailItem>
                 {simulator.dataPath && (
@@ -309,7 +326,10 @@ export function SimulatorDetailPage({
                     size="sm"
                     variant="outline"
                   >
-                    <FolderOpen /> {t("openInFinder", { agent: agentName })}
+                    <FolderOpen />{" "}
+                    {t(android ? "openEmulatorFolder" : "openInFinder", {
+                      agent: agentName,
+                    })}
                   </Button>
                   <Button
                     onClick={() => void copyPath(simulator.dataPath!)}
@@ -390,7 +410,9 @@ export function SimulatorDetailPage({
           <Card className="gap-0 pb-0">
             <CardHeader>
               <CardTitle>{t("installedApps")}</CardTitle>
-              <CardDescription>{t("appsDescription")}</CardDescription>
+              <CardDescription>
+                {t(android ? "androidAppsDescription" : "appsDescription")}
+              </CardDescription>
             </CardHeader>
             {!booted || details.apps.length === 0 ? (
               <CardContent className="py-(--card-spacing) text-muted-foreground">
@@ -470,10 +492,10 @@ export function SimulatorDetailPage({
                               >
                                 {t("terminateApp")}
                               </DropdownMenuItem>
-                              {(app.bundlePath || app.dataPath) && (
+                              {!android && (app.bundlePath || app.dataPath) && (
                                 <DropdownMenuSeparator />
                               )}
-                              {app.bundlePath && (
+                              {!android && app.bundlePath && (
                                 <>
                                   <DropdownMenuItem
                                     disabled={!canAct}
@@ -494,7 +516,7 @@ export function SimulatorDetailPage({
                                   </DropdownMenuItem>
                                 </>
                               )}
-                              {app.dataPath && (
+                              {!android && app.dataPath && (
                                 <>
                                   <DropdownMenuItem
                                     disabled={!canAct}
@@ -548,6 +570,7 @@ export function SimulatorDetailPage({
           {named && (
             <SimulatorNameDialog
               action={named}
+              android={android}
               currentName={simulator.name}
               onClose={() => setNamed(null)}
               onSubmit={(name) => run(named, { name })}
@@ -561,11 +584,13 @@ export function SimulatorDetailPage({
 
 function SimulatorNameDialog({
   action,
+  android,
   currentName,
   onClose,
   onSubmit,
 }: {
   action: NamedAction;
+  android: boolean;
   currentName: string;
   onClose: () => void;
   onSubmit: (name: string) => Promise<boolean>;
@@ -609,9 +634,12 @@ function SimulatorNameDialog({
           <div className="space-y-1.5">
             <Label htmlFor="simulator-name">{t("name")}</Label>
             <Input
+              maxLength={android ? 80 : 120}
+              pattern={
+                android ? "[A-Za-z0-9][A-Za-z0-9._\\-]{0,79}" : undefined
+              }
               disabled={busy}
               id="simulator-name"
-              maxLength={120}
               onChange={(event) => setName(event.target.value)}
               value={name}
             />

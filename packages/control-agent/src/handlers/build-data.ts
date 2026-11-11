@@ -9,6 +9,7 @@ import {
   statfs,
 } from "node:fs/promises";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import {
   basename,
   dirname,
@@ -250,6 +251,165 @@ async function scanDeviceSupport(
   return { entries, warnings };
 }
 
+async function scanGradleProjects(
+  managedRoot: string | null | undefined,
+  signal: AbortSignal,
+): Promise<{ entries: BuildDataScanEntry[]; warnings: string[] }> {
+  const entries: BuildDataScanEntry[] = [];
+  const warnings: string[] = [];
+  if (
+    !managedRoot ||
+    !isAbsolute(managedRoot) ||
+    basename(managedRoot) !== ".worktree-derived-data"
+  )
+    return { entries, warnings };
+
+  const root = join(dirname(managedRoot), ".android-gradle");
+  try {
+    const canonicalRoot = await realpath(root);
+    if (canonicalRoot !== join(await realpath(dirname(root)), basename(root)))
+      throw new Error("Gradle project cache root must not be a symbolic link");
+    for (const worktree of await readdir(canonicalRoot, {
+      withFileTypes: true,
+    })) {
+      signal.throwIfAborted();
+      if (!worktree.isDirectory()) continue;
+      const rootPath = join(canonicalRoot, worktree.name);
+      try {
+        for (const project of await readdir(rootPath, {
+          withFileTypes: true,
+        })) {
+          signal.throwIfAborted();
+          if (!project.isDirectory() || !/^[a-f0-9]{16}$/.test(project.name))
+            continue;
+          const path = join(rootPath, project.name);
+          const marker = join(path, ".aide-android-gradle.json");
+          try {
+            const record = await gradleProjectRecord(path);
+            const information = await lstat(path);
+            entries.push({
+              path,
+              rootPath,
+              name:
+                record.projectPath === "."
+                  ? basename(record.worktreePath)
+                  : record.projectPath,
+              kind: "GRADLE_PROJECT",
+              workspacePath: record.worktreePath,
+              modifiedAt: information.mtime.toISOString(),
+              volumeId: String(information.dev),
+            });
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+              warnings.push(`${marker}: ${errorMessage(error)}`);
+          }
+        }
+      } catch (error) {
+        signal.throwIfAborted();
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+          warnings.push(`${rootPath}: ${errorMessage(error)}`);
+      }
+    }
+  } catch (error) {
+    signal.throwIfAborted();
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      warnings.push(`${root}: ${errorMessage(error)}`);
+  }
+  return { entries, warnings };
+}
+
+async function gradleProjectRecord(cache: string) {
+  const marker = join(cache, ".aide-android-gradle.json");
+  const metadata = await lstat(marker);
+  if (!metadata.isFile() || metadata.size > 16_384)
+    throw new Error("Gradle project cache ownership marker is invalid");
+  const { worktreeId, worktreePath, projectPath, module, modules } = JSON.parse(
+    await readFile(marker, "utf8"),
+  );
+  if (
+    worktreeId !== basename(dirname(cache)) ||
+    typeof worktreePath !== "string" ||
+    !isAbsolute(worktreePath) ||
+    typeof projectPath !== "string" ||
+    (projectPath !== "." && !safeRelativePath(projectPath)) ||
+    createHash("sha256").update(projectPath).digest("hex").slice(0, 16) !==
+      basename(cache)
+  )
+    throw new Error(
+      "Gradle project cache ownership marker does not match its path",
+    );
+  const modulePaths = new Set<string>();
+  for (const name of [
+    module,
+    ...(Array.isArray(modules) ? modules.slice(0, 100) : []),
+  ]) {
+    if (
+      typeof name === "string" &&
+      (name === ":" ||
+        /^:[A-Za-z0-9_][A-Za-z0-9_.-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)*$/.test(
+          name,
+        ))
+    )
+      modulePaths.add(name.slice(1).replaceAll(":", "/"));
+  }
+  return { worktreePath, projectPath, modulePaths };
+}
+
+async function generatedGradleDirectories(
+  cache: string,
+  signal: AbortSignal,
+): Promise<string[]> {
+  if (basename(dirname(dirname(cache))) !== ".android-gradle") return [];
+  const { worktreePath, projectPath, modulePaths } =
+    await gradleProjectRecord(cache);
+  const workspace = await realpath(worktreePath).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
+  );
+  if (workspace !== worktreePath) return [];
+
+  const directories: string[] = [];
+  for (const modulePath of modulePaths) {
+    signal.throwIfAborted();
+    const output = join(workspace, projectPath, modulePath, "build");
+    const info = await lstat(output).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!info?.isDirectory() || (await realpath(output)) !== output) continue;
+    const apkOutputs = join(output, "outputs", "apk");
+    if ((await realpath(apkOutputs).catch(() => null)) !== apkOutputs) continue;
+    const relativeOutput = relative(workspace, output);
+    const [ignored, tracked] = await Promise.all([
+      captureCommand({
+        command: "git",
+        args: ["check-ignore", "-q", "--", relativeOutput + "/"],
+        cwd: workspace,
+        timeoutMs: 5_000,
+        signal,
+      }),
+      captureCommand({
+        command: "git",
+        args: ["ls-files", "-z", "--", relativeOutput + "/"],
+        cwd: workspace,
+        timeoutMs: 5_000,
+        signal,
+      }),
+    ]);
+    signal.throwIfAborted();
+    if (
+      ignored.exitCode === 0 &&
+      tracked.exitCode === 0 &&
+      !tracked.outputTruncated &&
+      !tracked.stdout
+    )
+      directories.push(output);
+  }
+  return directories;
+}
+
 export const scanBuildData: AgentJobHandler = async (
   rawPayload,
   timeoutMs,
@@ -277,6 +437,9 @@ export const scanBuildData: AgentJobHandler = async (
   const deviceSupport = await scanDeviceSupport(signal);
   entries.push(...deviceSupport.entries);
   warnings.push(...deviceSupport.warnings);
+  const gradle = await scanGradleProjects(payload.managedRoot, signal);
+  entries.push(...gradle.entries);
+  warnings.push(...gradle.warnings);
   return { ...successfulProcess, entries, warnings };
 };
 
@@ -349,6 +512,15 @@ export async function ownedWorktreeBuildData(
       targets.push({ path: entry.path, rootPath: entry.rootPath });
     }
   }
+  const gradle = await scanGradleProjects(configuration.managedRoot, signal);
+  warnings.push(...gradle.warnings);
+  targets.push(
+    ...gradle.entries.flatMap(({ workspacePath, path, rootPath }) =>
+      workspacePath && resolve(workspacePath) === resolve(folder)
+        ? [{ path, rootPath }]
+        : [],
+    ),
+  );
   return { targets, warnings };
 }
 
@@ -410,9 +582,13 @@ export const sizeBuildData: AgentJobHandler = async (
       if (!stats.isDirectory() || stats.isSymbolicLink()) {
         throw new Error("Build Data target is not a directory");
       }
+      const generated = await generatedGradleDirectories(target.path, signal);
+      let sizeBytes = await allocatedBytes(target.path, signal);
+      for (const directory of generated)
+        sizeBytes += await allocatedBytes(directory, signal);
       sizes.push({
         path: target.path,
-        sizeBytes: await allocatedBytes(target.path, signal),
+        sizeBytes,
         error: null,
       });
     } catch (error) {
@@ -451,6 +627,12 @@ export const deleteBuildData: AgentJobHandler = async (
         const stats = await lstat(target.path);
         if (!stats.isDirectory() || stats.isSymbolicLink()) {
           throw new Error("Build Data target is not a directory");
+        }
+        for (const directory of await generatedGradleDirectories(
+          target.path,
+          signal,
+        )) {
+          await rm(directory, { recursive: true, force: false, maxRetries: 3 });
         }
         await rm(target.path, { recursive: true, force: false, maxRetries: 3 });
       };

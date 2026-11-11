@@ -297,6 +297,92 @@ const COMMAND_SUMMARIES: Record<"ARCHIVE" | "BUILD" | "TEST", string> = {
 export async function seedBuilds(prisma: PrismaClient): Promise<void> {
   await prisma.codebaseProject.create({
     data: {
+      id: ids.buildProjects.android,
+      repositoryId: ids.repositories.web,
+      type: "ANDROID_APP",
+      defaultDestinationType: "HOST",
+      androidConfigurations: {
+        create: {
+          id: ids.buildConfigurations.android,
+          name: "Android QA Debug",
+          projectPath: "android",
+          module: ":app",
+          variant: "qaDebug",
+        },
+      },
+    },
+  });
+  const androidDestination = {
+    type: "HOST",
+    platform: "Android",
+    platformId: "ANDROID",
+    id: "android",
+    name: "Android",
+    osVersion: null,
+    state: null,
+  };
+  await prisma.build.create({
+    data: {
+      id: ids.builds.android,
+      requestKey: "build-request-android-debug-1",
+      requestId: "req-android-debug-1",
+      agentId: ids.agents.studio,
+      codebaseId: ids.codebases.web,
+      worktreeId: ids.worktrees.webMain,
+      repositoryId: ids.repositories.web,
+      androidConfigurationId: ids.buildConfigurations.android,
+      status: "SUCCEEDED",
+      action: "BUILD",
+      destinationType: "HOST",
+      destinationJson: JSON.stringify(androidDestination),
+      snapshotJson: JSON.stringify({
+        platform: "ANDROID",
+        repository: {
+          id: ids.repositories.web,
+          name: "web-app",
+          canonicalOrigin: "github.com/acme/web-app",
+        },
+        worktree: {
+          id: ids.worktrees.webMain,
+          branch: "main",
+          folder: "/Users/acme/Repositories/web-app",
+          headSha: "9f3c1a2b4d5e6f7089a1b2c3d4e5f60718293a4b",
+        },
+        configuration: {
+          id: ids.buildConfigurations.android,
+          name: "Android QA Debug",
+          projectPath: "android",
+          module: ":app",
+          variant: "qaDebug",
+        },
+        destination: androidDestination,
+      }),
+      commandSummary: "./gradlew :app:assembleQaDebug",
+      artifactDirectory: `${BUILDS_DIR}/${ids.builds.android}`,
+      createdAt: hoursAgo(6),
+      startedAt: hoursAgo(6),
+      finishedAt: new Date(hoursAgo(6).getTime() + 97_000),
+      artifacts: {
+        create: {
+          id: "artifact-android-debug-apk",
+          kind: "APK",
+          relativePath: "app-qa-debug.apk",
+          checksum: "a".repeat(64),
+          sizeBytes: 22_478_101,
+          metadataJson: JSON.stringify({
+            applicationId: "com.acme.mobile.qa",
+            versionName: "1.8.2-qa",
+            versionCode: 87,
+            signed: true,
+            minSdk: 26,
+            abis: ["arm64-v8a", "x86_64"],
+          }),
+        },
+      },
+    },
+  });
+  await prisma.codebaseProject.create({
+    data: {
       id: ids.buildProjects.ios,
       repositoryId: ids.repositories.ios,
       type: "IOS_APP",

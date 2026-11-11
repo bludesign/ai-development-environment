@@ -10,6 +10,7 @@ import {
   parseBuildDataDeleteResult,
   parseBuildDataScanResult,
   parseBuildDataSizeResult,
+  type BuildDataScanEntry,
 } from "@ai-development-environment/agent-contract/build-data";
 
 import { getPrismaClient } from "@/data/prisma-client";
@@ -70,7 +71,7 @@ export type BuildDataAgentStatus =
 export type BuildDataEntryView = {
   id: string;
   name: string;
-  kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  kind: BuildDataScanEntry["kind"];
   deviceSupportPlatform: string | null;
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;

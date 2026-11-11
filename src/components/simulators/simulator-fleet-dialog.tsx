@@ -20,12 +20,14 @@ import { Spinner } from "@/components/ui/spinner";
 import type {
   CreateSimulatorInput,
   SimulatorInventory,
+  SimulatorPlatform,
 } from "./simulator-client";
 
 export function SimulatorFleetDialog({
   agents,
   inventories,
   mode,
+  platform = "APPLE",
   onClose,
   onCreate,
   onReset,
@@ -33,6 +35,7 @@ export function SimulatorFleetDialog({
   agents: ActiveAgentOption[];
   inventories: Record<string, SimulatorInventory>;
   mode: "create" | "reset";
+  platform?: SimulatorPlatform;
   onClose: () => void;
   onCreate: (input: CreateSimulatorInput) => Promise<void>;
   onReset: (agentId: string) => Promise<void>;
@@ -52,6 +55,10 @@ export function SimulatorFleetDialog({
   const runtime = runtimes.find(({ id }) => id === runtimeId);
   const deviceType = runtime?.deviceTypes.find(({ id }) => id === deviceTypeId);
   const creating = mode === "create";
+  const android = platform === "ANDROID";
+  const defaultName = android
+    ? deviceType?.name.replace(/[^a-zA-Z0-9_.-]+/g, "_")
+    : deviceType?.name;
   const canReset = !inventories[agentId]?.simulators.some(
     ({ state }) => state.toLowerCase() !== "shutdown",
   );
@@ -68,7 +75,8 @@ export function SimulatorFleetDialog({
           agentId,
           runtimeId,
           deviceTypeId,
-          name: name.trim() || deviceType.name,
+          name: name.trim() || defaultName || deviceType.id,
+          ...(android ? { platform } : {}),
         });
       } else {
         await onReset(agentId);
@@ -95,7 +103,11 @@ export function SimulatorFleetDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t(creating ? "create" : "resetTitle")}</DialogTitle>
+          <DialogTitle>
+            {t(
+              creating ? (android ? "createEmulator" : "create") : "resetTitle",
+            )}
+          </DialogTitle>
           <DialogDescription>
             {creating
               ? t("createDescription")
@@ -173,9 +185,12 @@ export function SimulatorFleetDialog({
                 <Input
                   disabled={busy}
                   id="create-simulator-name"
-                  maxLength={120}
+                  maxLength={android ? 80 : 120}
+                  pattern={
+                    android ? "[A-Za-z0-9][A-Za-z0-9._\\-]{0,79}" : undefined
+                  }
                   onChange={(event) => setName(event.target.value)}
-                  placeholder={deviceType?.name}
+                  placeholder={defaultName}
                   value={name}
                 />
               </div>
@@ -196,7 +211,7 @@ export function SimulatorFleetDialog({
               variant={creating ? "default" : "destructive"}
             >
               {busy && <Spinner />}
-              {t(creating ? "create" : "reset")}
+              {t(creating ? (android ? "createEmulator" : "create") : "reset")}
             </Button>
           </DialogFooter>
         </form>

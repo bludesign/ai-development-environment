@@ -1628,15 +1628,16 @@ model SkillSyncItem {
 }
 
 model CodebaseProject {
-  id                     String               @id
+  id                     String                      @id
   repositoryId           String
   type                   String
-  defaultDestinationType String               @default("SIMULATOR")
-  createdAt              DateTime             @default(now())
-  updatedAt              DateTime             @updatedAt
-  repository             CodebaseRepository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  defaultDestinationType String                      @default("SIMULATOR")
+  createdAt              DateTime                    @default(now())
+  updatedAt              DateTime                    @updatedAt
+  repository             CodebaseRepository          @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
   sources                BuildSource[]
   configurations         BuildConfiguration[]
+  androidConfigurations  AndroidBuildConfiguration[]
 
   @@unique([repositoryId, type])
   @@index([repositoryId])
@@ -1708,6 +1709,22 @@ model BuildConfiguration {
   @@index([sourceId])
 }
 
+model AndroidBuildConfiguration {
+  id          String          @id
+  projectId   String
+  name        String
+  projectPath String
+  module      String
+  variant     String
+  apkPath     String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  project     CodebaseProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  builds      Build[]
+
+  @@unique([projectId, name])
+}
+
 model BuildScript {
   iconKey          String?
   id               String                          @id
@@ -1739,42 +1756,44 @@ model CodebaseRepositoryBuildScript {
 }
 
 model Build {
-  id                String                 @id
-  requestKey        String                 @unique
-  requestId         String
-  agentId           String?
-  codebaseId        String?
-  worktreeId        String?
-  repositoryId      String?
-  configurationId   String?
-  jobId             String?
-  queuePayloadJson  String?
-  status            String                 @default("QUEUED")
-  action            String
-  destinationType   String
-  destinationJson   String
-  snapshotJson      String
-  commandSummary    String
-  artifactDirectory String
-  errorCode         String?
-  error             String?
-  createdAt         DateTime               @default(now())
-  startedAt         DateTime?
-  finishedAt        DateTime?
-  updatedAt         DateTime               @updatedAt
-  agent             Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
-  codebase          Codebase?              @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
-  worktree          Worktree?              @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
-  repository        CodebaseRepository?    @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
-  configuration     BuildConfiguration?    @relation(fields: [configurationId], references: [id], onDelete: SetNull)
-  job               AgentJob?              @relation(fields: [jobId], references: [id], onDelete: SetNull)
-  artifacts         BuildArtifact[]
-  scriptExecutions  BuildScriptExecution[]
-  logChunks         BuildLogChunk[]
-  deployments       BuildDeployment[]
-  exports           BuildExport[]
-  reports           BuildReport[]
-  dsymUploads       DsymUpload[]
+  id                     String                     @id
+  requestKey             String                     @unique
+  requestId              String
+  agentId                String?
+  codebaseId             String?
+  worktreeId             String?
+  repositoryId           String?
+  configurationId        String?
+  androidConfigurationId String?
+  jobId                  String?
+  queuePayloadJson       String?
+  status                 String                     @default("QUEUED")
+  action                 String
+  destinationType        String
+  destinationJson        String
+  snapshotJson           String
+  commandSummary         String
+  artifactDirectory      String
+  errorCode              String?
+  error                  String?
+  createdAt              DateTime                   @default(now())
+  startedAt              DateTime?
+  finishedAt             DateTime?
+  updatedAt              DateTime                   @updatedAt
+  agent                  Agent?                     @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  codebase               Codebase?                  @relation(fields: [codebaseId], references: [id], onDelete: SetNull)
+  worktree               Worktree?                  @relation(fields: [worktreeId], references: [id], onDelete: SetNull)
+  repository             CodebaseRepository?        @relation(fields: [repositoryId], references: [id], onDelete: SetNull)
+  configuration          BuildConfiguration?        @relation(fields: [configurationId], references: [id], onDelete: SetNull)
+  androidConfiguration   AndroidBuildConfiguration? @relation(fields: [androidConfigurationId], references: [id], onDelete: SetNull)
+  job                    AgentJob?                  @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  artifacts              BuildArtifact[]
+  scriptExecutions       BuildScriptExecution[]
+  logChunks              BuildLogChunk[]
+  deployments            BuildDeployment[]
+  exports                BuildExport[]
+  reports                BuildReport[]
+  dsymUploads            DsymUpload[]
 
   @@index([status, createdAt])
   @@index([agentId, createdAt])
@@ -1783,6 +1802,7 @@ model Build {
   @@index([repositoryId, createdAt])
   @@index([jobId])
   @@index([configurationId, createdAt])
+  @@index([androidConfigurationId, createdAt])
 }
 
 model BuildArtifact {

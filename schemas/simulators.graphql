@@ -1,14 +1,14 @@
 "A simulator on an enrolled Mac agent."
 type Simulator {
-  "The simulator UUID on this agent."
+  "The simulator identifier on this agent, an Apple UUID or an android-prefixed AVD name."
   id: ID!
   "The configured simulator name."
   name: String!
-  "The CoreSimulator runtime identifier."
+  "The CoreSimulator runtime or Android system image identifier."
   runtimeId: ID!
   "The name of the runtime, when installed."
   runtimeName: String
-  "The Apple platform of the runtime."
+  "The runtime platform, including ANDROID for Android emulators."
   platform: String!
   "The CoreSimulator device type identifier, when known."
   deviceTypeId: ID
@@ -20,6 +20,14 @@ type Simulator {
   availabilityError: String
   "The data directory on the selected Mac, when available."
   dataPath: String
+}
+
+"The toolchain that manages the selected simulator."
+enum SimulatorPlatform {
+  "CoreSimulator on macOS."
+  APPLE
+  "Android Virtual Devices on macOS."
+  ANDROID
 }
 
 "A device type supported by a simulator runtime."
@@ -106,6 +114,8 @@ enum SimulatorAction {
 
 "The simulator and runtime to create on a selected agent."
 input CreateSimulatorInput {
+  "Simulator toolchain. Omit to create an Apple simulator."
+  platform: SimulatorPlatform
   "The selected Mac agent."
   agentId: ID!
   "The client-generated request identifier for retries."
@@ -120,11 +130,13 @@ input CreateSimulatorInput {
 
 "An operation and its target simulator on a selected agent."
 input SimulatorActionInput {
+  "Simulator toolchain. Omit to infer it from the simulator identifier."
+  platform: SimulatorPlatform
   "The selected Mac agent."
   agentId: ID!
   "The client-generated request identifier for retries."
   requestId: ID!
-  "The simulator UUID on this agent."
+  "The simulator identifier on this agent."
   simulatorId: ID!
   "The operation to run."
   action: SimulatorAction!
@@ -144,6 +156,8 @@ extend type AgentJob {
 extend type Mutation {
   "Queues a fresh simulator inventory on the selected Mac agent."
   refreshSimulatorInventory(
+    "Simulator toolchain. Omit to list Apple simulators."
+    platform: SimulatorPlatform
     "The selected Mac agent."
     agentId: ID!
     "The client-generated request identifier for retries."
@@ -151,9 +165,11 @@ extend type Mutation {
   ): AgentJob!
   "Queues inspection of one simulator on the selected Mac agent."
   inspectSimulator(
+    "Simulator toolchain. Omit to infer it from the simulator identifier."
+    platform: SimulatorPlatform
     "The selected Mac agent."
     agentId: ID!
-    "The simulator UUID on this agent."
+    "The simulator identifier on this agent."
     simulatorId: ID!
     "The client-generated request identifier for retries."
     requestId: ID!

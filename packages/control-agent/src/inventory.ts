@@ -28,8 +28,19 @@ import { SKILL_JOB_KINDS } from "@ai-development-environment/agent-contract/skil
 import { RUN_SESSION_READ_JOB_KIND } from "@ai-development-environment/agent-contract/runs";
 import {
   IOS_BUILD_JOB_KINDS,
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+  ANDROID_BUILD_DELETE_JOB_KIND,
+  ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+  ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_REMOTE_DEPLOY_JOB_KIND,
   XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
 } from "@ai-development-environment/agent-contract/builds";
+import { androidTools } from "./android-tools.js";
+import { ANDROID_SIMULATORS_CAPABILITY } from "@ai-development-environment/agent-contract/simulators";
 import { SIGNING_ASSET_JOB_KINDS } from "@ai-development-environment/agent-contract/signing-assets";
 import { WORKFLOW_JOB_KINDS } from "@ai-development-environment/agent-contract/workflows";
 import { COMMAND_RUN_JOB_KIND } from "@ai-development-environment/agent-contract/commands";
@@ -109,6 +120,30 @@ export function operatingSystemVersion(
 
 export const AGENT_CAPABILITIES = capabilitiesForPlatform(process.platform);
 
+function androidCapabilities(): string[] {
+  if (process.platform !== "darwin") return [];
+  const { adb, emulator, avdmanager, java, apkanalyzer, apksigner } =
+    androidTools();
+  return [
+    ANDROID_BUILD_DELETE_JOB_KIND,
+    ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+    ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+    ANDROID_SOURCE_DISCOVER_JOB_KIND,
+    ...(java && apkanalyzer ? [ANDROID_SOURCE_INSPECT_JOB_KIND] : []),
+    ...(java && apkanalyzer && apksigner ? [ANDROID_BUILD_JOB_KIND] : []),
+    ...(adb
+      ? [
+          ANDROID_RUN_DESTINATIONS_JOB_KIND,
+          ANDROID_DEPLOY_JOB_KIND,
+          ANDROID_REMOTE_DEPLOY_JOB_KIND,
+        ]
+      : []),
+    ...(adb && emulator && avdmanager && java
+      ? [ANDROID_SIMULATORS_CAPABILITY]
+      : []),
+  ];
+}
+
 export type AgentInventory = {
   hostname: string;
   version: string;
@@ -135,6 +170,6 @@ export function collectInventory(): AgentInventory {
     memoryFreeBytes: freemem(),
     diskTotalBytes: Number(disk.blocks * disk.bsize),
     diskFreeBytes: Number(disk.bavail * disk.bsize),
-    capabilities: AGENT_CAPABILITIES,
+    capabilities: [...AGENT_CAPABILITIES, ...androidCapabilities()],
   };
 }

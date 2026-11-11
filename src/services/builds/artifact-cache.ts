@@ -306,8 +306,12 @@ async function transfer(
 export async function materializeArtifact(
   buildId: string,
   artifactId: string,
+  options?: { authorized: boolean },
 ): Promise<MaterializedArtifact> {
   const { artifact, key } = await artifactCacheIdentity(buildId, artifactId);
+  if (artifact.kind === "APK" && options?.authorized === false) {
+    throw new Error("A signed download link is required for this APK");
+  }
   const cached = await readCached(key);
   if (cached) return cached;
 

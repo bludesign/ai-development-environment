@@ -31,6 +31,7 @@ import { RebuildButton } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { WorktreeCoverageButton } from "@/components/builds/start-build-dialog";
 import {
+  isRunnableBuildArtifact,
   platformLabel,
   type BuildRecord,
   type BuildReport,
@@ -129,7 +130,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
     agents {
       agent { id name hostname capabilities baseRepoDirectory connectionStatus }
       codebases {
-        iosBuildConfigured
+        iosBuildConfigured androidBuildConfigured
         blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
         quickActions {
             id name description quickActionIconKey quickActionButtonVariant
@@ -1149,9 +1150,7 @@ export function WorktreeBuildTable({
               const startedAt = build.startedAt ?? build.createdAt;
               const runnable =
                 build.status === "SUCCEEDED" &&
-                build.artifacts.some(
-                  (artifact) => artifact.kind === "RUNNABLE_APP",
-                );
+                build.artifacts.some(isRunnableBuildArtifact);
               return (
                 <TableRow
                   aria-label={t("viewBuild")}

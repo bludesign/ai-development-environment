@@ -216,6 +216,7 @@ function patchFor(path: string, changeType: string): string {
 type GraphQLBody = {
   query?: string;
   variables?: {
+    buildId?: string;
     input?: {
       path?: string | null;
       scope?: string;
@@ -288,6 +289,32 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
       const key = run
         ? "inspectBuildRunDestinations"
         : "inspectBuildDestinations";
+      if (run && body.variables?.buildId === ids.builds.android) {
+        return respond({
+          [key]: [
+            {
+              type: "SIMULATOR",
+              id: ids.simulators.android,
+              name: "Pixel_9_QA",
+              platform: "Android",
+              platformId: "ANDROID",
+              osVersion: "36",
+              state: "Booted",
+              available: true,
+            },
+            {
+              type: "PHYSICAL_DEVICE",
+              id: "QA_PIXEL_001",
+              name: "Connected Pixel",
+              platform: "Android",
+              platformId: "ANDROID",
+              osVersion: "36",
+              state: "Ready",
+              available: true,
+            },
+          ],
+        });
+      }
       if (!run && body.variables?.input?.action === "ARCHIVE") {
         return respond({
           [key]: [

@@ -1102,6 +1102,14 @@
         "title": "Error en la compilación de iOS",
         "description": "Una compilación de iOS termina con un error."
       },
+      "ANDROID_BUILD_SUCCEEDED": {
+        "title": "Compilación de Android completada",
+        "description": "Una compilación de Android termina correctamente."
+      },
+      "ANDROID_BUILD_FAILED": {
+        "title": "Error en la compilación de Android",
+        "description": "Una compilación de Android termina con un error."
+      },
       "COMMAND_RUN_SUCCEEDED": {
         "title": "Ejecución de comando completada",
         "description": "Un comando guardado finaliza correctamente."
@@ -1609,8 +1617,10 @@
     }
   },
   "simulators": {
+    "androidEmptyTitle": "No se encontraron emuladores de Android",
+    "androidEmptyDescription": "Instala una imagen del sistema Android en un agente en línea para crear un emulador.",
     "title": "Simuladores",
-    "description": "Gestiona los simuladores de Xcode en los Mac registrados.",
+    "description": "Gestiona simuladores de Apple y emuladores de Android en agentes registrados.",
     "loading": "Cargando el inventario de simuladores…",
     "search": "Buscar simuladores",
     "allPlatforms": "Todas las plataformas",
@@ -1696,11 +1706,20 @@
     "eraseDescription": "¿Borrar todo el contenido y los ajustes de {name} en {agent}?",
     "eraseTitle": "¿Borrar el contenido del simulador?",
     "renameDescription": "Introduce un nombre nuevo para {name}.",
-    "cloneDescription": "Crea una copia de {name} con un nombre nuevo."
+    "cloneDescription": "Crea una copia de {name} con un nombre nuevo.",
+    "simulatorFamily": "Familia de simuladores",
+    "appleSimulators": "Simuladores de Apple",
+    "androidEmulators": "Emuladores de Android",
+    "createEmulator": "Crear emulador",
+    "androidToolsRequired": "Las herramientas del emulador de Android no están disponibles en este agente.",
+    "emulatorIdentifier": "Identificador del emulador",
+    "androidAppsDescription": "Inicia o detén una aplicación instalada en este emulador.",
+    "openEmulatorFolder": "Abrir carpeta de datos en {agent}",
+    "emulatorFolderOpened": "Carpeta de datos abierta en {agent}."
   },
   "buildData": {
     "title": "Datos de compilación",
-    "description": "Inspecciona y limpia el DerivedData de Xcode en los agentes registrados.",
+    "description": "Inspecciona y limpia los datos derivados de Xcode y las cachés administradas de Gradle en los agentes registrados.",
     "derivedDataTitle": "Datos derivados",
     "derivedDataDescription": "Productos de compilación, índices, registros y cachés de Xcode por proyecto.",
     "deviceSupportTitle": "Soporte de dispositivos",
@@ -1770,7 +1789,12 @@
       "OFFLINE": "sin conexión",
       "UNSUPPORTED": "se requiere actualizar el agente",
       "INVALID": "respuesta no válida"
-    }
+    },
+    "gradleTitle": "Datos de compilación de Gradle",
+    "gradleDescription": "Cachés de proyecto de Gradle creadas por compilaciones de Android.",
+    "gradleEmptyTitle": "No hay datos de compilación de Gradle",
+    "gradleEmptyDescription": "Ejecuta una compilación de Android para crear una caché de proyecto administrada.",
+    "selectAllGradle": "Seleccionar todos los datos de compilación de Gradle"
   },
   "cacheServerSettings": {
     "title": "Servidor de caché de Acciones",
@@ -4162,7 +4186,8 @@
     "commitsBehindBase": "{count} commits detrás de la base",
     "defaultBranchUpdateEnabled": "Mantener actualizada",
     "defaultBranchUpdatePaused": "Actualización pausada",
-    "defaultBranch": "Rama predeterminada"
+    "defaultBranch": "Rama predeterminada",
+    "mobileBuildNotConfigured": "Añade primero una configuración de compilación móvil en los ajustes del repositorio."
   },
   "worktreeDetail": {
     "loading": "Cargando detalles del worktree…",
@@ -4537,6 +4562,42 @@
     "missingResultFile": "Añade este archivo al resultado o selecciona otro archivo del paquete.",
     "useManualVersion": "Usar versión editada"
   },
+  "androidBuilds": {
+    "discoverProjects": "Buscar proyectos de Gradle",
+    "inspectModules": "Inspeccionar módulos de Gradle",
+    "discoveredProject": "Proyecto de Gradle",
+    "useModuleVariant": "Módulo y variante de aplicación",
+    "noDiscoveredProjects": "No se encontraron proyectos de Gradle Wrapper en este árbol de trabajo.",
+    "noDiscoveredModules": "No se encontraron variantes de aplicación Android en este proyecto.",
+    "project": "Aplicación Android",
+    "projectDescription": "Configura compilaciones de Gradle para este repositorio. Selecciona un árbol de trabajo para crear un APK.",
+    "noCheckout": "Clona este repositorio en un agente registrado para configurar compilaciones de Android.",
+    "enableProject": "Activar compilaciones de Android",
+    "noConfigurations": "Todavía no hay configuraciones de compilación para Android.",
+    "addConfiguration": "Añadir configuración de Android",
+    "editConfiguration": "Editar configuración de Android",
+    "deleteConfiguration": "Eliminar configuración de Android",
+    "deleteProject": "Eliminar proyecto de Android",
+    "deleteProjectDescription": "¿Eliminar este proyecto de Android y sus configuraciones? Se conserva el historial de compilaciones.",
+    "deleteConfigurationDescription": "¿Eliminar esta configuración de Android? Se conservan las compilaciones existentes.",
+    "configurationDescription": "Usa el Gradle Wrapper del repositorio. La ruta opcional del APK es relativa al árbol de trabajo.",
+    "name": "Nombre",
+    "projectPath": "Ruta del proyecto de Gradle",
+    "module": "Módulo de aplicación",
+    "variant": "Variante de compilación",
+    "apkPath": "Ruta del APK (opcional)",
+    "configuration": "Configuración de Android",
+    "start": "Iniciar compilación de Android",
+    "startDescription": "Genera el APK seleccionado en el agente del árbol de trabajo. Después podrás ejecutarlo en un emulador o en un dispositivo conectado.",
+    "startFailed": "No se pudo iniciar la compilación de Android.",
+    "install": "Instalar en Android",
+    "installInstructions": "Descarga el APK y ábrelo desde tus descargas para iniciar el instalador de Android. Android puede pedirte que permitas instalaciones desde el navegador.",
+    "download": "Descargar APK",
+    "export": "Exportar APK",
+    "applicationId": "ID de aplicación",
+    "version": "Versión",
+    "unsignedApk": "Este APK necesita una firma válida para poder instalarse."
+  },
   "builds": {
     "filterRepository": "Filtrar compilaciones por repositorio",
     "allRepositories": "Todos los repositorios",
@@ -4740,6 +4801,7 @@
     "runAgents": "Agentes de ejecución",
     "buildAgent": "Agente de compilación",
     "runAgentUnavailable": {
+      "ANDROID_TOOLS_UNAVAILABLE": "Las herramientas del SDK de Android no están disponibles en este agente.",
       "OFFLINE": "Sin conexión",
       "AGENT_UPDATE_REQUIRED": "Actualización necesaria",
       "BUILD_AGENT_UNAVAILABLE": "Artefacto de compilación no disponible",

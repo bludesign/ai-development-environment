@@ -84,6 +84,8 @@ type RepositoryPreparation {
 type CodebaseRepository {
   "The repository-wide iOS App project, if enabled."
   iosAppProject: CodebaseProject
+  "The repository-wide Android app project, if enabled."
+  androidAppProject: CodebaseProject
   "Newest build across every checkout and worktree of this repository."
   latestBuild: Build
   "Stable identifier for this codebase repository."

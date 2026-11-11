@@ -26,24 +26,38 @@ import {
 } from "@/components/ui/select";
 import type { PublicOrigin } from "@/lib/public-origin";
 import { ConfigurationIcon } from "./configuration-icon";
+import { AndroidBuildConfigurationDialog } from "./android-project-section";
 import { BuildConfigurationDialog } from "./ios-project-section";
 import { BuildsPage } from "./builds-page";
 import {
   configurationPlatforms,
   platformLabel,
   settingsForPlatform,
+  type AndroidBuildConfiguration,
   type BuildConfiguration,
 } from "./types";
-import { BUILD_PLATFORM_CONFIGURATION_FIELDS } from "./graphql-fields";
+import {
+  ANDROID_BUILD_CONFIGURATION_FIELDS,
+  BUILD_PLATFORM_CONFIGURATION_FIELDS,
+} from "./graphql-fields";
 
 const FIELDS = `id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
   source { id kind relativePath }
   platformConfigurations { ${BUILD_PLATFORM_CONFIGURATION_FIELDS} }
   repository { id name }`;
-type Configuration = BuildConfiguration & {
-  repository: { id: string; name: string };
+const ANDROID_FIELDS = `${ANDROID_BUILD_CONFIGURATION_FIELDS} repository { id name }`;
+type Repository = { id: string; name: string };
+type AppleConfiguration = BuildConfiguration & { repository: Repository };
+type AndroidConfiguration = AndroidBuildConfiguration & {
+  repository: Repository;
 };
-type Checkout = { codebaseId: string; worktreeId: string; label: string };
+type Configuration = AppleConfiguration | AndroidConfiguration;
+type Checkout = {
+  codebaseId: string;
+  worktreeId: string;
+  label: string;
+  androidDiscovery: boolean;
+};
 
 export function BuildConfigurations() {
   const t = useTranslations("builds");
@@ -53,9 +67,15 @@ export function BuildConfigurations() {
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
-        buildConfigurations: Configuration[];
-      }>(`query BuildConfigurations { buildConfigurations { ${FIELDS} } }`);
-      setItems(data.buildConfigurations);
+        buildConfigurations: AppleConfiguration[];
+        androidBuildConfigurations?: AndroidConfiguration[];
+      }>(
+        `query BuildConfigurations { buildConfigurations { ${FIELDS} } androidBuildConfigurations { ${ANDROID_FIELDS} } }`,
+      );
+      setItems([
+        ...data.buildConfigurations,
+        ...(data.androidBuildConfigurations ?? []),
+      ]);
       setError(null);
     } catch (error) {
       setError(String(error));
@@ -93,24 +113,39 @@ export function BuildConfigurations() {
             <Card className="h-full hover:bg-muted/40">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <ConfigurationIcon iconKey={item.iconKey} />
+                  <ConfigurationIcon
+                    iconKey={"iconKey" in item ? item.iconKey : null}
+                  />
                   {item.name}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-1 text-sm">
                 <p>{item.repository.name}</p>
-                <p className="text-muted-foreground">
-                  {configurationPlatforms(item)
-                    .map(({ platform }) => platformLabel(platform))
-                    .join(" · ")}
-                </p>
-                <p className="text-muted-foreground">
-                  {item.scheme} · {item.buildConfiguration} ·{" "}
-                  {t(`actions.${item.defaultAction}`)}
-                </p>
-                <p className="break-all font-mono text-xs">
-                  {item.source.relativePath}
-                </p>
+                {"projectPath" in item ? (
+                  <>
+                    <p className="text-muted-foreground">
+                      {platformLabel("ANDROID")}
+                    </p>
+                    <p className="break-all font-mono text-xs">
+                      {item.projectPath} · {item.module} · {item.variant}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-muted-foreground">
+                      {configurationPlatforms(item)
+                        .map(({ platform }) => platformLabel(platform))
+                        .join(" · ")}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {item.scheme} · {item.buildConfiguration} ·{" "}
+                      {t(`actions.${item.defaultAction}`)}
+                    </p>
+                    <p className="break-all font-mono text-xs">
+                      {item.source.relativePath}
+                    </p>
+                  </>
+                )}
               </CardContent>
             </Card>
           </Link>
@@ -128,6 +163,7 @@ export function BuildConfigurationDetail({
   publicOrigin: PublicOrigin | null;
 }) {
   const t = useTranslations("builds");
+  const androidT = useTranslations("androidBuilds");
   const [configuration, setConfiguration] = useState<Configuration | null>(
     null,
   );
@@ -147,7 +183,8 @@ export function BuildConfigurationDetail({
   const load = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{
-        buildConfiguration: Configuration | null;
+        buildConfiguration: AppleConfiguration | null;
+        androidBuildConfiguration?: AndroidConfiguration | null;
         worktreeOverview: {
           agents: Array<{
             agent: {
@@ -171,21 +208,25 @@ export function BuildConfigurationDetail({
       }>(
         `query BuildConfigurationDetail($id: ID!) {
         buildConfiguration(id: $id) { ${FIELDS} }
+        androidBuildConfiguration(id: $id) { ${ANDROID_FIELDS} }
         worktreeOverview { agents { agent { name connectionStatus capabilities } codebases { codebase { id } repository { id } worktrees { id folder branch primary availability } } } }
       }`,
         { id },
       );
-      setConfiguration(data.buildConfiguration);
+      const result =
+        data.buildConfiguration ?? data.androidBuildConfiguration ?? null;
+      setConfiguration(result);
+      const capability =
+        result && "projectPath" in result
+          ? "android.build.run"
+          : "ios.source.parse";
       const choices = data.worktreeOverview.agents.flatMap(
         ({ agent, codebases }) =>
           agent.connectionStatus !== "ONLINE" ||
-          !agent.capabilities.includes("ios.source.parse")
+          !agent.capabilities.includes(capability)
             ? []
             : codebases.flatMap((group) => {
-                if (
-                  group.repository.id !== data.buildConfiguration?.repository.id
-                )
-                  return [];
+                if (group.repository.id !== result?.repository.id) return [];
                 const tree =
                   group.worktrees.find(
                     (tree) => tree.primary && tree.availability === "AVAILABLE",
@@ -199,6 +240,11 @@ export function BuildConfigurationDetail({
                         codebaseId: group.codebase.id,
                         worktreeId: tree.id,
                         label: `${agent.name} · ${tree.branch ?? tree.folder}`,
+                        androidDiscovery:
+                          agent.capabilities.includes(
+                            "android.source.discover",
+                          ) &&
+                          agent.capabilities.includes("android.source.inspect"),
                       },
                     ]
                   : [];
@@ -229,7 +275,57 @@ export function BuildConfigurationDetail({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {configuration ? (
+      {configuration && "projectPath" in configuration ? (
+        <>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h1 className="flex items-center gap-2 text-2xl font-semibold">
+              <ConfigurationIcon iconKey={null} /> {configuration.name}
+            </h1>
+            <Button disabled={!checkout} onClick={() => setEditing(true)}>
+              <Pencil /> {androidT("editConfiguration")}
+            </Button>
+          </div>
+          <Card>
+            <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  {t("repository")}
+                </p>
+                <Link
+                  href={`/dashboard/codebases/repositories/${configuration.repository.id}`}
+                >
+                  {configuration.repository.name}
+                </Link>
+              </div>
+              {(["projectPath", "module", "variant", "apkPath"] as const).map(
+                (field) =>
+                  configuration[field] && (
+                    <div key={field}>
+                      <p className="text-sm text-muted-foreground">
+                        {androidT(field)}
+                      </p>
+                      <p className="break-all font-mono text-sm">
+                        {configuration[field]}
+                      </p>
+                    </div>
+                  ),
+              )}
+            </CardContent>
+          </Card>
+          <BuildsPage configurationId={id} publicOrigin={publicOrigin} />
+          {editing && checkout && (
+            <AndroidBuildConfigurationDialog
+              codebaseId={checkout.codebaseId}
+              configuration={configuration}
+              discoveryWorktreeId={
+                checkout.androidDiscovery ? checkout.worktreeId : undefined
+              }
+              onClose={() => setEditing(false)}
+              onSaved={() => void load()}
+            />
+          )}
+        </>
+      ) : configuration ? (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 className="flex items-center gap-2 text-2xl font-semibold">

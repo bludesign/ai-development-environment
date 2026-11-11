@@ -11,7 +11,12 @@ type ScanEntry = {
   path: string;
   rootPath: string;
   name: string;
-  kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  kind:
+    | "PROJECT"
+    | "PENDING"
+    | "SHARED_CACHE"
+    | "DEVICE_SUPPORT"
+    | "GRADLE_PROJECT";
   deviceSupportPlatform?: string;
   workspacePath: string | null;
   modifiedAt: string;
@@ -32,12 +37,23 @@ function scan(
   const rootPath = `${rootFolder}/Library/Developer/Xcode/DerivedData`;
   return entries.map((entry) => ({
     ...entry,
-    rootPath: entry.kind === "DEVICE_SUPPORT" ? dirname(entry.path) : rootPath,
+    rootPath:
+      entry.kind === "DEVICE_SUPPORT" || entry.kind === "GRADLE_PROJECT"
+        ? dirname(entry.path)
+        : rootPath,
     volumeId,
   }));
 }
 
 const STUDIO_ENTRIES = scan("/Users/acme", "disk3s5", [
+  {
+    path: "/Users/acme/Repositories/Builds/.android-gradle/worktree-web-main/1b3015f912fe5dd9",
+    name: "web-app Android Gradle cache",
+    kind: "GRADLE_PROJECT",
+    workspacePath: "/Users/acme/Repositories/web-app",
+    modifiedAt: hoursAgo(6).toISOString(),
+    sizeBytes: 472 * MIB,
+  },
   {
     path: "/Users/acme/Library/Developer/Xcode/DerivedData/AcmeWebApp-abcdefghijklmnop",
     name: "AcmeWebApp-abcdefghijklmnop",

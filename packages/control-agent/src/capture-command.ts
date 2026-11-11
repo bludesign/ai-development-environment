@@ -17,6 +17,7 @@ export function captureCommand(options: {
   signal: AbortSignal;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
+  stdin?: string;
   stdoutFileDescriptor?: number;
   /** Optional combined stdout/stderr retention limit. */
   maxOutputBytes?: number;
@@ -48,7 +49,7 @@ export function captureCommand(options: {
     const child = spawn(options.command, options.args, {
       shell: false,
       stdio: [
-        "ignore",
+        options.stdin === undefined ? "ignore" : "pipe",
         options.stdoutFileDescriptor === undefined
           ? "pipe"
           : options.stdoutFileDescriptor,
@@ -61,6 +62,10 @@ export function captureCommand(options: {
       // stop the entire command tree instead of only the immediate Git process.
       detached,
     });
+    if (options.stdin !== undefined && child.stdin) {
+      child.stdin.on("error", () => undefined);
+      child.stdin.end(options.stdin);
+    }
     const append = (
       chunks: Buffer[],
       chunk: Buffer | string,

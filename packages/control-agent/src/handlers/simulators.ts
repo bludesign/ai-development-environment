@@ -10,6 +10,7 @@ import {
   simulatorEmptyPayload,
   simulatorId,
   simulatorInspectPayload,
+  simulatorInventoryPayload,
   type Simulator,
   type SimulatorApp,
   type SimulatorDetails,
@@ -18,6 +19,12 @@ import {
   type SimulatorRuntime,
 } from "@ai-development-environment/agent-contract/simulators";
 
+import {
+  createAndroidSimulator,
+  inspectAndroidSimulator,
+  inventoryAndroidSimulators,
+  performAndroidSimulatorAction,
+} from "../android-simulators.js";
 import { captureCommand } from "../capture-command.js";
 
 type Fields = Record<string, unknown>;
@@ -499,7 +506,10 @@ export async function inventorySimulators(
   timeoutMs: number,
   signal: AbortSignal,
 ) {
-  simulatorEmptyPayload(payload);
+  if (simulatorInventoryPayload(payload).platform === "ANDROID")
+    return inventoryAndroidSimulators(
+      AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    );
   const host = await hostInventory(commandRunner(timeoutMs, signal));
   return { ...completed, inventory: publicInventory(host) };
 }
@@ -510,6 +520,11 @@ export async function inspectSimulator(
   signal: AbortSignal,
 ) {
   const input = simulatorInspectPayload(payload);
+  if (input.platform === "ANDROID")
+    return inspectAndroidSimulator(
+      input.simulatorId,
+      AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    );
   const run = commandRunner(timeoutMs, signal);
   const simulator = selectedSimulator(
     await hostInventory(run),
@@ -529,6 +544,11 @@ export async function createSimulator(
   signal: AbortSignal,
 ) {
   const input = simulatorCreatePayload(payload);
+  if (input.platform === "ANDROID")
+    return createAndroidSimulator(
+      input,
+      AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    );
   const run = commandRunner(timeoutMs, signal);
   const runtime = (await hostInventory(run)).runtimes.find(
     (runtime) => runtime.id === input.runtimeId && runtime.isAvailable,
@@ -562,6 +582,11 @@ export async function performSimulatorAction(
   signal: AbortSignal,
 ) {
   const input = simulatorActionPayload(payload);
+  if (input.platform === "ANDROID")
+    return performAndroidSimulatorAction(
+      input,
+      AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
+    );
   const run = commandRunner(timeoutMs, signal);
   const simulator = selectedSimulator(
     await hostInventory(run),

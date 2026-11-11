@@ -51,7 +51,10 @@ export type WorktreeLatestBuild = Pick<
   "id" | "status" | "action" | "destinationType" | "createdAt" | "outOfDate"
 > & {
   destination: BuildDestination;
-  artifacts: Array<Pick<BuildArtifact, "id" | "kind">>;
+  artifacts: Array<
+    Pick<BuildArtifact, "id" | "kind"> &
+      Partial<Pick<BuildArtifact, "metadata" | "checksum">>
+  >;
 };
 
 export type WorktreeAutoSync = {
@@ -167,6 +170,7 @@ export type WorktreeCodebaseGroup = {
   worktrees: Worktree[];
   blockingJob?: AgentJob | null;
   iosBuildConfigured?: boolean;
+  androidBuildConfigured?: boolean;
   quickActions?: WorktreeQuickAction[];
   mergeConflictQuickActions?: WorktreeQuickAction[];
 };

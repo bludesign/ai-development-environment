@@ -18,7 +18,8 @@ export const BUILD_PLATFORMS = [
 
 export type BuildPlatform = (typeof BUILD_PLATFORMS)[number];
 
-const PLATFORM_LABELS: Record<RunPlatform, string> = {
+const PLATFORM_LABELS: Record<string, string> = {
+  ANDROID: "Android",
   IOS: "iOS",
   TVOS: "tvOS",
   VISIONOS: "visionOS",
@@ -65,6 +66,7 @@ export type BuildRunAgent = {
     | "INCOMPATIBLE_ARCHITECTURE"
     | "LOCAL_MAC_ONLY"
     | "NOT_MACOS"
+    | "ANDROID_TOOLS_UNAVAILABLE"
     | null;
 };
 
@@ -194,6 +196,36 @@ export type BuildArtifact = {
   createdAt: string;
 };
 
+export type AndroidBuildConfiguration = {
+  id: string;
+  name: string;
+  projectPath: string;
+  module: string;
+  variant: string;
+  apkPath: string | null;
+  repository?: { id: string; name: string };
+};
+
+export function isRunnableBuildArtifact(artifact: {
+  kind: string;
+  metadata?: Record<string, unknown>;
+  checksum?: string | null;
+}) {
+  return (
+    artifact.kind === "RUNNABLE_APP" ||
+    (isInstallableApk(artifact) &&
+      Boolean(artifact.checksum) &&
+      typeof artifact.metadata?.applicationId === "string")
+  );
+}
+
+export function isInstallableApk(artifact: {
+  kind: string;
+  metadata?: Record<string, unknown>;
+}) {
+  return artifact.kind === "APK" && artifact.metadata?.signed === true;
+}
+
 export type BuildReport = {
   id: string;
   kind: "TEST_RESULTS" | "CODE_COVERAGE";
@@ -219,7 +251,7 @@ export type BuildRecord = {
   // HOST covers records that ran no device build, such as an imported
   // coverage report; no build destination ever carries it.
   destinationType: BuildDestination["type"] | "HOST";
-  platform?: BuildPlatform | null;
+  platform?: BuildPlatform | "ANDROID" | null;
   destination: BuildDestination;
   snapshot: Record<string, unknown>;
   commandSummary: string;
@@ -276,6 +308,7 @@ export type BuildRecord = {
     finishedAt: string | null;
   }>;
   configuration: BuildConfiguration | null;
+  androidConfiguration?: Pick<AndroidBuildConfiguration, "id" | "name"> | null;
   createdAt: string;
   startedAt: string | null;
   finishedAt: string | null;

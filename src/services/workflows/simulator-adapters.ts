@@ -223,7 +223,9 @@ export function registerSimulatorAdapters(
   }
 
   executor.register("SIMULATOR_INVENTORY", (context) =>
-    submit(context, SIMULATOR_INVENTORY_JOB_KIND, "INVENTORY", {}),
+    submit(context, SIMULATOR_INVENTORY_JOB_KIND, "INVENTORY", {
+      platform: context.node.config.platform,
+    }),
   );
   executor.register("SIMULATOR_INSPECT", (context) =>
     submit(
@@ -234,12 +236,12 @@ export function registerSimulatorAdapters(
     ),
   );
   executor.register("SIMULATOR_CREATE", (context) => {
-    const { name, runtimeId, deviceTypeId } = context.node.config;
+    const { name, runtimeId, deviceTypeId, platform } = context.node.config;
     return submit(
       context,
       SIMULATOR_CREATE_JOB_KIND,
       "CREATE",
-      simulatorCreatePayload({ name, runtimeId, deviceTypeId }),
+      simulatorCreatePayload({ name, runtimeId, deviceTypeId, platform }),
     );
   });
   executor.register("SIMULATOR_DEVICE_ACTION", (context) =>
