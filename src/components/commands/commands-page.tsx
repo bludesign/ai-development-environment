@@ -138,7 +138,6 @@ export function CommandsPage() {
     null,
   );
   const [customOpen, setCustomOpen] = useState(false);
-  const [customLaunching, setCustomLaunching] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const definitionsLoaded = useRef(false);
@@ -467,27 +466,6 @@ export function CommandsPage() {
       setError(value instanceof Error ? value.message : String(value));
     }
   };
-  const launchCustom = async (
-    script: string,
-    target: { agentId?: string; worktreeId?: string },
-  ) => {
-    setCustomLaunching(true);
-    try {
-      const data = await controlPlaneRequest<{
-        startCustomCommandRun: { id: string };
-      }>(
-        "mutation StartCustomCommand($input: StartCustomCommandRunInput!) { startCustomCommandRun(input: $input) { id } }",
-        { input: { script, origin: "MANUAL", ...target } },
-      );
-      setCustomOpen(false);
-      router.push(`/dashboard/commands/runs/${data.startCustomCommandRun.id}`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setCustomLaunching(false);
-    }
-  };
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1029,10 +1007,7 @@ export function CommandsPage() {
       {customOpen && (
         <CustomCommandDialog
           agents={agents}
-          onOpenChange={setCustomOpen}
-          onSubmit={(script, target) => void launchCustom(script, target)}
-          open
-          submitting={customLaunching}
+          onClose={() => setCustomOpen(false)}
           worktrees={worktrees}
         />
       )}

@@ -411,6 +411,7 @@ describe("CommandsPage", () => {
             script: "printf custom",
             origin: "MANUAL",
             agentId: "agent-1",
+            idempotencyKey: expect.any(String),
           },
         },
       ),

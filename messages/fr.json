@@ -3910,6 +3910,7 @@
     "newPlan": "Nouveau plan",
     "pull": "Tirer",
     "moreActions": "Plus",
+    "runCommand": "Exécuter une commande",
     "forcePush": "Forcer le push",
     "sync": "Synchroniser",
     "rebase": "Rebaser",
