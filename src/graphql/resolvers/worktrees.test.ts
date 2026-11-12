@@ -12,6 +12,58 @@ const context = (agentId: string | null) =>
   ({ agentId }) as unknown as GraphQLContext;
 
 describe("worktree resolvers", () => {
+  test("starts and reads branch change batches only for control-plane callers", async () => {
+    const result = { id: "batch" };
+    const start = vi.fn().mockResolvedValue(result);
+    const batch = vi.fn().mockResolvedValue(result);
+    const batches = vi.fn().mockResolvedValue([result]);
+    const resolvers = createWorktreeResolvers(
+      {
+        branchBatches: { start, batch, batches },
+      } as unknown as WorktreesService,
+      {} as WorktreeAutomationService,
+    );
+    const scope = { appId: "app", agentId: "agent" };
+    const input = {
+      ...scope,
+      mode: "EXISTING" as const,
+      branchName: "release",
+      requestId: "request",
+      items: [
+        { worktreeId: "worktree", expectedBranch: null, baseBranch: "main" },
+      ],
+    };
+    await expect(
+      resolvers.Mutation.startWorktreeBranchBatch({}, { input }, context(null)),
+    ).resolves.toEqual(result);
+    expect(start).toHaveBeenCalledWith(input);
+    await expect(
+      resolvers.Query.worktreeBranchBatches({}, scope, context(null)),
+    ).resolves.toEqual([result]);
+    expect(batches).toHaveBeenCalledWith(scope);
+    await expect(
+      resolvers.Query.worktreeBranchBatch({}, { id: "batch" }, context(null)),
+    ).resolves.toEqual(result);
+    expect(batch).toHaveBeenCalledWith("batch");
+    expect(() =>
+      resolvers.Mutation.startWorktreeBranchBatch(
+        {},
+        { input },
+        context("agent"),
+      ),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.worktreeBranchBatches({}, scope, context("agent")),
+    ).toThrow("control-plane");
+    expect(() =>
+      resolvers.Query.worktreeBranchBatch(
+        {},
+        { id: "batch" },
+        context("agent"),
+      ),
+    ).toThrow("control-plane");
+  });
+
   test("starts and reads scoped Bulk Sync batches only for control-plane callers", async () => {
     const start = vi.fn().mockResolvedValue({ id: "batch" });
     const batch = vi.fn().mockResolvedValue({ id: "batch" });

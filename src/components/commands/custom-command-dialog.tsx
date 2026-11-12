@@ -2,8 +2,9 @@
 
 import { HardDrive, Laptop, Play } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,35 +17,49 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { useRouter } from "@/i18n/navigation";
+import { createClientId } from "@/lib/browser-utils";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
 import type { CommandAgent, CommandWorktree } from "./types";
 
-type CustomCommandTarget = { agentId: string } | { worktreeId: string };
+type CustomCommandTarget =
+  | { agentId: string; worktreeId?: never }
+  | { worktreeId: string; agentId?: never };
+
+type CustomCommandSubmission = CustomCommandTarget & {
+  script: string;
+  idempotencyKey: string;
+};
 
 export function CustomCommandDialog({
   agents,
   worktrees,
-  open,
-  submitting,
-  onOpenChange,
-  onSubmit,
+  worktreeId,
+  onClose,
+  onCloseAutoFocus,
 }: {
-  agents: CommandAgent[];
-  worktrees: CommandWorktree[];
-  open: boolean;
-  submitting: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSubmit: (script: string, target: CustomCommandTarget) => void;
-}) {
+  onClose: () => void;
+  onCloseAutoFocus?: (event: Event) => void;
+} & (
+  | { agents: CommandAgent[]; worktrees: CommandWorktree[]; worktreeId?: never }
+  | { worktreeId: string; agents?: never; worktrees?: never }
+)) {
   const t = useTranslations("commands");
+  const router = useRouter();
+  const scriptId = useId();
   const [script, setScript] = useState("");
   const [targetKey, setTargetKey] = useState<string | null>(null);
-  const targets = useMemo(
-    () => [
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submission = useRef<CustomCommandSubmission | null>(null);
+  const targets = useMemo(() => {
+    if (!agents || !worktrees) return [];
+    return [
       ...agents.map((agent) => ({
         key: `agent:${agent.id}`,
-        id: agent.id,
+        input: { agentId: agent.id },
         kind: "AGENT" as const,
         title: `${agent.name} · ${agent.hostname}`,
         detail: agent.connectionStatus,
@@ -52,7 +67,7 @@ export function CustomCommandDialog({
       })),
       ...worktrees.map((worktree) => ({
         key: `worktree:${worktree.id}`,
-        id: worktree.id,
+        input: { worktreeId: worktree.id },
         kind: "WORKTREE" as const,
         title: worktree.branch || worktree.folder,
         detail: `${worktree.repositoryName} · ${worktree.agentName} · ${worktree.folder}`,
@@ -61,25 +76,59 @@ export function CustomCommandDialog({
             .find((agent) => agent.id === worktree.agentId)
             ?.capabilities.includes("command.run") === true,
       })),
-    ],
-    [agents, worktrees],
-  );
-  const selected = targets.find((target) => target.key === targetKey) ?? null;
+    ];
+  }, [agents, worktrees]);
+  const selected = targets.find((target) => target.key === targetKey);
+  const target: CustomCommandTarget | null = worktreeId
+    ? { worktreeId }
+    : selected?.upgraded
+      ? selected.input
+      : null;
+  const launch = async () => {
+    if (!target || !script.trim() || submitting) return;
+    const previous = submission.current;
+    const input =
+      previous?.script === script &&
+      previous.agentId === target.agentId &&
+      previous.worktreeId === target.worktreeId
+        ? previous
+        : { script, ...target, idempotencyKey: createClientId() };
+    submission.current = input;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        startCustomCommandRun: { id: string };
+      }>(
+        "mutation StartCustomCommand($input: StartCustomCommandRunInput!) { startCustomCommandRun(input: $input) { id } }",
+        { input: { ...input, origin: "MANUAL" } },
+      );
+      onClose();
+      router.push(`/dashboard/commands/runs/${data.startCustomCommandRun.id}`);
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
+    <Dialog onOpenChange={(open) => !open && !submitting && onClose()} open>
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
         <DialogHeader>
           <DialogTitle>{t("runCustom")}</DialogTitle>
           <DialogDescription>{t("customCommandDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="custom-command-script">{t("script")}</Label>
+            <Label htmlFor={scriptId}>{t("script")}</Label>
             <Textarea
               autoFocus
               className="min-h-32 font-mono"
-              id="custom-command-script"
+              id={scriptId}
               onChange={(event) => setScript(event.target.value)}
               placeholder={t("customCommandPlaceholder")}
               value={script}
@@ -88,62 +137,61 @@ export function CustomCommandDialog({
               {t("customCommandWarning")}
             </p>
           </div>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">{t("runIn")}</legend>
-            <div className="grid gap-2">
-              {targets.map((target) => (
-                <Button
-                  aria-pressed={targetKey === target.key}
-                  className={cn(
-                    "h-auto w-full min-w-0 items-start justify-start gap-3 py-3 text-left whitespace-normal",
-                    targetKey === target.key && "ring-2 ring-ring",
-                  )}
-                  disabled={!target.upgraded || submitting}
-                  key={target.key}
-                  onClick={() => setTargetKey(target.key)}
-                  type="button"
-                  variant="outline"
-                >
-                  {target.kind === "AGENT" ? <Laptop /> : <HardDrive />}
-                  <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
-                    <span className="block font-medium">{target.title}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {target.detail}
+          {!worktreeId && (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">{t("runIn")}</legend>
+              <div className="grid gap-2">
+                {targets.map((target) => (
+                  <Button
+                    aria-pressed={targetKey === target.key}
+                    className={cn(
+                      "h-auto w-full min-w-0 items-start justify-start gap-3 py-3 text-left whitespace-normal",
+                      targetKey === target.key && "ring-2 ring-ring",
+                    )}
+                    disabled={!target.upgraded || submitting}
+                    key={target.key}
+                    onClick={() => setTargetKey(target.key)}
+                    type="button"
+                    variant="outline"
+                  >
+                    {target.kind === "AGENT" ? <Laptop /> : <HardDrive />}
+                    <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                      <span className="block font-medium">{target.title}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {target.detail}
+                      </span>
                     </span>
-                  </span>
-                  {!target.upgraded && (
-                    <Badge variant="secondary">{t("upgradeAgent")}</Badge>
-                  )}
-                </Button>
-              ))}
-              {targets.length === 0 && (
-                <p className="py-8 text-center text-sm text-muted-foreground">
-                  {t("noEligibleTargets")}
-                </p>
-              )}
-            </div>
-          </fieldset>
+                    {!target.upgraded && (
+                      <Badge variant="secondary">{t("upgradeAgent")}</Badge>
+                    )}
+                  </Button>
+                ))}
+                {targets.length === 0 && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">
+                    {t("noEligibleTargets")}
+                  </p>
+                )}
+              </div>
+            </fieldset>
+          )}
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
         </div>
         <DialogFooter>
           <Button
             disabled={submitting}
-            onClick={() => onOpenChange(false)}
+            onClick={onClose}
             type="button"
             variant="outline"
           >
             {t("cancel")}
           </Button>
           <Button
-            disabled={!script.trim() || !selected || submitting}
-            onClick={() => {
-              if (!selected) return;
-              onSubmit(
-                script,
-                selected.kind === "AGENT"
-                  ? { agentId: selected.id }
-                  : { worktreeId: selected.id },
-              );
-            }}
+            disabled={!script.trim() || !target || submitting}
+            onClick={() => void launch()}
             type="button"
           >
             <Play />

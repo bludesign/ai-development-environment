@@ -367,6 +367,7 @@ function createServerServices(): ServerServices {
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
   worktreesService.syncBatches.startRuntime(pollingService);
+  worktreesService.branchBatches.startRuntime(pollingService);
   const gitLabMergeService = new GitLabMergeService(
     gitLabService,
     worktreesService,

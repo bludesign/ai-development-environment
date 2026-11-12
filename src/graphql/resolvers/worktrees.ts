@@ -52,6 +52,22 @@ export const createWorktreeResolvers = (
       JSON.parse(value.destinationJson) as unknown,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
   },
+  WorktreeLatestBuildArtifact: {
+    metadata: ({ metadataJson }: { metadataJson?: string | null }) => {
+      try {
+        const metadata: unknown = JSON.parse(metadataJson ?? "{}");
+        if (
+          metadata &&
+          typeof metadata === "object" &&
+          !Array.isArray(metadata)
+        )
+          return metadata;
+      } catch {
+        // Older or malformed metadata should not invalidate the worktree.
+      }
+      return {};
+    },
+  },
   Worktree: {
     lastCheckedAt: (value: { lastCheckedAt: Date | null }) =>
       iso(value.lastCheckedAt),
@@ -167,6 +183,22 @@ export const createWorktreeResolvers = (
     },
   },
   Query: {
+    worktreeBranchBatches: (
+      _root: unknown,
+      args: Parameters<WorktreesService["branchBatches"]["batches"]>[0],
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.branchBatches.batches(args);
+    },
+    worktreeBranchBatch: (
+      _root: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.branchBatches.batch(id);
+    },
     worktreeSyncBatch: (
       _root: unknown,
       args: { id: string },
@@ -277,6 +309,16 @@ export const createWorktreeResolvers = (
     },
   },
   Mutation: {
+    startWorktreeBranchBatch: (
+      _root: unknown,
+      args: {
+        input: Parameters<WorktreesService["branchBatches"]["start"]>[0];
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.branchBatches.start(args.input);
+    },
     startWorktreeSyncBatch: (
       _root: unknown,
       args: { input: Parameters<WorktreesService["syncBatches"]["start"]>[0] },

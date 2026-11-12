@@ -3910,6 +3910,7 @@
     "newPlan": "New plan",
     "pull": "Pull",
     "moreActions": "More",
+    "runCommand": "Run command",
     "forcePush": "Force push",
     "sync": "Sync",
     "rebase": "Rebase",
@@ -4054,6 +4055,50 @@
         "SKIPPED": "Skipped",
         "FAILED": "Failed",
         "ATTENTION_REQUIRED": "Needs attention"
+      }
+    },
+    "bulkBranch": {
+      "button": "Bulk Change Branch",
+      "description": "Choose a destination branch, then select worktrees in this view. The batch continues after you close this dialog.",
+      "selection": "Worktrees in this view",
+      "empty": "No worktrees match this view.",
+      "chooseBranch": "Choose a branch before selecting worktrees.",
+      "invalidBranch": "Enter a valid Git branch name.",
+      "aiBranchHelp": "Generate or enter one branch name for all selected worktrees.",
+      "baseBranch": "Base branch (optional)",
+      "defaultBase": "Use each worktree’s base",
+      "rowBase": "Base branch: {branch}",
+      "selectWorktree": "Select {branch}",
+      "start": "Change branch on {count} worktrees",
+      "startOne": "Change branch on {count} worktree",
+      "running": "Bulk Change Branch running",
+      "completed": "Bulk Change Branch completed",
+      "progress": "{completed} of {total} worktrees processed",
+      "job": "View job logs",
+      "monitoringError": "Could not refresh branch change progress. {message}",
+      "missingBatch": "The branch change batch is temporarily unavailable.",
+      "namingCheckout": "Naming checkout",
+      "searchCheckouts": "Search checkouts",
+      "noNamingCheckouts": "No matching checkouts.",
+      "blocked": {
+        "unavailable": "This worktree is unavailable.",
+        "offline": "The agent is offline.",
+        "unsupported": "Update the agent to enable branch changes.",
+        "busy": "Another operation is running in this checkout.",
+        "conflicts": "Resolve the current rebase or conflicts first.",
+        "missingBase": "The base branch is unavailable in this checkout.",
+        "alreadyOnBranch": "This worktree is already on the destination branch.",
+        "branchUnavailable": "The destination branch is unavailable in this checkout.",
+        "branchExists": "The destination branch already exists in this checkout.",
+        "branchCheckedOut": "Another worktree in this clone already uses the destination branch.",
+        "sameCheckout": "Only one worktree per clone can switch to this branch."
+      },
+      "status": {
+        "PENDING": "Queued",
+        "RUNNING": "Changing branch",
+        "SUCCEEDED": "Branch changed",
+        "SKIPPED": "Skipped",
+        "FAILED": "Failed"
       }
     },
     "bulkSync": {

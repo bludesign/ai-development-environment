@@ -3910,6 +3910,7 @@
     "newPlan": "Nouveau plan",
     "pull": "Tirer",
     "moreActions": "Plus",
+    "runCommand": "Exécuter une commande",
     "forcePush": "Forcer le push",
     "sync": "Synchroniser",
     "rebase": "Rebaser",
@@ -4054,6 +4055,50 @@
         "SKIPPED": "Ignorée",
         "FAILED": "Échec",
         "ATTENTION_REQUIRED": "À vérifier"
+      }
+    },
+    "bulkBranch": {
+      "button": "Changer de branche en lot",
+      "description": "Choisissez une branche de destination, puis les arbres de travail de cette vue. Le traitement continue après la fermeture de cette boîte de dialogue.",
+      "selection": "Arbres de travail de cette vue",
+      "empty": "Aucun arbre de travail ne correspond à cette vue.",
+      "chooseBranch": "Choisissez une branche avant de sélectionner des arbres de travail.",
+      "invalidBranch": "Saisissez un nom de branche Git valide.",
+      "aiBranchHelp": "Générez ou saisissez un nom de branche commun aux arbres de travail sélectionnés.",
+      "baseBranch": "Branche de base (facultative)",
+      "defaultBase": "Utiliser la base de chaque arbre de travail",
+      "rowBase": "Branche de base : {branch}",
+      "selectWorktree": "Sélectionner {branch}",
+      "start": "Changer la branche de {count} arbres de travail",
+      "startOne": "Changer la branche de {count} arbre de travail",
+      "running": "Changement de branche en lot en cours",
+      "completed": "Changement de branche en lot terminé",
+      "progress": "{completed} arbres de travail traités sur {total}",
+      "job": "Voir les journaux de la tâche",
+      "monitoringError": "Impossible d’actualiser la progression du changement de branche. {message}",
+      "missingBatch": "Le lot de changement de branche est temporairement indisponible.",
+      "namingCheckout": "Copie pour nommer la branche",
+      "searchCheckouts": "Rechercher des copies du dépôt",
+      "noNamingCheckouts": "Aucune copie correspondante.",
+      "blocked": {
+        "unavailable": "Cet arbre de travail est indisponible.",
+        "offline": "L’agent est hors ligne.",
+        "unsupported": "Mettez à jour l’agent pour permettre les changements de branche.",
+        "busy": "Une autre opération est en cours dans cette copie du dépôt.",
+        "conflicts": "Terminez le rebasage ou résolvez les conflits en cours.",
+        "missingBase": "La branche de base est indisponible dans cette copie du dépôt.",
+        "alreadyOnBranch": "Cet arbre de travail est déjà sur la branche de destination.",
+        "branchUnavailable": "La branche de destination est indisponible dans cette copie du dépôt.",
+        "branchExists": "La branche de destination existe déjà dans cette copie du dépôt.",
+        "branchCheckedOut": "Un autre arbre de travail de cette copie du dépôt utilise déjà la branche de destination.",
+        "sameCheckout": "Un seul arbre de travail par copie du dépôt peut basculer sur cette branche."
+      },
+      "status": {
+        "PENDING": "En file d’attente",
+        "RUNNING": "Changement de branche",
+        "SUCCEEDED": "Branche changée",
+        "SKIPPED": "Ignoré",
+        "FAILED": "Échec"
       }
     },
     "bulkSync": {

@@ -34,6 +34,10 @@ describe("agent inventory", () => {
     );
   });
 
+  test("advertises source branch verification for branch changes", () => {
+    expect(AGENT_CAPABILITIES).toContain("worktree.branch.expected-source");
+  });
+
   test("reports the operating system instead of assuming macOS", () => {
     expect(operatingSystemVersion("darwin", "25.0.0")).toBe("macOS 25.0.0");
     expect(operatingSystemVersion("linux", "6.8.0")).toBe("Linux 6.8.0");

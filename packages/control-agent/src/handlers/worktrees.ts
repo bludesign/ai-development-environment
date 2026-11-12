@@ -1946,6 +1946,38 @@ async function currentBranch(
   return result.exitCode === 0 ? result.stdout.trim() : null;
 }
 
+async function branchChangeSource(
+  folder: string,
+  expectedBranch: string | null | undefined,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  if (expectedBranch === undefined)
+    return currentBranch(folder, timeoutMs, signal);
+  const result = await git(
+    folder,
+    ["symbolic-ref", "-q", "HEAD"],
+    timeoutMs,
+    signal,
+  );
+  const ref =
+    result.exitCode === 1 && !result.cancelled && !result.timedOut
+      ? null
+      : requireSuccess(
+          result,
+          "Could not verify the worktree source branch",
+        ).stdout.trim();
+  const expectedRef =
+    expectedBranch === null ? null : `refs/heads/${expectedBranch}`;
+  if (ref !== expectedRef) {
+    const actual = ref?.replace(/^refs\/heads\//, "") ?? "detached HEAD";
+    throw new Error(
+      `The worktree branch changed after selection. Expected ${expectedBranch ?? "detached HEAD"}, found ${actual}.`,
+    );
+  }
+  return expectedBranch;
+}
+
 async function chooseNewBranch(
   folder: string,
   candidates: string[],
@@ -2059,29 +2091,35 @@ export const branchWorktree: AgentJobHandler = async (
           signal,
         )
       : null;
-  const beforeBranch = changeFolder
-    ? await currentBranch(changeFolder, timeoutMs, signal)
-    : null;
-  const branch =
+  const selectBranch = (beforeBranch: string | null) =>
     input.mode === "NEW"
-      ? await chooseNewBranch(
+      ? chooseNewBranch(
           rootFolder,
           input.candidates,
-          input.action === "CHANGE" ? beforeBranch : null,
+          beforeBranch,
           timeoutMs,
           signal,
         )
       : input.candidates[0]!;
+  const createBranch = changeFolder ? null : await selectBranch(null);
   const targetFolder =
-    input.action === "CREATE"
-      ? join(
-          dirname(rootFolder),
-          `${basename(rootFolder)}-${branch.replaceAll("/", "-")}`,
-        )
-      : changeFolder!;
+    changeFolder ??
+    join(
+      dirname(rootFolder),
+      `${basename(rootFolder)}-${createBranch!.replaceAll("/", "-")}`,
+    );
 
-  const execute = () =>
-    finishBranchWorktree(
+  const execute = async () => {
+    const beforeBranch = changeFolder
+      ? await branchChangeSource(
+          changeFolder,
+          input.expectedBranch,
+          timeoutMs,
+          signal,
+        )
+      : null;
+    const branch = createBranch ?? (await selectBranch(beforeBranch));
+    return finishBranchWorktree(
       input,
       rootFolder,
       targetFolder,
@@ -2090,6 +2128,7 @@ export const branchWorktree: AgentJobHandler = async (
       timeoutMs,
       signal,
     );
+  };
   return context?.withOperationResources
     ? context.withOperationResources(
         [

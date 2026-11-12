@@ -174,6 +174,84 @@ describe("worktree inventory and inspection", () => {
     );
   });
 
+  test.each(["main", null])(
+    "checks the reviewed source %s after locking the checkout",
+    async (expectedBranch) => {
+      const folder = await repository();
+      const gitDirectory = await realpath(join(folder, ".git"));
+      if (expectedBranch === null) await git(folder, "switch", "--detach");
+      const payload = {
+        codebaseId: "codebase-1",
+        rootFolder: folder,
+        folder,
+        gitDirectory,
+        expectedOrigin: "github.com/openai/codex",
+        expectedBranch,
+        baseBranch: "main",
+        action: "CHANGE",
+        mode: "NEW",
+        candidates: ["release"],
+        stashOnFailure: false,
+      };
+
+      await expect(
+        branchWorktree(
+          payload,
+          10_000,
+          new AbortController().signal,
+          async () => undefined,
+          {
+            agentId: "agent-1",
+            reportWorktreeActivity: async () => undefined,
+            withOperationResources: async (_resources, run) => {
+              await git(folder, "switch", "-c", "unreviewed");
+              return run();
+            },
+          },
+        ),
+      ).rejects.toThrow(
+        `Expected ${expectedBranch ?? "detached HEAD"}, found unreviewed.`,
+      );
+      expect(
+        (await git(folder, "branch", "--show-current")).stdout.trim(),
+      ).toBe("unreviewed");
+      expect((await git(folder, "branch", "--list", "release")).stdout).toBe(
+        "",
+      );
+    },
+  );
+
+  test.each(["main", null])(
+    "switches when the reviewed source %s matches live HEAD",
+    async (expectedBranch) => {
+      const folder = await repository();
+      const gitDirectory = await realpath(join(folder, ".git"));
+      if (expectedBranch === null) await git(folder, "switch", "--detach");
+      else await git(folder, "tag", "main");
+
+      await expect(
+        branchWorktree(
+          {
+            codebaseId: "codebase-1",
+            rootFolder: folder,
+            folder,
+            gitDirectory,
+            expectedOrigin: "github.com/openai/codex",
+            expectedBranch,
+            baseBranch: "main",
+            action: "CHANGE",
+            mode: "NEW",
+            candidates: ["release"],
+            stashOnFailure: false,
+          },
+          10_000,
+          new AbortController().signal,
+          async () => undefined,
+        ),
+      ).resolves.toMatchObject({ worktree: { branch: "release" } });
+    },
+  );
+
   test("suspends and reapplies tracked preparations around a branch change", async () => {
     const folder = await repository();
     await git(folder, "switch", "-c", "release");

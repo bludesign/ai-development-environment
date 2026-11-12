@@ -1574,6 +1574,27 @@ export function registerWorktreesPageTests(
         },
       );
 
+      test("offers Run for the latest signed APK", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const build =
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!
+            .latestBuild!;
+        build.artifacts = [
+          {
+            id: "apk-artifact",
+            kind: "APK",
+            checksum: "sha256:artifact",
+            metadata: { signed: true, applicationId: "com.example.app" },
+          },
+        ];
+        render(<WorktreesPage />);
+
+        const row = (await screen.findByText("Latest build")).parentElement!;
+        expect(within(row).getByRole("button", { name: "Run" })).toBeDefined();
+      });
+
       test.each(["GITHUB", "GITLAB"] as const)(
         "distinguishes required and requested %s reviews",
         async (provider) => {
@@ -2016,6 +2037,83 @@ export function registerWorktreesPageTests(
             { id: "worktree-1" },
           ),
         );
+      });
+
+      test("runs a custom command in the worktree whose More menu was opened", async () => {
+        const fixture = await request<{ worktreeOverview: WorktreeOverview }>(
+          "query Fixture",
+        );
+        const agentGroup = fixture.worktreeOverview.agents[0]!;
+        agentGroup.agent.capabilities.push("command.run");
+        const group = agentGroup.codebases[0]!;
+        group.worktrees.push({
+          ...group.worktrees[0]!,
+          id: "worktree-2",
+          branch: "feature/custom-command",
+          folder: "/workspaces/custom-command",
+          primary: false,
+        });
+        const launch = vi
+          .fn()
+          .mockRejectedValueOnce(new Error("Could not start command"))
+          .mockResolvedValue({ startCustomCommandRun: { id: "custom-run" } });
+        request.mockImplementation(async (query, variables) =>
+          query.includes("mutation StartCustomCommand")
+            ? launch(variables)
+            : (fixture as never),
+        );
+
+        render(<WorktreesPage />);
+        const branch = await screen.findByRole("button", {
+          name: "feature/custom-command",
+        });
+        const card = branch.closest<HTMLElement>('[data-slot="card"]')!;
+        const more = within(card).getByRole("button", { name: "More" });
+        const openCommand = async () => {
+          fireEvent.keyDown(more, { key: "Enter" });
+          fireEvent.click(
+            await screen.findByRole("menuitem", { name: "Run command" }),
+          );
+          return screen.findByRole("dialog", { name: "Run custom" });
+        };
+
+        const firstDialog = within(await openCommand());
+        expect(firstDialog.queryByText("Run in")).toBeNull();
+        fireEvent.click(firstDialog.getByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(document.activeElement).toBe(more));
+
+        const dialog = within(await openCommand());
+        const script = dialog.getByRole<HTMLTextAreaElement>("textbox", {
+          name: "Shell script",
+        });
+        expect(document.activeElement).toBe(script);
+        const run = dialog.getByRole<HTMLButtonElement>("button", {
+          name: "Run",
+        });
+        expect(run.disabled).toBe(true);
+        fireEvent.change(script, { target: { value: "pwd" } });
+        fireEvent.click(run);
+        expect((await dialog.findByRole("alert")).textContent).toContain(
+          "Could not start command",
+        );
+        expect(script.value).toBe("pwd");
+        expect(navigation.push).not.toHaveBeenCalled();
+
+        fireEvent.click(run);
+        await waitFor(() =>
+          expect(navigation.push).toHaveBeenCalledWith(
+            "/dashboard/commands/runs/custom-run",
+          ),
+        );
+        const input = {
+          script: "pwd",
+          origin: "MANUAL",
+          worktreeId: "worktree-2",
+          idempotencyKey: expect.any(String),
+        };
+        expect(launch).toHaveBeenCalledTimes(2);
+        expect(launch).toHaveBeenNthCalledWith(1, { input });
+        expect(launch.mock.calls[1]).toEqual(launch.mock.calls[0]);
       });
 
       test("disables worktree operations while the codebase has a blocking job", async () => {

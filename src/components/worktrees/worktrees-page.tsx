@@ -68,6 +68,7 @@ import {
 } from "@/components/worktrees/worktree-automation-buttons";
 import { WorkflowQuickActions } from "@/components/workflows/workflow-quick-actions";
 import { CommandQuickActions } from "@/components/commands/command-quick-actions";
+import { CustomCommandDialog } from "@/components/commands/custom-command-dialog";
 import { PipelineMenu } from "@/components/github/pipeline-menu";
 import { PullRequestMenu } from "@/components/github/pull-request-menu";
 import { AssignReviewersButton } from "@/components/reviewers/assign-reviewers-button";
@@ -203,6 +204,7 @@ import {
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
+import { WorktreeBulkBranch } from "./worktree-bulk-branch";
 import { WorktreeBulkMerge } from "./worktree-bulk-merge";
 import { WorktreeBulkSync } from "./worktree-bulk-sync";
 import {
@@ -801,7 +803,7 @@ export function WorktreesPage({
             agents {
               agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
-                iosBuildConfigured androidBuildConfigured
+                hasPreparations iosBuildConfigured androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
@@ -1147,6 +1149,15 @@ export function WorktreesPage({
             appId={appId}
             disabled={busy || fetchOperation.active || !overview}
             key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+            onReload={refreshPage}
+          />
+          <WorktreeBulkBranch
+            agentId={globalAgent.activeAgentId}
+            agents={filteredAgents}
+            allAgents={overview?.agents ?? []}
+            appId={appId}
+            disabled={busy || fetchOperation.active || !overview}
+            key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
             onReload={refreshPage}
           />
           <Button onClick={() => setHiddenOpen(true)} variant="outline">
@@ -1998,6 +2009,7 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
             await props.onReload();
             if (expanded) await refreshInspection();
           }}
+          showRunCommand
         />
         <QuickActionsRow
           first={
@@ -3898,10 +3910,23 @@ export function PrimaryWorktreeActions(
 }
 
 export function ActionRow(
-  props: WorktreeItemProps & { onCompleted: () => Promise<void> },
+  props: WorktreeItemProps & {
+    onCompleted: () => Promise<void>;
+    showRunCommand?: boolean;
+  },
 ) {
   const { worktree } = props;
   const t = useTranslations("worktrees");
+  const [customCommandOpen, setCustomCommandOpen] = useState(false);
+  const moreButton = useRef<HTMLButtonElement>(null);
+  const openCommandOnMenuClose = useRef(false);
+  const commandSupported = props.overview.agents
+    .find((entry) =>
+      entry.codebases.some(
+        (codebase) => codebase.codebase.id === props.group.codebase.id,
+      ),
+    )
+    ?.agent.capabilities.includes("command.run");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
     Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
@@ -3976,14 +4001,34 @@ export function ActionRow(
         onCompleted={props.onCompleted}
         worktree={worktree}
       />
-      {/* The operations that discard or rewrite work, kept off the row itself. */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button size="sm" variant="outline">
+          <Button ref={moreButton} size="sm" variant="outline">
             <MoreHorizontal /> {t("moreActions")}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent
+          align="end"
+          onCloseAutoFocus={(event) => {
+            if (!openCommandOnMenuClose.current) return;
+            openCommandOnMenuClose.current = false;
+            event.preventDefault();
+            setCustomCommandOpen(true);
+          }}
+        >
+          {props.showRunCommand && (
+            <>
+              <DropdownMenuItem
+                disabled={!commandSupported || Boolean(worktree.missingAt)}
+                onSelect={() => {
+                  openCommandOnMenuClose.current = true;
+                }}
+              >
+                <Terminal /> {t("runCommand")}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
+          )}
           {isDefault && (
             <>
               <OperationMenuItem
@@ -4065,6 +4110,16 @@ export function ActionRow(
           />
         </DropdownMenuContent>
       </DropdownMenu>
+      {customCommandOpen && (
+        <CustomCommandDialog
+          onClose={() => setCustomCommandOpen(false)}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            moreButton.current?.focus();
+          }}
+          worktreeId={worktree.id}
+        />
+      )}
       <WorktreeActiveOperations worktree={worktree} />
     </div>
   );
