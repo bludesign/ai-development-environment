@@ -4,11 +4,9 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 vi.mock("web-push", () => ({
-  default: {
-    generateVAPIDKeys: vi.fn(),
-    setVapidDetails: vi.fn(),
-    sendNotification: vi.fn(),
-  },
+  generateVAPIDKeys: vi.fn(),
+  setVapidDetails: vi.fn(),
+  sendNotification: vi.fn(),
 }));
 
 import type { CredentialService } from "@/services/credentials";
