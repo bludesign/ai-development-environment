@@ -15,7 +15,7 @@ describe("agent release version", () => {
     const { AGENT_VERSION, collectInventory } = await import("./inventory.js");
 
     expect(AGENT_VERSION).toBe("1.2.3");
-    expect(collectInventory().version).toBe("1.2.3");
+    expect((await collectInventory()).version).toBe("1.2.3");
   });
 
   test("preserves the runtime version override used by container releases", async () => {
@@ -23,6 +23,6 @@ describe("agent release version", () => {
     const { AGENT_VERSION, collectInventory } = await import("./inventory.js");
 
     expect(AGENT_VERSION).toBe("2.3.4");
-    expect(collectInventory().version).toBe("2.3.4");
+    expect((await collectInventory()).version).toBe("2.3.4");
   });
 });

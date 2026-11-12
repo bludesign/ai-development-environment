@@ -76,6 +76,7 @@ import {
   type Simulator,
   type SimulatorAction,
   type SimulatorInventory,
+  type SimulatorPlatform,
 } from "./simulator-client";
 import { SimulatorStateBadge } from "./simulator-state-badge";
 
@@ -123,8 +124,11 @@ async function deleteSimulatorGroups(groups: SimulatorRow[][]) {
   return failures;
 }
 
-export function SimulatorsPage() {
+export function SimulatorsPage({
+  initialPlatform = "APPLE",
+}: { initialPlatform?: SimulatorPlatform } = {}) {
   const t = useTranslations("simulators");
+  const [platform, setPlatform] = useState(initialPlatform);
   const { activeAgentId, agents, loading, ready, error } = useActiveAgent();
   const [selection, setSelection] = usePageAgentFilter(
     "simulators",
@@ -159,7 +163,25 @@ export function SimulatorsPage() {
             {t("description")}
           </p>
         </div>
-        <PageAgentFilter value={selection} onValueChange={setSelection} />
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            disabled={deleting}
+            value={platform}
+            onValueChange={(value) => {
+              setPlatform(value === "ANDROID" ? "ANDROID" : "APPLE");
+              setCompletedDeletion(null);
+            }}
+          >
+            <SelectTrigger aria-label={t("simulatorFamily")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="APPLE">{t("appleSimulators")}</SelectItem>
+              <SelectItem value="ANDROID">{t("androidEmulators")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <PageAgentFilter value={selection} onValueChange={setSelection} />
+        </div>
       </div>
       {error && (
         <Alert variant="destructive">
@@ -196,7 +218,8 @@ export function SimulatorsPage() {
         <SimulatorList
           completedDeletion={completedDeletion}
           deleting={deleting}
-          key={agentId ?? ALL_PAGE_AGENTS}
+          key={`${platform}:${agentId ?? ALL_PAGE_AGENTS}`}
+          simulatorFamily={platform}
           agents={
             agentId ? agents.filter((agent) => agent.id === agentId) : agents
           }
@@ -216,17 +239,21 @@ function SimulatorList({
   completedDeletion,
   deleting,
   onDelete,
+  simulatorFamily,
 }: {
   agents: ActiveAgentOption[];
   completedDeletion: DeleteBatchResult | null;
   deleting: boolean;
   onDelete: (groups: SimulatorRow[][]) => Promise<void>;
+  simulatorFamily: SimulatorPlatform;
 }) {
   const t = useTranslations("simulators");
   const tc = useTranslations("common");
   const locale = useLocale();
   const eligibleIds = agents
-    .filter((agent) => simulatorAgentSupports(agent, "inventory"))
+    .filter((agent) =>
+      simulatorAgentSupports(agent, "inventory", simulatorFamily),
+    )
     .map(({ id }) => id)
     .join("\0");
   const [inventories, setInventories] = useState<
@@ -295,6 +322,7 @@ function SimulatorList({
             const result = await refreshSimulatorInventory(
               id,
               controller.signal,
+              simulatorFamily === "ANDROID" ? simulatorFamily : undefined,
             );
             if (controller.signal.aborted) return;
             setInventories((current) => ({ ...current, [id]: result }));
@@ -314,7 +342,7 @@ function SimulatorList({
         }),
       );
     },
-    [eligibleIds],
+    [eligibleIds, simulatorFamily],
   );
 
   useEffect(() => {
@@ -423,11 +451,13 @@ function SimulatorList({
 
   const createAgents = agents.filter(
     (agent) =>
-      simulatorAgentSupports(agent, "create") && inventoryReady(agent.id),
+      simulatorAgentSupports(agent, "create", simulatorFamily) &&
+      inventoryReady(agent.id),
   );
   const resetAgents = agents.filter(
     (agent) =>
-      simulatorAgentSupports(agent, "reset") && inventoryReady(agent.id),
+      simulatorAgentSupports(agent, "reset", simulatorFamily) &&
+      inventoryReady(agent.id),
   );
   const noMatchingRows = rows.length > 0 && filtered.length === 0;
   const groups = agents
@@ -438,7 +468,7 @@ function SimulatorList({
     .filter((group) => group.rows.length > 0);
   const canDelete = ({ agent, simulator }: SimulatorRow) =>
     !agentErrors[agent.id] &&
-    simulatorAgentSupports(agent, "action") &&
+    simulatorAgentSupports(agent, "action", simulatorFamily) &&
     canDeleteSimulator(simulator);
   const selectedRows = filtered.filter(
     (row) => canDelete(row) && selected.has(simulatorRowKey(row)),
@@ -554,18 +584,21 @@ function SimulatorList({
         >
           {editMode ? <X /> : <ListFilter />} {t(editMode ? "done" : "edit")}
         </Button>
-        <Button
-          disabled={editMode || operationsBusy || !resetAgents.length}
-          onClick={() => setDialog("reset")}
-          variant="outline"
-        >
-          {t("reset")}
-        </Button>
+        {simulatorFamily === "APPLE" && (
+          <Button
+            disabled={editMode || operationsBusy || !resetAgents.length}
+            onClick={() => setDialog("reset")}
+            variant="outline"
+          >
+            {t("reset")}
+          </Button>
+        )}
         <Button
           disabled={editMode || operationsBusy || !createAgents.length}
           onClick={() => setDialog("create")}
         >
-          <Plus /> {t("create")}
+          <Plus />{" "}
+          {t(simulatorFamily === "ANDROID" ? "createEmulator" : "create")}
         </Button>
       </div>
 
@@ -598,8 +631,12 @@ function SimulatorList({
         const message =
           agent.connectionStatus !== "ONLINE"
             ? t("offline")
-            : !simulatorAgentSupports(agent, "inventory")
-              ? t("agentUpdateRequired")
+            : !simulatorAgentSupports(agent, "inventory", simulatorFamily)
+              ? t(
+                  simulatorFamily === "ANDROID"
+                    ? "androidToolsRequired"
+                    : "agentUpdateRequired",
+                )
               : agentErrors[agent.id];
         return (
           message && (
@@ -678,7 +715,7 @@ function SimulatorList({
                     const canAct =
                       !agentBusy &&
                       !agentErrors[agent.id] &&
-                      simulatorAgentSupports(agent, "action");
+                      simulatorAgentSupports(agent, "action", simulatorFamily);
                     const booted = simulator.state.toLowerCase() === "booted";
                     const shutDown =
                       simulator.state.toLowerCase() === "shutdown";
@@ -804,10 +841,22 @@ function SimulatorList({
                 <TabletSmartphone />
               </EmptyMedia>
               <EmptyTitle>
-                {t(noMatchingRows ? "noMatches" : "emptyTitle")}
+                {t(
+                  noMatchingRows
+                    ? "noMatches"
+                    : simulatorFamily === "ANDROID"
+                      ? "androidEmptyTitle"
+                      : "emptyTitle",
+                )}
               </EmptyTitle>
               <EmptyDescription>
-                {t(noMatchingRows ? "adjustFilters" : "emptyDescription")}
+                {t(
+                  noMatchingRows
+                    ? "adjustFilters"
+                    : simulatorFamily === "ANDROID"
+                      ? "androidEmptyDescription"
+                      : "emptyDescription",
+                )}
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
@@ -819,6 +868,7 @@ function SimulatorList({
           agents={dialog === "create" ? createAgents : resetAgents}
           inventories={inventories}
           mode={dialog}
+          platform={simulatorFamily}
           onClose={() => setDialog(null)}
           onCreate={(input: CreateSimulatorInput) =>
             run([input.agentId], (signal) => createSimulator(input, signal))

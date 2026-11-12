@@ -52,6 +52,7 @@ const platformNames: Record<BuildPlatform, string> = {
   MAC_CATALYST: "Mac Catalyst",
   MACOS_DESIGNED_FOR_IPAD: "macOS (Designed for iPad)",
   VISIONOS_DESIGNED_FOR_IPAD: "visionOS (Designed for iPad)",
+  ANDROID: "Android",
 };
 
 export function buildPlatformName(platform: BuildPlatform | null) {
@@ -179,7 +180,16 @@ export function storedBuildPlatform(build: {
   destinationJson?: string;
   destinationType?: string;
 }): BuildPlatform | null {
-  if (build.destinationType === "HOST") return null;
+  if (build.destinationType === "HOST") {
+    try {
+      return JSON.parse(build.destinationJson ?? "null")?.platformId ===
+        "ANDROID"
+        ? "ANDROID"
+        : null;
+    } catch {
+      return null;
+    }
+  }
   if (!build.destinationJson) return "IOS";
   try {
     return buildDestinationPlatform(

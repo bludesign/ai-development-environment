@@ -6,6 +6,17 @@ import {
 } from "@ai-development-environment/agent-contract/operation-resources";
 import { WORKTREE_POST_MERGE_SWITCH_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
 import {
+  ANDROID_BUILD_DELETE_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_REMOTE_DEPLOY_JOB_KIND,
+  ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+  ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+  isBuildRunJob,
+} from "@ai-development-environment/agent-contract/builds";
+import {
   SIMULATOR_ACTION_JOB_KIND,
   SIMULATOR_CREATE_JOB_KIND,
   SIMULATOR_INSPECT_JOB_KIND,
@@ -98,10 +109,11 @@ export async function jobOperationDescriptor(
     const changesRoster =
       input.kind === SIMULATOR_CREATE_JOB_KIND ||
       action?.action === "CLONE" ||
+      (action?.platform === "ANDROID" && action.action === "RENAME") ||
       action?.action === "DELETE";
     resources.push({
       kind: "DESTINATION",
-      key: `${input.agentId}:simulator-set`,
+      key: `${input.agentId}:${p.platform === "ANDROID" ? "android-" : ""}simulator-set`,
       mode: changesRoster ? "WRITE" : "READ",
       ...context,
     });
@@ -136,7 +148,7 @@ export async function jobOperationDescriptor(
     return { version: 1, resources: command ? barrier() : resources };
   const artifact =
     typeof p.artifactDirectory === "string" ? p.artifactDirectory : null;
-  const isBuild = input.kind === "ios.build.run";
+  const isBuild = isBuildRunJob(input.kind);
   const artifactOnly = [
     "ios.build.delete",
     "ios.artifact.download",
@@ -148,6 +160,12 @@ export async function jobOperationDescriptor(
     "ios.test-results.parse",
     "ios.coverage.generate",
     "ios.runDestinations.inspect",
+    ANDROID_BUILD_DELETE_JOB_KIND,
+    ANDROID_DEPLOY_JOB_KIND,
+    ANDROID_REMOTE_DEPLOY_JOB_KIND,
+    ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+    ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+    ANDROID_RUN_DESTINATIONS_JOB_KIND,
   ].includes(input.kind);
   if (artifact)
     resources.push({
@@ -157,6 +175,7 @@ export async function jobOperationDescriptor(
       mode:
         isBuild ||
         input.kind === "ios.build.delete" ||
+        input.kind === ANDROID_BUILD_DELETE_JOB_KIND ||
         input.kind === "ios.archive.export" ||
         input.kind === "ios.test-results.parse" ||
         input.kind === "ios.coverage.generate"
@@ -249,10 +268,12 @@ export async function jobOperationDescriptor(
   if (p.operation === "OPEN_EDITOR" || input.kind === "worktree.watch")
     return { version: 1, resources };
   const read =
-    input.kind.includes("inspect") ||
+    (input.kind.includes("inspect") &&
+      input.kind !== ANDROID_SOURCE_INSPECT_JOB_KIND) ||
     input.kind === "codebase.refresh" ||
     input.kind === "worktree.diff.asset" ||
     input.kind === "ios.source.discover" ||
+    input.kind === ANDROID_SOURCE_DISCOVER_JOB_KIND ||
     input.kind === "ios.source.parse" ||
     (input.kind === "worktree.prepare" && p.action === "INSPECT");
   const mode = isBuild ? "BUILD" : read ? "READ" : "WRITE";
@@ -435,11 +456,12 @@ export async function jobOperationDescriptor(
         key: resource.key.replace(":worktree:", ":build-stability:"),
         mode: "WRITE",
       });
-    if (typeof p.derivedDataPath === "string")
+    const buildDataPath = p.gradleCachePath ?? p.derivedDataPath;
+    if (typeof buildDataPath === "string")
       resources.push({
         kind: "PATH",
-        key: `${input.agentId}:path:${p.derivedDataPath}`,
-        path: p.derivedDataPath,
+        key: `${input.agentId}:path:${buildDataPath}`,
+        path: buildDataPath,
         mode: "WRITE",
         ...context,
       });

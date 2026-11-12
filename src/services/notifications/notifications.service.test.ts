@@ -7,7 +7,9 @@ const sendNotification = vi.hoisted(() => vi.fn());
 
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 vi.mock("web-push", () => ({
-  default: { generateVAPIDKeys, setVapidDetails, sendNotification },
+  generateVAPIDKeys,
+  setVapidDetails,
+  sendNotification,
 }));
 
 import { agentEventBus } from "@/services/agent-control";

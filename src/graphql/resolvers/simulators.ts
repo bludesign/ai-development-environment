@@ -9,12 +9,18 @@ import {
   simulatorActionPayload,
   simulatorCreatePayload,
   simulatorInspectPayload,
+  simulatorInventoryPayload,
   type SimulatorAction,
+  type SimulatorPlatform,
 } from "@ai-development-environment/agent-contract/simulators";
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import type { SimulatorsService } from "@/services/simulators/simulators.service";
 
-type SimulatorRequest = { agentId: string; requestId: string };
+type SimulatorRequest = {
+  agentId: string;
+  requestId: string;
+  platform?: SimulatorPlatform | null;
+};
 type CompletedJob = { kind: string; status: string; resultJson: string | null };
 
 function requireControlPlane(context: GraphQLContext): void {
@@ -61,7 +67,7 @@ export function createSimulatorResolvers(service: SimulatorsService) {
     Mutation: {
       refreshSimulatorInventory(
         _root: unknown,
-        { agentId, requestId }: SimulatorRequest,
+        { agentId, requestId, platform }: SimulatorRequest,
         context: GraphQLContext,
       ) {
         requireControlPlane(context);
@@ -69,7 +75,7 @@ export function createSimulatorResolvers(service: SimulatorsService) {
           agentId,
           requestId,
           SIMULATOR_INVENTORY_JOB_KIND,
-          {},
+          simulatorInventoryPayload({ platform }),
         );
       },
       inspectSimulator(
@@ -78,6 +84,7 @@ export function createSimulatorResolvers(service: SimulatorsService) {
           agentId,
           requestId,
           simulatorId,
+          platform,
         }: SimulatorRequest & { simulatorId: string },
         context: GraphQLContext,
       ) {
@@ -86,7 +93,7 @@ export function createSimulatorResolvers(service: SimulatorsService) {
           agentId,
           requestId,
           SIMULATOR_INSPECT_JOB_KIND,
-          simulatorInspectPayload({ simulatorId }),
+          simulatorInspectPayload({ simulatorId, platform }),
         );
       },
       createSimulator(
@@ -126,7 +133,15 @@ export function createSimulatorResolvers(service: SimulatorsService) {
       performSimulatorAction(
         _root: unknown,
         {
-          input: { agentId, requestId, simulatorId, action, name, bundleId },
+          input: {
+            agentId,
+            requestId,
+            simulatorId,
+            action,
+            name,
+            bundleId,
+            platform,
+          },
         }: {
           input: SimulatorRequest & {
             simulatorId: string;
@@ -144,6 +159,7 @@ export function createSimulatorResolvers(service: SimulatorsService) {
           SIMULATOR_ACTION_JOB_KIND,
           simulatorActionPayload({
             simulatorId,
+            platform,
             action,
             ...(name == null ? {} : { name }),
             ...(bundleId == null ? {} : { bundleId }),

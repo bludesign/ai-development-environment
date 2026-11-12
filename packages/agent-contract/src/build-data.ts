@@ -18,7 +18,7 @@ export type DerivedDataLocationMode =
   (typeof DERIVED_DATA_LOCATION_MODES)[number];
 
 export type BuildDataScanEntryKind =
-  "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT" | "GRADLE_PROJECT";
 
 export type BuildDataWorktreeRoot = {
   id: string;
@@ -148,7 +148,13 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
   if (
     kind !== undefined &&
     !(
-      ["PROJECT", "PENDING", "SHARED_CACHE", "DEVICE_SUPPORT"] as unknown[]
+      [
+        "PROJECT",
+        "PENDING",
+        "SHARED_CACHE",
+        "DEVICE_SUPPORT",
+        "GRADLE_PROJECT",
+      ] as unknown[]
     ).includes(kind)
   ) {
     throw new Error(`build data delete targets[${index}].kind is invalid`);
@@ -270,7 +276,13 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
       const kind = entry.kind;
       if (
         !(
-          ["PROJECT", "PENDING", "SHARED_CACHE", "DEVICE_SUPPORT"] as unknown[]
+          [
+            "PROJECT",
+            "PENDING",
+            "SHARED_CACHE",
+            "DEVICE_SUPPORT",
+            "GRADLE_PROJECT",
+          ] as unknown[]
         ).includes(kind)
       ) {
         throw new Error(`build data entries[${index}].kind is invalid`);

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import {
+  ANDROID_SIMULATORS_CAPABILITY,
   SIMULATOR_ACTION_JOB_KIND,
   SIMULATOR_CREATE_JOB_KIND,
   SIMULATOR_INSPECT_JOB_KIND,
@@ -14,6 +15,8 @@ import {
   simulatorEmptyPayload,
   simulatorId,
   simulatorInspectPayload,
+  simulatorInventoryPayload,
+  simulatorPlatform,
   type SimulatorAction,
   type SimulatorDetails,
   type SimulatorInventory,
@@ -29,7 +32,7 @@ const simulatorPayloads = {
   [SIMULATOR_ACTION_JOB_KIND]: simulatorActionPayload,
   [SIMULATOR_CREATE_JOB_KIND]: simulatorCreatePayload,
   [SIMULATOR_INSPECT_JOB_KIND]: simulatorInspectPayload,
-  [SIMULATOR_INVENTORY_JOB_KIND]: simulatorEmptyPayload,
+  [SIMULATOR_INVENTORY_JOB_KIND]: simulatorInventoryPayload,
   [SIMULATOR_RESET_JOB_KIND]: simulatorEmptyPayload,
 };
 
@@ -42,7 +45,11 @@ export type SimulatorAutomation = {
   source: "MCP" | "WORKFLOW";
   requestScope?: readonly string[];
 };
-type SimulatorTarget = { agentId: string; simulatorId: string };
+type SimulatorTarget = {
+  agentId: string;
+  simulatorId: string;
+  platform?: "APPLE" | "ANDROID";
+};
 type SimulatorDeleteOutcome = SimulatorTarget & {
   jobId: string | null;
   status: string | null;
@@ -75,6 +82,9 @@ export function summarizeSimulatorJob(job: SimulatorJob) {
   let operation: SimulatorOperation;
   let deviceId: string | null = null;
   let bundleId: string | null = null;
+  const payloadPlatform = simulatorPlatform(
+    JSON.parse(job.payloadJson).platform,
+  );
   switch (job.kind) {
     case SIMULATOR_ACTION_JOB_KIND: {
       const payload = simulatorActionPayload(JSON.parse(job.payloadJson));
@@ -115,9 +125,13 @@ export function summarizeSimulatorJob(job: SimulatorJob) {
         );
         if (details.simulator.id !== deviceId) {
           details = null;
-          throw new Error("Simulator details returned a different UUID");
+          throw new Error("Simulator details returned a different identifier");
         }
-      } else if (operation === "CREATE" || operation === "CLONE") {
+      } else if (
+        operation === "CREATE" ||
+        operation === "CLONE" ||
+        (operation === "RENAME" && payloadPlatform === "ANDROID")
+      ) {
         deviceId = simulatorId(JSON.parse(job.resultJson ?? "{}").simulatorId);
       }
     } catch (failure) {
@@ -129,6 +143,7 @@ export function summarizeSimulatorJob(job: SimulatorJob) {
     jobId: job.id,
     agentId: job.agentId,
     operation,
+    ...(payloadPlatform === "ANDROID" ? { platform: payloadPlatform } : {}),
     status: job.status,
     error,
     timeoutSeconds: job.timeoutSeconds,
@@ -246,11 +261,15 @@ export class SimulatorsService {
     for (const target of targets) {
       if (!target || typeof target !== "object")
         throw new Error(
-          "Simulator deletion targets require an agent ID and simulator UUID",
+          "Simulator deletion targets require an agent ID and simulator identifier",
         );
       const normalized = {
         agentId: checkedAgentId(target.agentId),
-        simulatorId: simulatorId(target.simulatorId),
+        simulatorId: simulatorInspectPayload(
+          target.platform
+            ? { simulatorId: target.simulatorId, platform: target.platform }
+            : { simulatorId: target.simulatorId },
+        ).simulatorId,
       };
       byTarget.set(
         JSON.stringify([normalized.agentId, normalized.simulatorId]),
@@ -269,7 +288,10 @@ export class SimulatorsService {
         const job = await this.enqueueJob(
           target.agentId,
           SIMULATOR_ACTION_JOB_KIND,
-          { simulatorId: target.simulatorId, action: "DELETE" },
+          simulatorActionPayload({
+            simulatorId: target.simulatorId,
+            action: "DELETE",
+          }),
           `${batchKey}:${digest(key)}`,
         );
         outcomes.push({
@@ -329,7 +351,15 @@ export class SimulatorsService {
     } catch {
       capabilities = null;
     }
-    if (!Array.isArray(capabilities) || !capabilities.includes(kind))
+    const platform = simulatorPlatform(
+      (payload as { platform?: unknown }).platform,
+    );
+    if (
+      !Array.isArray(capabilities) ||
+      !capabilities.includes(kind) ||
+      (platform === "ANDROID" &&
+        !capabilities.includes(ANDROID_SIMULATORS_CAPABILITY))
+    )
       throw new Error(
         `${agent.name} does not support this simulator operation`,
       );
@@ -339,7 +369,12 @@ export class SimulatorsService {
       kind,
       payload,
       idempotencyKey,
-      timeoutSeconds: kind === SIMULATOR_RESET_JOB_KIND ? 600 : 120,
+      timeoutSeconds:
+        kind === SIMULATOR_RESET_JOB_KIND
+          ? 600
+          : platform === "ANDROID"
+            ? 300
+            : 120,
       visibility:
         kind === SIMULATOR_INVENTORY_JOB_KIND ||
         kind === SIMULATOR_INSPECT_JOB_KIND

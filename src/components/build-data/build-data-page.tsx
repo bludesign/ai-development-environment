@@ -99,7 +99,12 @@ type AgentProgress = {
 type DerivedDataEntry = {
   id: string;
   name: string;
-  kind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  kind:
+    | "PROJECT"
+    | "PENDING"
+    | "SHARED_CACHE"
+    | "DEVICE_SUPPORT"
+    | "GRADLE_PROJECT";
   deviceSupportPlatform?: string | null;
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
@@ -143,7 +148,7 @@ type HistoryItem = {
   worktreeId: string | null;
   worktreePath: string | null;
   source: "USER" | "AUTOMATIC";
-  entryKind: "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT";
+  entryKind: DerivedDataEntry["kind"];
   deletedAt: string;
 };
 
@@ -408,7 +413,13 @@ function BuildDataScope({
   }, [historyVersion, loadHistory, ready]);
 
   const allEntries = collection?.entries ?? [];
-  const entries = allEntries.filter((entry) => entry.kind !== "DEVICE_SUPPORT");
+  const derivedDataEntries = allEntries.filter(
+    (entry) =>
+      entry.kind !== "DEVICE_SUPPORT" && entry.kind !== "GRADLE_PROJECT",
+  );
+  const gradleEntries = allEntries.filter(
+    (entry) => entry.kind === "GRADLE_PROJECT",
+  );
   const deviceSupportEntries = allEntries.filter(
     (entry) => entry.kind === "DEVICE_SUPPORT",
   );
@@ -420,10 +431,6 @@ function BuildDataScope({
     collection?.status !== "COMPLETED" ||
     activeOperation ||
     operationBusy;
-  const selectedEntries = entries.filter((entry) => selected.has(entry.id));
-  const allSelected =
-    entries.length > 0 && selectedEntries.length === entries.length;
-  const someSelected = selectedEntries.length > 0 && !allSelected;
 
   const runOperation = async (
     operation: "calculateDerivedDataSizes" | "deleteDerivedDataEntries",
@@ -576,6 +583,36 @@ function BuildDataScope({
     }
   };
 
+  function selectEntries(ids: string[], checked: boolean) {
+    setArmedDeleteKey(null);
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
+
+  function dismissDelete(key: string) {
+    if (armedDeleteKey !== key) return;
+    if (armedDeleteTimer.current) {
+      window.clearTimeout(armedDeleteTimer.current);
+      armedDeleteTimer.current = null;
+    }
+    setArmedDeleteKey(null);
+  }
+
+  const cacheCardActions = {
+    actionsBlocked,
+    armedDeleteKey,
+    onDelete: inlineDelete,
+    onDismissDelete: dismissDelete,
+    onLock: setLocked,
+    onSelect: selectEntries,
+    selected,
+  };
   const groupedHistory = useMemo(() => {
     const groups = new Map<string, { label: string; items: HistoryItem[] }>();
     for (const item of history) {
@@ -590,12 +627,6 @@ function BuildDataScope({
     }
     return [...groups.values()];
   }, [history, locale]);
-  const bulkDeleteKey = `bulk:${selectedEntries
-    .map((entry) => entry.id)
-    .sort()
-    .join(":")}`;
-  const bulkDeleteArmed = armedDeleteKey === bulkDeleteKey;
-
   return (
     <section className="mx-auto flex w-full max-w-[1500px] flex-col gap-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -654,235 +685,14 @@ function BuildDataScope({
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner /> {t("loading")}
         </p>
-      ) : entries.length === 0 ? (
-        <Empty>
-          <EmptyHeader>
-            <EmptyTitle>{t("emptyTitle")}</EmptyTitle>
-            <EmptyDescription>{t("emptyDescription")}</EmptyDescription>
-          </EmptyHeader>
-        </Empty>
       ) : (
         <>
-          {entries.length > 0 && (
-            <Card className="gap-0 py-0">
-              <CardHeader>
-                <CardTitle>{t("derivedDataTitle")}</CardTitle>
-                <CardDescription>{t("derivedDataDescription")}</CardDescription>
-              </CardHeader>
-              {selectedEntries.length > 0 && (
-                <div className="flex items-center justify-between gap-3 border-b p-3">
-                  <p className="text-sm">
-                    {t("selected", { count: selectedEntries.length })}
-                  </p>
-                  <Button
-                    className="w-40"
-                    disabled={actionsBlocked}
-                    onClick={() =>
-                      inlineDelete(
-                        bulkDeleteKey,
-                        selectedEntries.map((entry) => entry.id),
-                      )
-                    }
-                    size="sm"
-                    variant={bulkDeleteArmed ? "destructive" : "outline"}
-                  >
-                    {bulkDeleteArmed ? <Check /> : <Trash2 />}
-                    {bulkDeleteArmed ? t("confirmDelete") : t("deleteSelected")}
-                  </Button>
-                </div>
-              )}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-12">
-                      <Checkbox
-                        aria-label={t("selectAll")}
-                        checked={
-                          allSelected
-                            ? true
-                            : someSelected
-                              ? "indeterminate"
-                              : false
-                        }
-                        onCheckedChange={(checked) => {
-                          setArmedDeleteKey(null);
-                          setSelected((current) => {
-                            const next = new Set(current);
-                            for (const entry of entries) {
-                              if (checked === true) next.add(entry.id);
-                              else next.delete(entry.id);
-                            }
-                            return next;
-                          });
-                        }}
-                      />
-                    </TableHead>
-                    <TableHead>{t("folder")}</TableHead>
-                    <TableHead>{t("worktree")}</TableHead>
-                    <TableHead>{t("modified")}</TableHead>
-                    <TableHead>{t("size")}</TableHead>
-                    <TableHead>{t("agent")}</TableHead>
-                    <TableHead className="w-12 text-right">
-                      <span className="sr-only">{t("actions")}</span>
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {entries.map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell>
-                        <Checkbox
-                          aria-label={t("selectEntry", { name: entry.name })}
-                          checked={selected.has(entry.id)}
-                          onCheckedChange={(checked) => {
-                            setArmedDeleteKey(null);
-                            setSelected((current) => {
-                              const next = new Set(current);
-                              if (checked === true) next.add(entry.id);
-                              else next.delete(entry.id);
-                              return next;
-                            });
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="break-all font-mono text-xs">
-                            {entry.name}
-                          </span>
-                          {entry.status !== "READY" && (
-                            <Badge variant="secondary">
-                              {t(`status.${entry.status}`)}
-                            </Badge>
-                          )}
-                          {entry.operation !== "IDLE" && <Spinner />}
-                          {entry.locked && (
-                            <Badge variant="success">
-                              <Lock /> {t("locked")}
-                            </Badge>
-                          )}
-                        </div>
-                        {(entry.activeResources?.length ?? 0) > 0 && (
-                          <div className="mt-1 flex flex-wrap gap-1">
-                            {entry.activeResources?.map((resource) => (
-                              <Link
-                                href={resource.href}
-                                key={`${resource.kind}:${resource.id}`}
-                              >
-                                <Badge variant="secondary">
-                                  {resource.label}
-                                </Badge>
-                              </Link>
-                            ))}
-                          </div>
-                        )}
-                        {entry.error && (
-                          <p className="mt-1 text-xs text-destructive">
-                            {entry.error}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs">
-                        {entry.worktreeId && entry.worktreePath ? (
-                          <Link
-                            className="underline-offset-4 hover:underline"
-                            href={`/dashboard/worktrees/${entry.worktreeId}`}
-                          >
-                            {entry.worktreePath}
-                          </Link>
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="whitespace-nowrap text-xs">
-                        {entry.modifiedAt ? (
-                          <DateTime value={entry.modifiedAt} />
-                        ) : (
-                          "—"
-                        )}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {entry.sizeBytes === null
-                          ? "—"
-                          : formatBytes(entry.sizeBytes, locale)}
-                      </TableCell>
-                      <TableCell>
-                        <Link
-                          className={cn(rowLinkClass, "inline-block")}
-                          href={`/dashboard/agents/${entry.agent.id}`}
-                        >
-                          {entry.agent.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell className="w-12 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <DropdownMenu
-                            onOpenChange={(open) => {
-                              if (
-                                !open &&
-                                armedDeleteKey === `row:${entry.id}`
-                              ) {
-                                if (armedDeleteTimer.current) {
-                                  window.clearTimeout(armedDeleteTimer.current);
-                                  armedDeleteTimer.current = null;
-                                }
-                                setArmedDeleteKey(null);
-                              }
-                            }}
-                          >
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                aria-label={t("entryActions", {
-                                  name: entry.name,
-                                })}
-                                disabled={actionsBlocked}
-                                size="icon-sm"
-                                variant="ghost"
-                              >
-                                <MoreHorizontal />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-48">
-                              <DropdownMenuItem
-                                onSelect={() =>
-                                  void setLocked(entry, !entry.locked)
-                                }
-                              >
-                                {entry.locked ? <Unlock /> : <Lock />}
-                                {entry.locked ? t("unlock") : t("lock")}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onSelect={(event) => {
-                                  if (armedDeleteKey !== `row:${entry.id}`) {
-                                    event.preventDefault();
-                                  }
-                                  inlineDelete(`row:${entry.id}`, [entry.id]);
-                                }}
-                                variant={
-                                  armedDeleteKey === `row:${entry.id}`
-                                    ? "destructive"
-                                    : "default"
-                                }
-                              >
-                                {armedDeleteKey === `row:${entry.id}` ? (
-                                  <Check />
-                                ) : (
-                                  <Trash2 />
-                                )}
-                                {armedDeleteKey === `row:${entry.id}`
-                                  ? t("confirmDelete")
-                                  : t("delete")}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
-          )}
+          <BuildCacheCard {...cacheCardActions} entries={derivedDataEntries} />
+          <BuildCacheCard
+            {...cacheCardActions}
+            entries={gradleEntries}
+            gradle
+          />
         </>
       )}
 
@@ -897,15 +707,9 @@ function BuildDataScope({
           onDeleteMany={(entryIds) =>
             inlineDelete("device:bulk", entryIds, true)
           }
-          onSelectionChange={(entryId, checked) => {
-            setArmedDeleteKey(null);
-            setSelected((current) => {
-              const next = new Set(current);
-              if (checked) next.add(entryId);
-              else next.delete(entryId);
-              return next;
-            });
-          }}
+          onSelectionChange={(entryId, checked) =>
+            selectEntries([entryId], checked)
+          }
           selected={selected}
         />
       )}
@@ -1027,6 +831,255 @@ function BuildDataScope({
         )}
       </Card>
     </section>
+  );
+}
+
+function BuildCacheCard({
+  actionsBlocked,
+  armedDeleteKey,
+  entries,
+  gradle = false,
+  onDelete,
+  onDismissDelete,
+  onLock,
+  onSelect,
+  selected,
+}: {
+  actionsBlocked: boolean;
+  armedDeleteKey: string | null;
+  entries: DerivedDataEntry[];
+  gradle?: boolean;
+  onDelete: (key: string, ids: string[]) => void;
+  onDismissDelete: (key: string) => void;
+  onLock: (entry: DerivedDataEntry, locked: boolean) => Promise<void>;
+  onSelect: (ids: string[], checked: boolean) => void;
+  selected: Set<string>;
+}) {
+  const t = useTranslations("buildData");
+  const locale = useLocale();
+  const selectedEntries = entries.filter((entry) => selected.has(entry.id));
+  const allSelected =
+    entries.length > 0 && selectedEntries.length === entries.length;
+  const someSelected = selectedEntries.length > 0 && !allSelected;
+  const bulkDeleteKey = `bulk:${gradle ? "gradle" : "xcode"}:${selectedEntries
+    .map((entry) => entry.id)
+    .sort()
+    .join(":")}`;
+  const bulkDeleteArmed = armedDeleteKey === bulkDeleteKey;
+  return (
+    <Card className="gap-0 py-0">
+      <CardHeader>
+        <CardTitle>{t(gradle ? "gradleTitle" : "derivedDataTitle")}</CardTitle>
+        <CardDescription>
+          {t(gradle ? "gradleDescription" : "derivedDataDescription")}
+        </CardDescription>
+      </CardHeader>
+      {entries.length === 0 ? (
+        <Empty className="py-8">
+          <EmptyHeader>
+            <EmptyTitle>
+              {t(gradle ? "gradleEmptyTitle" : "emptyTitle")}
+            </EmptyTitle>
+            <EmptyDescription>
+              {t(gradle ? "gradleEmptyDescription" : "emptyDescription")}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      ) : (
+        <>
+          {selectedEntries.length > 0 && (
+            <div className="flex items-center justify-between gap-3 border-b p-3">
+              <p className="text-sm">
+                {t("selected", { count: selectedEntries.length })}
+              </p>
+              <Button
+                className="w-40"
+                disabled={actionsBlocked}
+                onClick={() =>
+                  onDelete(
+                    bulkDeleteKey,
+                    selectedEntries.map((entry) => entry.id),
+                  )
+                }
+                size="sm"
+                variant={bulkDeleteArmed ? "destructive" : "outline"}
+              >
+                {bulkDeleteArmed ? <Check /> : <Trash2 />}
+                {bulkDeleteArmed ? t("confirmDelete") : t("deleteSelected")}
+              </Button>
+            </div>
+          )}
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-12">
+                  <Checkbox
+                    aria-label={t(gradle ? "selectAllGradle" : "selectAll")}
+                    checked={
+                      allSelected
+                        ? true
+                        : someSelected
+                          ? "indeterminate"
+                          : false
+                    }
+                    onCheckedChange={(checked) =>
+                      onSelect(
+                        entries.map(({ id }) => id),
+                        checked === true,
+                      )
+                    }
+                  />
+                </TableHead>
+                <TableHead>{t("folder")}</TableHead>
+                <TableHead>{t("worktree")}</TableHead>
+                <TableHead>{t("modified")}</TableHead>
+                <TableHead>{t("size")}</TableHead>
+                <TableHead>{t("agent")}</TableHead>
+                <TableHead className="w-12 text-right">
+                  <span className="sr-only">{t("actions")}</span>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {entries.map((entry) => (
+                <TableRow key={entry.id}>
+                  <TableCell>
+                    <Checkbox
+                      aria-label={t("selectEntry", {
+                        name: entry.name,
+                      })}
+                      checked={selected.has(entry.id)}
+                      onCheckedChange={(checked) =>
+                        onSelect([entry.id], checked === true)
+                      }
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      <span className="break-all font-mono text-xs">
+                        {entry.name}
+                      </span>
+                      {entry.status !== "READY" && (
+                        <Badge variant="secondary">
+                          {t(`status.${entry.status}`)}
+                        </Badge>
+                      )}
+                      {entry.operation !== "IDLE" && <Spinner />}
+                      {entry.locked && (
+                        <Badge variant="success">
+                          <Lock /> {t("locked")}
+                        </Badge>
+                      )}
+                    </div>
+                    {(entry.activeResources?.length ?? 0) > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {entry.activeResources?.map((resource) => (
+                          <Link
+                            href={resource.href}
+                            key={`${resource.kind}:${resource.id}`}
+                          >
+                            <Badge variant="secondary">{resource.label}</Badge>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                    {entry.error && (
+                      <p className="mt-1 text-xs text-destructive">
+                        {entry.error}
+                      </p>
+                    )}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {entry.worktreeId && entry.worktreePath ? (
+                      <Link
+                        className="underline-offset-4 hover:underline"
+                        href={`/dashboard/worktrees/${entry.worktreeId}`}
+                      >
+                        {entry.worktreePath}
+                      </Link>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs">
+                    {entry.modifiedAt ? (
+                      <DateTime value={entry.modifiedAt} />
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="tabular-nums">
+                    {entry.sizeBytes === null
+                      ? "—"
+                      : formatBytes(entry.sizeBytes, locale)}
+                  </TableCell>
+                  <TableCell>
+                    <Link
+                      className={cn(rowLinkClass, "inline-block")}
+                      href={`/dashboard/agents/${entry.agent.id}`}
+                    >
+                      {entry.agent.name}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="w-12 text-right">
+                    <div className="flex items-center justify-end gap-1.5">
+                      <DropdownMenu
+                        onOpenChange={(open) => {
+                          if (!open) onDismissDelete(`row:${entry.id}`);
+                        }}
+                      >
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            aria-label={t("entryActions", {
+                              name: entry.name,
+                            })}
+                            disabled={actionsBlocked}
+                            size="icon-sm"
+                            variant="ghost"
+                          >
+                            <MoreHorizontal />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem
+                            onSelect={() => void onLock(entry, !entry.locked)}
+                          >
+                            {entry.locked ? <Unlock /> : <Lock />}
+                            {entry.locked ? t("unlock") : t("lock")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onSelect={(event) => {
+                              if (armedDeleteKey !== `row:${entry.id}`) {
+                                event.preventDefault();
+                              }
+                              onDelete(`row:${entry.id}`, [entry.id]);
+                            }}
+                            variant={
+                              armedDeleteKey === `row:${entry.id}`
+                                ? "destructive"
+                                : "default"
+                            }
+                          >
+                            {armedDeleteKey === `row:${entry.id}` ? (
+                              <Check />
+                            ) : (
+                              <Trash2 />
+                            )}
+                            {armedDeleteKey === `row:${entry.id}`
+                              ? t("confirmDelete")
+                              : t("delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </>
+      )}
+    </Card>
   );
 }
 

@@ -11,7 +11,7 @@ type BuildScope = {
 const scopeWhere = (input: BuildScope) => Prisma.sql`
   1 = 1
   ${input.repositoryId ? Prisma.sql`AND b.repositoryId = ${input.repositoryId}` : Prisma.empty}
-  ${input.configurationId ? Prisma.sql`AND b.configurationId = ${input.configurationId}` : Prisma.empty}
+  ${input.configurationId ? Prisma.sql`AND (b.configurationId = ${input.configurationId} OR b.androidConfigurationId = ${input.configurationId})` : Prisma.empty}
   ${input.codebaseId ? Prisma.sql`AND b.codebaseId = ${input.codebaseId}` : Prisma.empty}
   ${input.worktreeId ? Prisma.sql`AND b.worktreeId = ${input.worktreeId}` : Prisma.empty}
   ${input.appId ? Prisma.sql`AND EXISTS (SELECT 1 FROM AppRepository a WHERE a.repositoryId = b.repositoryId AND a.appId = ${input.appId})` : Prisma.empty}

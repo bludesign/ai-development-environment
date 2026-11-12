@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   lstat,
   mkdtemp,
@@ -87,6 +88,81 @@ const signal = () => new AbortController().signal;
 const log = async () => undefined;
 
 describe("Build Data agent handlers", () => {
+  test("sizes and deletes a Gradle cache with its generated Android module outputs", async () => {
+    const builds = await realpath(await temporaryDirectory());
+    const worktreePath = await realpath(await temporaryDirectory());
+    const projectPath = ".";
+    const worktreeId = "android-worktree";
+    const rootPath = join(builds, ".android-gradle", worktreeId);
+    const path = join(
+      rootPath,
+      createHash("sha256").update(projectPath).digest("hex").slice(0, 16),
+    );
+    const generated = join(worktreePath, "app", "build", "outputs", "apk");
+    const tracked = join(worktreePath, "tracked", "build", "outputs", "apk");
+    await Promise.all(
+      [path, generated, tracked].map((directory) =>
+        mkdir(directory, { recursive: true }),
+      ),
+    );
+    await writeFile(
+      join(path, ".aide-android-gradle.json"),
+      JSON.stringify({
+        worktreeId,
+        worktreePath,
+        projectPath,
+        module: ":app",
+        modules: [":tracked"],
+      }),
+    );
+    await writeFile(join(generated, "generated.apk"), Buffer.alloc(4096));
+    const retained = join(tracked, "tracked.apk");
+    await writeFile(retained, "tracked");
+    capture.mockImplementation(async ({ args }) => ({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      stderr: "",
+      outputTruncated: false,
+      stdout:
+        args[0] === "ls-files" && args.includes("tracked/build/")
+          ? "tracked/build/outputs/apk/tracked.apk\0"
+          : "",
+    }));
+    const configuration = {
+      mode: "ABSOLUTE" as const,
+      path: join(builds, "legacy"),
+      managedRoot: join(builds, ".worktree-derived-data"),
+    };
+    const scan = await scanBuildData(
+      { ...configuration, worktrees: [] },
+      10_000,
+      signal(),
+      log,
+    );
+    expect(scan).toMatchObject({
+      entries: [
+        { path, rootPath, kind: "GRADLE_PROJECT", workspacePath: worktreePath },
+      ],
+    });
+    const target = { path, rootPath };
+    const size = await sizeBuildData(
+      { targets: [target] },
+      10_000,
+      signal(),
+      log,
+    );
+    expect(size).toMatchObject({
+      sizes: [{ path, sizeBytes: expect.any(Number), error: null }],
+    });
+    expect(
+      await deleteBuildData({ targets: [target] }, 10_000, signal(), log),
+    ).toMatchObject({ deleted: [{ path, deleted: true, error: null }] });
+    await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(generated)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(retained, "utf8")).toBe("tracked");
+  });
   test("discovers and deletes only the removed worktree's managed cache without an Xcode plist", async () => {
     const root = await realpath(await temporaryDirectory());
     const folder = await realpath(await temporaryDirectory());

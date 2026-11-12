@@ -67,9 +67,10 @@ export function RunBuildControls({
   compact?: boolean;
 }) {
   const t = useTranslations("builds");
-  const preferred = preferredDestination?.generic
-    ? null
-    : (preferredDestination ?? null);
+  const preferred =
+    destinationType === "HOST" || preferredDestination?.generic
+      ? null
+      : (preferredDestination ?? null);
   const [destinations, setDestinations] = useState<BuildDestination[]>(
     preferred ? [preferred] : [],
   );

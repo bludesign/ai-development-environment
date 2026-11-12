@@ -404,6 +404,7 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
     [
       "jobId",
       "agentId",
+      "platform",
       "inventory",
       "inventory.simulators",
       "inventory.runtimes",
@@ -416,6 +417,7 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
     [
       "jobId",
       "agentId",
+      "platform",
       "simulatorId",
       "details",
       "details.simulator",
@@ -425,35 +427,35 @@ const EXPANSION_STEP_CATALOG: WorkflowCatalogEntry[] = [
   simulatorStep(
     "SIMULATOR_CREATE",
     "Create simulator",
-    "Create a device for a runtime and device type, then return its UUID.",
-    ["jobId", "agentId", "simulatorId"],
+    "Create a device for a runtime and device type, then return its identifier.",
+    ["jobId", "agentId", "platform", "simulatorId"],
     true,
   ),
   simulatorStep(
     "SIMULATOR_DEVICE_ACTION",
     "Control simulator",
     "Boot, shut down, reboot, rename, clone, or erase a simulator.",
-    ["jobId", "agentId", "simulatorId"],
+    ["jobId", "agentId", "platform", "simulatorId"],
     true,
   ),
   simulatorStep(
     "SIMULATOR_APP_ACTION",
     "Control simulator app",
-    "Launch or terminate an installed app by its bundle ID.",
-    ["jobId", "agentId", "simulatorId", "bundleId"],
+    "Launch or terminate an installed app by its bundle ID or Android package name.",
+    ["jobId", "agentId", "platform", "simulatorId", "bundleId"],
     true,
   ),
   simulatorStep(
     "SIMULATOR_OPEN_FOLDER",
     "Open simulator folder",
     "Open device data, an app bundle, or app data in Finder on the agent.",
-    ["jobId", "agentId", "simulatorId", "bundleId"],
+    ["jobId", "agentId", "platform", "simulatorId", "bundleId"],
     true,
   ),
   simulatorStep(
     "SIMULATOR_DELETE",
     "Delete selected simulators",
-    "Delete selected devices by agent and UUID, with a result for each device.",
+    "Delete selected devices by agent and simulator ID, with a result for each device.",
     ["targets"],
     true,
   ),
@@ -2170,7 +2172,7 @@ const EXPANSION_TRIGGER_CATALOG: WorkflowTriggerCatalogEntry[] = [
       description:
         "Fires when an app or standalone MCP simulator operation finishes.",
       details:
-        "Filter by agent, operation, or outcome. Each selected deletion emits its own result. Simulator jobs started by workflows return through their step results.",
+        "Filter by platform, agent, operation, or outcome. Each selected deletion emits its own result. Simulator jobs started by workflows return through their step results.",
     },
   ),
   expansionTrigger(

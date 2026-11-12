@@ -117,6 +117,20 @@ afterEach(async () => {
   await rm(CACHE_DIRECTORY, { recursive: true, force: true });
 });
 
+test("requires authorization before materializing an APK, including on cache hits", async () => {
+  artifactRow.kind = "APK";
+  const { materializeArtifact } = await importCache();
+  await expect(
+    materializeArtifact("build-1", "artifact-1", { authorized: false }),
+  ).rejects.toThrow("signed download link");
+  expect(downloads).toBe(0);
+  await materializeArtifact("build-1", "artifact-1", { authorized: true });
+  await expect(
+    materializeArtifact("build-1", "artifact-1", { authorized: false }),
+  ).rejects.toThrow("signed download link");
+  expect(downloads).toBe(1);
+});
+
 describe("materializeArtifact", () => {
   test("transfers from the agent on a miss and serves the bytes", async () => {
     const { materializeArtifact } = await importCache();

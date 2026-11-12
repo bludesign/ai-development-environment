@@ -40,7 +40,15 @@ export type RouteEntry = {
   /** Accessible tab name selected after the page reaches its ready state. */
   clickTab?: string;
   buildWorkflow?:
-    "start" | "custom" | "script" | "project" | "configuration-platforms";
+    | "start"
+    | "custom"
+    | "script"
+    | "project"
+    | "configuration-platforms"
+    | "android-configuration"
+    | "android-start"
+    | "android-run"
+    | "android-install";
   /** Open a transfer review without applying configuration or queuing clones. */
   transferWorkflow?: "export" | "import" | "import-destinations";
   /** Auth pages are intentionally captured without the seeded bearer session. */
@@ -55,6 +63,7 @@ export type RouteEntry = {
   usagePopover?: boolean;
   destinationPicker?: "start" | "run" | "start-platforms" | "run-platform";
   desktopOnly?: boolean;
+  mobileOnly?: boolean;
   /** Expand two independent Claude child conversations in the session Agents card. */
   sessionAgents?: boolean;
   /** Show simulator Edit mode with one agent's eligible devices selected. */
@@ -383,9 +392,40 @@ export const routes: RouteEntry[] = [
   },
   {
     name: "app-build-overview",
-    scrollTo: "[data-build-repository]",
+    scrollTo: `[data-build-repository="${ids.repositories.ios}"]`,
     path: `/dashboard/apps/${ids.apps.mobileSuite}`,
     readyTexts: ["Latest repository build"],
+  },
+  {
+    name: "android-build-configuration",
+    path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
+    buildWorkflow: "android-configuration",
+  },
+  {
+    name: "android-build-start",
+    path: `/dashboard/apps/${ids.apps.customerPortal}?view=builds`,
+    buildWorkflow: "android-start",
+  },
+  {
+    name: "android-build-detail",
+    path: `/dashboard/builds/${ids.builds.android}`,
+    readyEnabledButton: "Export APK",
+  },
+  {
+    name: "android-build-run",
+    path: `/dashboard/builds/${ids.builds.android}`,
+    stubWorktree: true,
+    buildWorkflow: "android-run",
+  },
+  {
+    name: "android-build-install",
+    path: `/dashboard/builds/${ids.builds.android}`,
+    initScript: `Object.defineProperty(navigator, "userAgent", {
+      configurable: true,
+      value: "Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 Chrome/141.0.0.0 Mobile Safari/537.36",
+    });`,
+    buildWorkflow: "android-install",
+    mobileOnly: true,
   },
   { name: "build-detail", path: `/dashboard/builds/${ids.builds.archive}` },
   {
@@ -420,6 +460,28 @@ export const routes: RouteEntry[] = [
   {
     ...simulatorInventoryCapture,
     name: "simulators",
+  },
+  {
+    name: "android-emulators",
+    path: "/system/simulators?platform=ANDROID",
+    readyGraphqlOperation: "RefreshSimulatorInventory",
+    readyTexts: ["Pixel_9_QA"],
+    readyEnabledButton: "Create emulator",
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.simulators.androidInventoryRequest}",
+    });`,
+  },
+  {
+    name: "android-build-data",
+    path: "/system/build-data",
+    readyTexts: ["web-app Android Gradle cache"],
+    scrollTo:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Gradle Build Data"))',
+    initScript: `Object.defineProperty(crypto, "randomUUID", {
+      configurable: true,
+      value: () => "${ids.buildDataCollections.captured}",
+    });`,
   },
   {
     ...simulatorInventoryCapture,

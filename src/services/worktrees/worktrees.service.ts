@@ -220,8 +220,11 @@ const worktreeInclude = {
       repository: {
         include: {
           projects: {
-            where: { type: "IOS_APP" },
-            include: { configurations: { select: { id: true } } },
+            where: { type: { in: ["IOS_APP", "ANDROID_APP"] as string[] } },
+            include: {
+              configurations: { select: { id: true } },
+              androidConfigurations: { select: { id: true }, take: 1 },
+            },
           },
         },
       },
@@ -1937,6 +1940,7 @@ export class WorktreesService {
       worktrees: View[];
       blockingJob: View["codebase"]["jobs"][number] | null;
       iosBuildConfigured: boolean;
+      androidBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
       mergeConflictQuickActions: typeof eligibleQuickActions;
     };
@@ -1964,6 +1968,12 @@ export class WorktreesService {
           iosBuildConfigured:
             worktree.codebase.repository.projects?.some(
               (project) => project.type === "IOS_APP",
+            ) ?? false,
+          androidBuildConfigured:
+            worktree.codebase.repository.projects?.some(
+              (project) =>
+                project.type === "ANDROID_APP" &&
+                project.androidConfigurations.length > 0,
             ) ?? false,
           quickActions: eligibleQuickActions.filter(
             (workflow) =>

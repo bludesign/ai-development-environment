@@ -18,6 +18,42 @@ export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
 export const XCODE_MULTIPLATFORM_BUILD_CAPABILITY =
   "xcode.build.multiplatform.v1";
 
+export const ANDROID_BUILD_JOB_KIND = "android.build.run";
+export const ANDROID_BUILD_DESTINATION = {
+  type: "HOST",
+  platformId: "ANDROID",
+  platform: "Android",
+  id: "android",
+  name: "Android",
+  osVersion: null,
+  state: null,
+} as const;
+export const ANDROID_SOURCE_DISCOVER_JOB_KIND = "android.source.discover";
+export const ANDROID_SOURCE_INSPECT_JOB_KIND = "android.source.inspect";
+export const ANDROID_BUILD_DELETE_JOB_KIND = "android.build.delete";
+export const ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND = "android.artifact.download";
+export const ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND =
+  "android.artifact.transfer.upload";
+export const ANDROID_RUN_DESTINATIONS_JOB_KIND =
+  "android.runDestinations.inspect";
+export const ANDROID_DEPLOY_JOB_KIND = "android.build.deploy";
+export const ANDROID_REMOTE_DEPLOY_JOB_KIND = "android.build.remoteDeploy";
+export const ANDROID_BUILD_JOB_KINDS = [
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+  ANDROID_BUILD_DELETE_JOB_KIND,
+  ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+  ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_REMOTE_DEPLOY_JOB_KIND,
+] as const;
+
+export function isBuildRunJob(kind: string): boolean {
+  return kind === IOS_BUILD_JOB_KIND || kind === ANDROID_BUILD_JOB_KIND;
+}
+
 export type BuildLogChunk = {
   scope: string;
   scopeId: string;
@@ -127,6 +163,7 @@ export const BUILD_PLATFORMS = [
   "MAC_CATALYST",
   "MACOS_DESIGNED_FOR_IPAD",
   "VISIONOS_DESIGNED_FOR_IPAD",
+  "ANDROID",
 ] as const;
 export type BuildPlatform = (typeof BUILD_PLATFORMS)[number];
 
@@ -181,7 +218,7 @@ export type BuildDestination = {
   available?: boolean;
 };
 
-const xcodePlatforms: Record<BuildPlatform, string> = {
+const xcodePlatforms: Record<Exclude<BuildPlatform, "ANDROID">, string> = {
   IOS: "iOS",
   TVOS: "tvOS",
   WATCHOS: "watchOS",
@@ -233,6 +270,8 @@ export function buildXcodePlatform(
   platform: BuildPlatform,
   type: BuildDestinationType,
 ): string {
+  if (platform === "ANDROID")
+    throw new Error("Android uses Gradle destinations");
   const name = xcodePlatforms[platform];
   return type === "SIMULATOR" ? `${name} Simulator` : name;
 }
@@ -279,7 +318,8 @@ export function genericBuildDestinations(
 ): BuildDestination[] {
   if (!GENERIC_BUILD_DESTINATION_ACTIONS.includes(action)) return [];
   return (platforms ?? ["IOS"]).flatMap((platformId): BuildDestination[] => {
-    if (platformId.endsWith("_DESIGNED_FOR_IPAD")) return [];
+    if (platformId === "ANDROID" || platformId.endsWith("_DESIGNED_FOR_IPAD"))
+      return [];
     const platform = xcodePlatforms[platformId];
     const id = `generic-${platformId.toLowerCase().replaceAll("_", "-")}`;
     const mac = platformId === "MACOS" || platformId === "MAC_CATALYST";
@@ -664,6 +704,7 @@ export function parseBuildDestination(value: unknown): BuildDestination {
   );
   if (
     platform.platformId &&
+    platform.platformId !== "ANDROID" &&
     (type === "LOCAL_MAC") !== (xcodePlatforms[platform.platformId] === "macOS")
   ) {
     throw new Error("Destination type does not match its platform");
@@ -711,6 +752,160 @@ export function parseBuildDestination(value: unknown): BuildDestination {
             "build destination.available",
           ),
         }),
+  };
+}
+
+function androidProjectPath(value: unknown) {
+  const projectPath =
+    safeRelativePath(value, "Gradle project directory")
+      .split("/")
+      .filter((part) => part && part !== ".")
+      .join("/") || ".";
+  if (projectPath.length > 1024)
+    throw new Error("Gradle project path is too long");
+  return projectPath;
+}
+
+export function parseAndroidSourcePayload(value: unknown) {
+  const input = objectValue(value, "Android Gradle source payload");
+  return {
+    ...worktreeIdentity(input),
+    projectPath:
+      input.projectPath == null ? null : androidProjectPath(input.projectPath),
+  };
+}
+
+export function parseAndroidBuildSettings(value: unknown) {
+  const settings = objectValue(value, "Android build settings");
+  const projectPath = androidProjectPath(settings.projectPath);
+  const gradleModule = stringValue(
+    settings.module,
+    "Gradle application module",
+  ).trim();
+  const variant = stringValue(settings.variant, "Android build variant").trim();
+  const apkPath =
+    settings.apkPath == null
+      ? null
+      : safeRelativePath(settings.apkPath, "APK output path");
+  if ((apkPath?.length ?? 0) > 1024)
+    throw new Error("Android build path is too long");
+  if (
+    !/^:(?:[A-Za-z0-9_][A-Za-z0-9_.-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)*)?$/.test(
+      gradleModule,
+    ) ||
+    gradleModule.length > 256
+  )
+    throw new Error("Enter a Gradle application module such as :app");
+  if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(variant) || variant.length > 128)
+    throw new Error(
+      "Enter a Gradle build variant such as debug or demoRelease",
+    );
+  if (apkPath && !apkPath.endsWith(".apk"))
+    throw new Error("APK output path must end in .apk");
+  return { projectPath, module: gradleModule, variant, apkPath };
+}
+
+export function androidAssembleTask(settings: {
+  module: string;
+  variant: string;
+}) {
+  return `${settings.module === ":" ? "" : settings.module}:assemble${settings.variant.charAt(0).toUpperCase()}${settings.variant.slice(1)}`;
+}
+
+export function parseAndroidBuildPayload(value: unknown) {
+  const input = objectValue(value, "Android build payload");
+  return {
+    ...worktreeIdentity(input),
+    ...parseBuildDeletePayload(input),
+    settings: parseAndroidBuildSettings(input.settings),
+    gradleCachePath: safeAbsolutePath(
+      input.gradleCachePath,
+      "Gradle project cache",
+    ),
+    scripts: Array.isArray(input.scripts) ? input.scripts.map(parseScript) : [],
+    telemetry: parseBuildTelemetrySettings(input.telemetry),
+    server: parseBuildServer(input.server),
+    endpointPaths: parseBuildEndpointPaths(input.endpointPaths),
+  };
+}
+
+export function parseAndroidDestination(value: unknown): BuildDestination {
+  const destination = parseBuildDestination(value);
+  const validId =
+    /^[A-Za-z0-9][A-Za-z0-9_.:%[\]-]{0,254}$/.test(destination.id) ||
+    (destination.type === "PHYSICAL_DEVICE" &&
+      destination.id.length <= 255 &&
+      /^\[[0-9A-Fa-f:.]+(?:%[A-Za-z0-9_.-]+)?\]:\d+$/.test(destination.id));
+  if (
+    destination.platformId !== "ANDROID" ||
+    destination.generic ||
+    !["SIMULATOR", "PHYSICAL_DEVICE"].includes(destination.type) ||
+    !validId ||
+    (destination.type === "SIMULATOR" && !destination.id.startsWith("android:"))
+  ) {
+    throw new Error("Select a concrete Android emulator or connected device");
+  }
+  return destination;
+}
+
+export function parseAndroidDeployPayload(value: unknown) {
+  const input = objectValue(value, "Android deployment payload");
+  const local = parseBuildDeletePayload(input);
+  return {
+    ...local,
+    ...androidDeployment(input),
+    artifactRelativePath: safeRelativePath(
+      input.artifactRelativePath,
+      "Android APK artifact",
+    ),
+  };
+}
+
+export function parseAndroidRemoteDeployPayload(value: unknown) {
+  const input = objectValue(value, "Remote Android deployment payload");
+  return {
+    buildId: stringValue(input.buildId, "Android build ID"),
+    transferId: stringValue(input.transferId, "Android APK transfer ID"),
+    ...androidDeployment(input),
+  };
+}
+
+function androidDeployment(input: JsonObject) {
+  const deployments = parseDeployments(input);
+  for (const { destination } of deployments)
+    parseAndroidDestination(destination);
+  const applicationId = stringValue(
+    input.applicationId,
+    "Android application ID",
+  );
+  if (
+    !/^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/.test(applicationId)
+  )
+    throw new Error("Android application ID is invalid");
+  const checksum = stringValue(input.checksum, "APK checksum");
+  if (!/^[a-f0-9]{64}$/.test(checksum))
+    throw new Error("APK checksum is invalid");
+  const minSdk = input.minSdk == null ? null : input.minSdk;
+  if (
+    minSdk !== null &&
+    (typeof minSdk !== "number" || !Number.isInteger(minSdk) || minSdk < 1)
+  )
+    throw new Error("APK minimum SDK is invalid");
+  const abis = input.abis == null ? [] : input.abis;
+  if (
+    !Array.isArray(abis) ||
+    abis.length > 32 ||
+    abis.some(
+      (abi) => typeof abi !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(abi),
+    )
+  )
+    throw new Error("APK ABIs are invalid");
+  return {
+    deployments,
+    applicationId,
+    checksum,
+    minSdk,
+    abis: abis as string[],
   };
 }
 

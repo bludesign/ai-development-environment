@@ -202,8 +202,16 @@ const simulatorAgent = () =>
     stepOutputSessionField: "agentId",
   });
 
-const simulatorUuid = () =>
-  text("simulatorId", "Simulator UUID", { required: true });
+const simulatorIdentifier = () =>
+  text("simulatorId", "Simulator ID", { required: true });
+
+const simulatorPlatformField = () =>
+  enumField(
+    "platform",
+    "Simulator platform",
+    staticOptions(["APPLE", "ANDROID"]),
+    { default: "APPLE" },
+  );
 
 const confirmSimulatorChange = (options: FieldOptions = {}) =>
   bool("confirm", "Confirm destructive operation", {
@@ -1019,11 +1027,12 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       }),
     ],
   },
-  SIMULATOR_INVENTORY: { fields: [simulatorAgent()] },
-  SIMULATOR_INSPECT: { fields: [simulatorAgent(), simulatorUuid()] },
+  SIMULATOR_INVENTORY: { fields: [simulatorAgent(), simulatorPlatformField()] },
+  SIMULATOR_INSPECT: { fields: [simulatorAgent(), simulatorIdentifier()] },
   SIMULATOR_CREATE: {
     fields: [
       simulatorAgent(),
+      simulatorPlatformField(),
       text("name", "Name", { required: true }),
       text("runtimeId", "Runtime ID", { required: true }),
       text("deviceTypeId", "Device type ID", { required: true }),
@@ -1032,7 +1041,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   SIMULATOR_DEVICE_ACTION: {
     fields: [
       simulatorAgent(),
-      simulatorUuid(),
+      simulatorIdentifier(),
       enumField("action", "Action", staticOptions(SIMULATOR_DEVICE_ACTIONS), {
         required: true,
       }),
@@ -1045,7 +1054,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   SIMULATOR_APP_ACTION: {
     fields: [
       simulatorAgent(),
-      simulatorUuid(),
+      simulatorIdentifier(),
       enumField("action", "Action", staticOptions(SIMULATOR_APP_ACTIONS), {
         required: true,
       }),
@@ -1055,7 +1064,7 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   SIMULATOR_OPEN_FOLDER: {
     fields: [
       simulatorAgent(),
-      simulatorUuid(),
+      simulatorIdentifier(),
       enumField("action", "Folder", staticOptions(SIMULATOR_FOLDER_ACTIONS), {
         required: true,
       }),
@@ -1969,6 +1978,7 @@ const TRIGGER_CONFIG_DESCRIPTORS: TriggerConfigDescriptors = Object.fromEntries(
         kind,
         triggerWithFilters([
           resource("agentId", "Agent", "agent"),
+          simulatorPlatformField(),
           enumField(
             "operation",
             "Operation",

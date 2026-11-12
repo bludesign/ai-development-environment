@@ -61,6 +61,7 @@ import { displayedRepositoryPath as displayedWorktreePath } from "@/lib/agent-pa
 import { useRebuildBuild } from "@/components/builds/rebuild-button";
 import { RunBuildControls } from "@/components/builds/run-build-controls";
 import { StartBuildButton } from "@/components/builds/start-build-dialog";
+import { isRunnableBuildArtifact } from "@/components/builds/types";
 import {
   AutoMergeButton,
   AutoSyncButton,
@@ -800,7 +801,7 @@ export function WorktreesPage({
             agents {
               agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
-                iosBuildConfigured
+                iosBuildConfigured androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
@@ -2221,7 +2222,7 @@ function LatestBuildRow({
   const buildsT = useTranslations("builds");
   const runnable =
     build.status === "SUCCEEDED" &&
-    build.artifacts.some((artifact) => artifact.kind === "RUNNABLE_APP");
+    build.artifacts.some(isRunnableBuildArtifact);
   const { rebuild, rebuilding } = useRebuildBuild({
     buildId: build.id,
     onCompleted: () => onCompleted(),
@@ -3809,16 +3810,23 @@ export function PrimaryWorktreeActions(
       (codebase) => codebase.codebase.id === props.group.codebase.id,
     ),
   )?.agent;
+  const appleSupported = agent?.capabilities.includes("ios.build.run") ?? false;
+  const androidSupported =
+    agent?.capabilities.includes("android.build.run") ?? false;
+  const appleEnabled =
+    appleSupported && props.group.iosBuildConfigured !== false;
+  const androidEnabled =
+    androidSupported && props.group.androidBuildConfigured === true;
   const buildDisabledForSettings =
     agent?.connectionStatus === "ONLINE" &&
-    agent.capabilities.includes("ios.build.run") &&
-    props.group.iosBuildConfigured === false;
+    (appleSupported || androidSupported) &&
+    !appleEnabled &&
+    !androidEnabled;
   const buildUnavailable =
     worktree.availability !== "AVAILABLE" ||
     !agent ||
     agent.connectionStatus !== "ONLINE" ||
-    !agent.capabilities.includes("ios.build.run") ||
-    props.group.iosBuildConfigured === false;
+    (!appleEnabled && !androidEnabled);
   const runUnavailable =
     worktree.availability !== "AVAILABLE" ||
     !agent ||
@@ -3832,6 +3840,8 @@ export function PrimaryWorktreeActions(
         />
       )}
       <StartBuildButton
+        androidEnabled={androidEnabled}
+        appleEnabled={appleEnabled}
         buildSettingsHref={
           buildDisabledForSettings
             ? `/dashboard/codebases/repositories/${props.group.repository.id}`
@@ -3842,10 +3852,14 @@ export function PrimaryWorktreeActions(
         disabledReason={
           !agent || agent.connectionStatus !== "ONLINE"
             ? t("agentOffline")
-            : !agent.capabilities.includes("ios.build.run")
+            : !appleSupported && !androidSupported
               ? t("agentUnsupported")
-              : props.group.iosBuildConfigured === false
-                ? t("iosBuildNotConfigured")
+              : !appleEnabled && !androidEnabled
+                ? t(
+                    androidSupported
+                      ? "mobileBuildNotConfigured"
+                      : "iosBuildNotConfigured",
+                  )
                 : worktree.availability !== "AVAILABLE"
                   ? t("worktreeUnavailable")
                   : null

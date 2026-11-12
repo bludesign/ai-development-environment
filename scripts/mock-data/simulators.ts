@@ -31,6 +31,43 @@ const ios = runtime("iOS", ["iPhone 18 Pro", "iPad Air"]);
 const tvos = runtime("tvOS", ["Apple TV 4K"]);
 const watchos = runtime("watchOS", ["Apple Watch Series 12"]);
 const visionos = runtime("visionOS", ["Apple Vision Pro"]);
+const androidRuntime: SimulatorRuntime = {
+  id: "system-images;android-36;google_apis;arm64-v8a",
+  name: "Android API 36 · Google APIs · arm64-v8a",
+  platform: "ANDROID",
+  version: "36",
+  deviceTypes: [{ id: "pixel_9", name: "Pixel 9" }],
+};
+
+const androidInventory: SimulatorInventory = {
+  runtimes: [androidRuntime],
+  simulators: [
+    {
+      id: ids.simulators.android,
+      name: "Pixel_9_QA",
+      runtimeId: androidRuntime.id,
+      runtimeName: androidRuntime.name,
+      platform: "ANDROID",
+      deviceTypeId: "pixel_9",
+      state: "Booted",
+      isAvailable: true,
+      availabilityError: null,
+      dataPath: "/Users/acme/.android/avd/Pixel_9_QA.avd",
+    },
+    {
+      id: "android:Pixel_9_Debug",
+      name: "Pixel_9_Debug",
+      runtimeId: androidRuntime.id,
+      runtimeName: androidRuntime.name,
+      platform: "ANDROID",
+      deviceTypeId: "pixel_9",
+      state: "Shutdown",
+      isAvailable: true,
+      availabilityError: null,
+      dataPath: "/Users/acme/.android/avd/Pixel_9_Debug.avd",
+    },
+  ],
+};
 
 function device(
   runtime: SimulatorRuntime,
@@ -135,6 +172,15 @@ export async function seedSimulators(prisma: PrismaClient): Promise<void> {
         payloadJson: "{}",
         resultJson: JSON.stringify({ inventory }),
       })),
+      {
+        ...terminal,
+        id: "job-simulator-inventory-android",
+        agentId: ids.agents.studio,
+        kind: SIMULATOR_INVENTORY_JOB_KIND,
+        idempotencyKey: `${SIMULATOR_INVENTORY_JOB_KIND}:${ids.simulators.androidInventoryRequest}`,
+        payloadJson: JSON.stringify({ platform: "ANDROID" }),
+        resultJson: JSON.stringify({ inventory: androidInventory }),
+      },
       {
         ...terminal,
         id: "job-simulator-detail-ios",

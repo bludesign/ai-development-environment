@@ -12,6 +12,20 @@ import { useServerUrlSettings } from "@/hooks/use-server-url-settings";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { serverUrlOptions, type ServerUrlKind } from "@/lib/server-urls";
 
+export async function buildArtifactDownloadUrl(
+  buildId: string,
+  artifactId: string,
+  kind?: ServerUrlKind,
+) {
+  const data = await controlPlaneRequest<{
+    buildArtifactLinks: { downloadUrl: string };
+  }>(
+    `query DownloadBuildArtifact($buildId: ID!, $artifactId: ID!, $kind: ServerUrlKind) { buildArtifactLinks(buildId: $buildId, artifactId: $artifactId, serverUrlKind: $kind) { downloadUrl } }`,
+    { buildId, artifactId, kind },
+  );
+  return data.buildArtifactLinks.downloadUrl;
+}
+
 export function BuildArtifactDownload({
   buildId,
   artifactId,
@@ -29,13 +43,13 @@ export function BuildArtifactDownload({
     setBusy(true);
     setError(null);
     try {
-      const data = await controlPlaneRequest<{
-        buildArtifactLinks: { downloadUrl: string };
-      }>(
-        `query DownloadBuildArtifact($buildId: ID!, $artifactId: ID!, $kind: ServerUrlKind) { buildArtifactLinks(buildId: $buildId, artifactId: $artifactId, serverUrlKind: $kind) { downloadUrl } }`,
-        { buildId, artifactId, kind: kind ?? settings?.defaultServerUrlKind },
+      window.location.assign(
+        await buildArtifactDownloadUrl(
+          buildId,
+          artifactId,
+          kind ?? settings?.defaultServerUrlKind,
+        ),
       );
-      window.location.assign(data.buildArtifactLinks.downloadUrl);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
     } finally {

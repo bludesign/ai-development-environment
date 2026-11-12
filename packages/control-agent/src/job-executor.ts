@@ -5,7 +5,7 @@ import {
   WORKTREE_INSPECT_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
 import { CODEBASE_GIT_INSPECT_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
-import { IOS_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
+import { isBuildRunJob } from "@ai-development-environment/agent-contract/builds";
 import { parseOperationDescriptor } from "@ai-development-environment/agent-contract/operation-resources";
 import { randomUUID } from "node:crypto";
 
@@ -125,10 +125,9 @@ export class JobExecutor {
           while (!this.shutdown.signal.aborted) {
             try {
               if (!checkpointRead) {
-                completion =
-                  job.kind === IOS_BUILD_JOB_KIND
-                    ? executionCompletion(identity)
-                    : undefined;
+                completion = isBuildRunJob(job.kind)
+                  ? executionCompletion(identity)
+                  : undefined;
                 checkpointRead = true;
                 if (
                   completion &&
@@ -333,7 +332,7 @@ export class JobExecutor {
               ),
             reportBuildProgress: (input) =>
               this.client.reportBuildProgress(input),
-            ...(resourceAware && claimed.kind === IOS_BUILD_JOB_KIND
+            ...(resourceAware && isBuildRunJob(claimed.kind)
               ? {
                   finalizeBuildResult: async (
                     completedResult: ProcessResult,
@@ -438,7 +437,7 @@ export class JobExecutor {
           },
         );
       else if (!codebaseId) result = await runHandler();
-      else if (claimed.kind === IOS_BUILD_JOB_KIND) {
+      else if (isBuildRunJob(claimed.kind)) {
         result = await this.repositoryCoordinator.runBuild(
           codebaseId,
           runHandler,

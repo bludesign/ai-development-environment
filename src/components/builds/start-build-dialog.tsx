@@ -33,6 +33,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -57,6 +63,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BuildConfigurationDialog } from "./ios-project-section";
+import { AndroidStartBuildDialog } from "./android-start-build-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
@@ -162,6 +169,8 @@ export function StartBuildButton({
   disabledReason,
   buildSettingsHref,
   onStarted,
+  appleEnabled = true,
+  androidEnabled = false,
   size = "sm",
 }: {
   codebaseId: string;
@@ -170,10 +179,14 @@ export function StartBuildButton({
   disabledReason?: string | null;
   buildSettingsHref?: string;
   onStarted?: (buildId: string) => void;
+  appleEnabled?: boolean;
+  androidEnabled?: boolean;
   size?: "sm" | "default";
 }) {
   const t = useTranslations("builds");
+  const androidT = useTranslations("androidBuilds");
   const [open, setOpen] = useState(false);
+  const [androidOpen, setAndroidOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const settingsCloseTimer = useRef<number | null>(null);
   const [destinationCache] = useState(
@@ -246,10 +259,28 @@ export function StartBuildButton({
             </Link>
           </PopoverContent>
         </Popover>
+      ) : !disabled && appleEnabled && androidEnabled ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size={size} type="button">
+              <Hammer /> {t("build")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => setOpen(true)}>
+              {t("iosApp")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setAndroidOpen(true)}>
+              {androidT("project")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       ) : (
         <Button
           disabled={disabled}
-          onClick={() => setOpen(true)}
+          onClick={() =>
+            androidEnabled ? setAndroidOpen(true) : setOpen(true)
+          }
           size={size}
           title={disabledReason ?? undefined}
           type="button"
@@ -264,6 +295,14 @@ export function StartBuildButton({
           onOpenChange={setOpen}
           onStarted={(id) => onStarted?.(id)}
           open={open}
+          worktreeId={worktreeId}
+        />
+      )}
+      {androidOpen && (
+        <AndroidStartBuildDialog
+          codebaseId={codebaseId}
+          onClose={() => setAndroidOpen(false)}
+          onStarted={onStarted}
           worktreeId={worktreeId}
         />
       )}

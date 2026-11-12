@@ -6,6 +6,14 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 
+export type SimulatorPlatform = "APPLE" | "ANDROID";
+
+export function simulatorPlatform(
+  simulatorId: string,
+): SimulatorPlatform | undefined {
+  return simulatorId.startsWith("android:") ? "ANDROID" : undefined;
+}
+
 export type Simulator = {
   id: string;
   name: string;
@@ -66,6 +74,7 @@ export type SimulatorActionInput = {
   action: SimulatorAction;
   name?: string;
   bundleId?: string;
+  platform?: SimulatorPlatform;
 };
 
 export type CreateSimulatorInput = {
@@ -73,6 +82,7 @@ export type CreateSimulatorInput = {
   name: string;
   runtimeId: string;
   deviceTypeId: string;
+  platform?: SimulatorPlatform;
 };
 
 type SimulatorJob = Pick<AgentJob, "id" | "agentId" | "status" | "error"> & {
@@ -204,12 +214,13 @@ async function runJob(
 export async function refreshSimulatorInventory(
   agentId: string,
   signal: AbortSignal,
+  platform?: SimulatorPlatform,
 ) {
   const job = await runJob(
-    `mutation RefreshSimulatorInventory($agentId: ID!, $requestId: ID!) {
-      refreshSimulatorInventory(agentId: $agentId, requestId: $requestId) { ${INVENTORY_FIELDS} }
+    `mutation RefreshSimulatorInventory($agentId: ID!, $requestId: ID!, $platform: SimulatorPlatform) {
+      refreshSimulatorInventory(agentId: $agentId, requestId: $requestId, platform: $platform) { ${INVENTORY_FIELDS} }
     }`,
-    { agentId, requestId: createClientId() },
+    { agentId, requestId: createClientId(), ...(platform ? { platform } : {}) },
     "SimulatorInventoryJob",
     INVENTORY_FIELDS,
     signal,
@@ -228,10 +239,17 @@ export async function inspectSimulator(
   signal: AbortSignal,
 ) {
   const job = await runJob(
-    `mutation InspectSimulator($agentId: ID!, $simulatorId: ID!, $requestId: ID!) {
-      inspectSimulator(agentId: $agentId, simulatorId: $simulatorId, requestId: $requestId) { ${DETAIL_FIELDS} }
+    `mutation InspectSimulator($agentId: ID!, $simulatorId: ID!, $requestId: ID!, $platform: SimulatorPlatform) {
+      inspectSimulator(agentId: $agentId, simulatorId: $simulatorId, requestId: $requestId, platform: $platform) { ${DETAIL_FIELDS} }
     }`,
-    { agentId, simulatorId, requestId: createClientId() },
+    {
+      agentId,
+      simulatorId,
+      requestId: createClientId(),
+      ...(simulatorPlatform(simulatorId)
+        ? { platform: simulatorPlatform(simulatorId) }
+        : {}),
+    },
     "SimulatorDetailJob",
     DETAIL_FIELDS,
     signal,
@@ -273,11 +291,18 @@ export function performSimulatorAction(
   input: SimulatorActionInput,
   signal: AbortSignal,
 ) {
+  const platform = input.platform ?? simulatorPlatform(input.simulatorId);
   return runJob(
     `mutation SimulatorAction($input: SimulatorActionInput!) {
       performSimulatorAction(input: $input) { ${JOB_FIELDS} }
     }`,
-    { input: { ...input, requestId: createClientId() } },
+    {
+      input: {
+        ...input,
+        ...(platform ? { platform } : {}),
+        requestId: createClientId(),
+      },
+    },
     "SimulatorActionJob",
     JOB_FIELDS,
     signal,
@@ -287,10 +312,14 @@ export function performSimulatorAction(
 export function simulatorAgentSupports(
   agent: ActiveAgentOption,
   capability: string,
+  platform: SimulatorPlatform = "APPLE",
 ) {
   return (
     agent.connectionStatus === "ONLINE" &&
-    Boolean(agent.capabilities?.includes(`simulators.${capability}`))
+    (platform === "ANDROID"
+      ? capability !== "reset" &&
+        Boolean(agent.capabilities?.includes("android.simulators"))
+      : Boolean(agent.capabilities?.includes(`simulators.${capability}`)))
   );
 }
 

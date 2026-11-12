@@ -28,8 +28,16 @@ import type { ToolInvocationContext } from "../tool-call-audit.service";
 export const SIMULATORS_TOOL_GROUP_ID = "builtin:simulators";
 
 const agentId = z.string().min(1);
-const simulatorId = z.guid();
-const target = z.strictObject({ agentId, simulatorId });
+const platform = z.enum(["APPLE", "ANDROID"]);
+const simulatorId = z.union([
+  z.guid(),
+  z.string().regex(/^android:[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/),
+]);
+const target = z.strictObject({
+  agentId,
+  simulatorId,
+  platform: platform.optional(),
+});
 const requestId = z.string().trim().min(1).max(200);
 const confirmation = z.literal(true);
 const name = z.string().trim().min(1).max(200);
@@ -157,9 +165,9 @@ export function createSimulatorToolGroup(
         title: "Refresh simulator inventory",
         description:
           "List simulators, installed runtimes, and available device types on an agent.",
-        inputSchema: request,
+        inputSchema: request.extend({ platform: platform.optional() }),
         kind: SIMULATOR_INVENTORY_JOB_KIND,
-        payload: () => ({}),
+        payload: ({ platform }) => (platform ? { platform } : {}),
       }),
       queueTool({
         name: "inspect_simulator",
@@ -186,6 +194,7 @@ export function createSimulatorToolGroup(
               ...SIMULATOR_ACTIONS,
             ]),
             error: z.string().nullable(),
+            platform: platform.optional(),
             simulatorId: simulatorId.nullable(),
             bundleId: z.string().nullable(),
             inventory: inventory.nullable(),
@@ -204,15 +213,24 @@ export function createSimulatorToolGroup(
           "Create a simulator using an installed runtime and a supported device type.",
         inputSchema: request.extend({
           name,
-          runtimeId: identifier,
+          runtimeId: z.union([
+            identifier,
+            z
+              .string()
+              .regex(
+                /^system-images;android-[A-Za-z0-9._-]+;[A-Za-z0-9._-]+;[A-Za-z0-9._-]+$/,
+              ),
+          ]),
           deviceTypeId: identifier,
+          platform: platform.optional(),
         }),
         annotations: WRITE_ANNOTATIONS,
         kind: SIMULATOR_CREATE_JOB_KIND,
-        payload: ({ name, runtimeId, deviceTypeId }) => ({
+        payload: ({ name, runtimeId, deviceTypeId, platform }) => ({
           name,
           runtimeId,
           deviceTypeId,
+          ...(platform ? { platform } : {}),
         }),
       }),
       ...(

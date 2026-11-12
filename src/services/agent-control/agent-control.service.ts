@@ -46,6 +46,21 @@ import {
 } from "@ai-development-environment/agent-contract/crashes";
 import {
   IOS_BUILD_JOB_KIND,
+  ANDROID_BUILD_JOB_KINDS,
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+  ANDROID_BUILD_DELETE_JOB_KIND,
+  ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+  ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_REMOTE_DEPLOY_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  isBuildRunJob,
+  parseAndroidBuildPayload,
+  parseAndroidSourcePayload,
+  parseAndroidDeployPayload,
+  parseAndroidRemoteDeployPayload,
   IOS_BUILD_DELETE_JOB_KIND,
   IOS_BUILD_JOB_KINDS,
   IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
@@ -255,6 +270,7 @@ export const SUPPORTED_AGENT_JOBS = [
   ...WORKTREE_JOB_KINDS,
   ...SKILL_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,
+  ...ANDROID_BUILD_JOB_KINDS,
   ...SIGNING_ASSET_JOB_KINDS,
   ...WORKFLOW_JOB_KINDS,
   ...TAILSCALE_SERVE_JOB_KINDS,
@@ -536,15 +552,46 @@ export function validateJob(kind: string, payload: unknown): void {
     parseBuildJobPayload(payload);
     return;
   }
-  if (kind === IOS_BUILD_DELETE_JOB_KIND) {
+  if (kind === ANDROID_BUILD_JOB_KIND) {
+    parseAndroidBuildPayload(payload);
+    return;
+  }
+  if (
+    kind === ANDROID_SOURCE_DISCOVER_JOB_KIND ||
+    kind === ANDROID_SOURCE_INSPECT_JOB_KIND
+  ) {
+    const source = parseAndroidSourcePayload(payload);
+    if (kind === ANDROID_SOURCE_INSPECT_JOB_KIND && source.projectPath == null)
+      throw new Error("Select a Gradle project directory");
+    return;
+  }
+  if (kind === ANDROID_DEPLOY_JOB_KIND) {
+    parseAndroidDeployPayload(payload);
+    return;
+  }
+  if (kind === ANDROID_REMOTE_DEPLOY_JOB_KIND) {
+    parseAndroidRemoteDeployPayload(payload);
+    return;
+  }
+  if (kind === ANDROID_RUN_DESTINATIONS_JOB_KIND) return;
+  if (
+    kind === IOS_BUILD_DELETE_JOB_KIND ||
+    kind === ANDROID_BUILD_DELETE_JOB_KIND
+  ) {
     parseBuildDeletePayload(payload);
     return;
   }
-  if (kind === IOS_ARTIFACT_DOWNLOAD_JOB_KIND) {
+  if (
+    kind === IOS_ARTIFACT_DOWNLOAD_JOB_KIND ||
+    kind === ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND
+  ) {
     parseBuildArtifactDownloadPayload(payload);
     return;
   }
-  if (kind === IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND) {
+  if (
+    kind === IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND ||
+    kind === ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND
+  ) {
     parseBuildArtifactTransferUploadPayload(payload);
     return;
   }
@@ -1360,7 +1407,7 @@ export class AgentControlService {
       );
     if (
       queued.status === "QUEUED" &&
-      queued.kind === IOS_BUILD_JOB_KIND &&
+      isBuildRunJob(queued.kind) &&
       queued.worktreeId
     ) {
       for (const guard of this.buildAdmissionGuards) {
@@ -1383,7 +1430,7 @@ export class AgentControlService {
         );
       }
     }
-    if (queued.status === "QUEUED" && queued.kind === IOS_BUILD_JOB_KIND) {
+    if (queued.status === "QUEUED" && isBuildRunJob(queued.kind)) {
       const [diskState, diskSettings] = await Promise.all([
         prisma.agentDiskSpaceState.findUnique({ where: { agentId } }),
         prisma.diskSpaceSettings.findUnique({ where: { id: "default" } }),
@@ -1680,12 +1727,9 @@ export class AgentControlService {
       throw new Error("Job not found for this agent");
     if (job.executionToken && job.executionToken !== executionToken)
       throw new Error("Job execution token does not match its owner");
-    if (
-      !cleanupVerified &&
-      (job.kind !== IOS_BUILD_JOB_KIND || !job.executionToken)
-    )
+    if (!cleanupVerified && (!isBuildRunJob(job.kind) || !job.executionToken))
       throw new Error(
-        "Only a protected iOS build can defer cleanup acknowledgement",
+        "Only a protected build can defer cleanup acknowledgement",
       );
     if (
       !job.executionToken &&

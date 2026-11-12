@@ -2,6 +2,8 @@
 enum CodebaseProjectType {
   "Represents the iOS app option."
   IOS_APP
+  "Represents an Android app project."
+  ANDROID_APP
 }
 
 "Values supported for build source."
@@ -56,7 +58,7 @@ enum BuildDestinationType {
   HOST
 }
 
-"Apple SDK family or compatible runtime used by an Xcode destination."
+"Platform used by a build or deployment destination."
 enum BuildPlatform {
   "iOS and iPadOS."
   IOS
@@ -74,6 +76,8 @@ enum BuildPlatform {
   MACOS_DESIGNED_FOR_IPAD
   "An iOS app running on Apple Vision."
   VISIONOS_DESIGNED_FOR_IPAD
+  "Android."
+  ANDROID
 }
 
 "Lifecycle statuses for build."
@@ -274,12 +278,70 @@ type CodebaseProject {
   repository: CodebaseRepository!
   "Configurations associated with this codebase project."
   configurations: [BuildConfiguration!]!
+  "Gradle configurations associated with this project."
+  androidConfigurations: [AndroidBuildConfiguration!]!
   "Allowed scripts associated with this codebase project."
   allowedScripts: [AllowedBuildScript!]!
   "ISO 8601 timestamp when this codebase project was created."
   createdAt: String!
   "ISO 8601 timestamp when this codebase project was last updated."
   updatedAt: String!
+}
+
+"A repository-scoped Android Gradle build configuration."
+type AndroidBuildConfiguration {
+  "Stable configuration identifier."
+  id: ID!
+  "Owning repository."
+  repository: CodebaseRepository!
+  "Display name."
+  name: String!
+  "Worktree-relative directory containing the Gradle wrapper."
+  projectPath: String!
+  "Gradle application module path."
+  module: String!
+  "Android application build variant."
+  variant: String!
+  "Optional worktree-relative standalone APK output path."
+  apkPath: String
+}
+
+"Settings for a saved Android Gradle build configuration."
+input SaveAndroidBuildConfigurationInput {
+  "Identifier of the existing configuration to edit. Omit to create one."
+  id: ID
+  "Codebase whose repository owns the configuration."
+  codebaseId: ID!
+  "Display name of the build configuration."
+  name: String!
+  "Worktree-relative directory containing the Gradle wrapper."
+  projectPath: String!
+  "Gradle path of the Android application module."
+  module: String!
+  "Android application build variant to assemble."
+  variant: String!
+  "Optional worktree-relative standalone APK output path."
+  apkPath: String
+}
+
+"Queue a saved Gradle configuration for an Android worktree build."
+input StartAndroidBuildInput {
+  "Worktree to build."
+  worktreeId: ID!
+  "Saved Gradle build configuration to use."
+  configurationId: ID!
+  "Identifier to reuse when retrying the same submission."
+  requestId: ID!
+  "Repository build scripts. Omit to select enabled defaults."
+  scriptIds: [ID!]
+}
+
+"An Android application module and its available Gradle variants."
+type AndroidBuildModule {
+  "Gradle path of the Android application module."
+  module: String!
+  "Enabled application build variants."
+  variants: [String!]!
 }
 
 "Represents a build artifact in the GraphQL API."
@@ -532,6 +594,8 @@ enum BuildRunAgentUnavailableReason {
   INCOMPATIBLE_ARCHITECTURE
   "The agent is not running macOS."
   NOT_MACOS
+  "Android SDK Platform Tools are unavailable on the agent."
+  ANDROID_TOOLS_UNAVAILABLE
   "A Mac app must run on the agent that built it."
   LOCAL_MAC_ONLY
 }
@@ -634,7 +698,7 @@ type Build {
   action: BuildAction!
   "The destination type associated with this build."
   destinationType: BuildDestinationType!
-  "Apple SDK family for the build. Imported coverage has no platform."
+  "Platform for the build. Imported coverage has no platform."
   platform: BuildPlatform
   "The destination associated with this build."
   destination: JSON!
@@ -660,6 +724,8 @@ type Build {
   worktree: Worktree
   "The configuration associated with this build. May be null when unavailable or not applicable."
   configuration: BuildConfiguration
+  "Saved Gradle configuration associated with the build, if still available."
+  androidConfiguration: AndroidBuildConfiguration
   "Artifacts associated with this build."
   artifacts: [BuildArtifact!]!
   "Reports associated with this build."
@@ -1127,6 +1193,23 @@ extend type Query {
   buildConfiguration("Configuration identifier." id: ID!): BuildConfiguration
   "Returns a codebase project, or null when it cannot be found."
   iosAppProject("Identifier of the codebase." codebaseId: ID!): CodebaseProject
+  "Returns the Android project for a codebase's repository."
+  androidAppProject(
+    "Codebase whose repository owns the project."
+    codebaseId: ID!
+  ): CodebaseProject
+  "Returns saved Android configurations in the selected scope."
+  androidBuildConfigurations(
+    "Repository whose Android build configurations to return."
+    repositoryId: ID
+    "App whose assigned repositories to include."
+    appId: ID
+  ): [AndroidBuildConfiguration!]!
+  "Returns a saved Android build configuration."
+  androidBuildConfiguration(
+    "Saved configuration identifier."
+    id: ID!
+  ): AndroidBuildConfiguration
   "Returns build signing options."
   buildSigningOptions(
     "Identifier of the build."
@@ -1193,6 +1276,44 @@ extend type Query {
 }
 
 extend type Mutation {
+  "Enables Android builds for a codebase's repository."
+  createAndroidAppProject(
+    "Codebase whose repository to configure."
+    codebaseId: ID!
+  ): CodebaseProject!
+  "Removes the repository's Android project and saved configurations."
+  deleteAndroidAppProject("Android project identifier." id: ID!): Boolean!
+  "Creates or updates a saved Android Gradle build configuration."
+  saveAndroidBuildConfiguration(
+    "Gradle configuration to save."
+    input: SaveAndroidBuildConfigurationInput!
+  ): AndroidBuildConfiguration!
+  "Removes a saved Android build configuration."
+  deleteAndroidBuildConfiguration(
+    "Saved configuration identifier."
+    id: ID!
+  ): Boolean!
+  "Queues a Gradle build that produces an APK."
+  startAndroidBuild(
+    "Worktree and configuration for the build."
+    input: StartAndroidBuildInput!
+  ): Build!
+  "Finds Gradle wrapper roots in the worktree."
+  discoverAndroidBuildSources(
+    "Worktree to scan."
+    worktreeId: ID!
+    "Identifier to reuse when retrying this scan."
+    requestId: ID!
+  ): [String!]!
+  "Finds application modules and enabled variants in a Gradle project."
+  inspectAndroidBuildSource(
+    "Worktree containing the Gradle project."
+    worktreeId: ID!
+    "Worktree-relative directory containing the Gradle wrapper."
+    projectPath: String!
+    "Identifier to reuse when retrying this inspection."
+    requestId: ID!
+  ): [AndroidBuildModule!]!
   "Reports a successful device or simulator launch from the owning deployment agent."
   reportBuildDeploymentLaunched(
     "Identifier of the agent job performing the deployment."

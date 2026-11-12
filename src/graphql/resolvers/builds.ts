@@ -18,6 +18,8 @@ import {
 } from "@/services/agent-control";
 import type {
   BuildsService,
+  SaveAndroidBuildConfigurationInput,
+  StartAndroidBuildInput,
   SaveBuildConfigurationInput,
   SaveBuildScriptInput,
 } from "@/services/builds";
@@ -76,6 +78,8 @@ export const createBuildResolvers = (service: BuildsService) => ({
   CodebaseRepository: {
     iosAppProject: (value: { id: string }) =>
       service.repositoryProject(value.id),
+    androidAppProject: (value: { id: string }) =>
+      service.repositoryAndroidProject(value.id),
     latestBuild: async (value: { id: string }) =>
       (await service.builds({ repositoryId: value.id, first: 1 })).items[0] ??
       null,
@@ -87,6 +91,16 @@ export const createBuildResolvers = (service: BuildsService) => ({
   CodebaseProject: {
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
     updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
+    androidConfigurations: (value: { androidConfigurations?: unknown[] }) =>
+      value.androidConfigurations ?? [],
+    configurations: (value: { configurations?: unknown[] }) =>
+      value.configurations ?? [],
+    allowedScripts: (value: { allowedScripts?: unknown[] }) =>
+      value.allowedScripts ?? [],
+  },
+  AndroidBuildConfiguration: {
+    repository: (value: { project: { repository: unknown } }) =>
+      value.project.repository,
   },
   BuildConfiguration: {
     repository: (value: { id: string }) =>
@@ -262,6 +276,30 @@ export const createBuildResolvers = (service: BuildsService) => ({
         : value.createdAt,
   },
   Query: {
+    androidAppProject: (
+      _: unknown,
+      { codebaseId }: { codebaseId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.androidProject(codebaseId);
+    },
+    androidBuildConfigurations: (
+      _: unknown,
+      args: { repositoryId?: string | null; appId?: string | null },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.androidConfigurations(args);
+    },
+    androidBuildConfiguration: (
+      _: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.androidConfiguration(id);
+    },
     buildArtifactLinks: async (
       _: unknown,
       {
@@ -382,6 +420,69 @@ export const createBuildResolvers = (service: BuildsService) => ({
     },
   },
   Mutation: {
+    discoverAndroidBuildSources: (
+      _: unknown,
+      { worktreeId, requestId }: { worktreeId: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.discoverAndroidSources(worktreeId, requestId);
+    },
+    inspectAndroidBuildSource: (
+      _: unknown,
+      {
+        worktreeId,
+        projectPath,
+        requestId,
+      }: { worktreeId: string; projectPath: string; requestId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.inspectAndroidSource(worktreeId, projectPath, requestId);
+    },
+    createAndroidAppProject: (
+      _: unknown,
+      { codebaseId }: { codebaseId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.createAndroidProject(codebaseId);
+    },
+    deleteAndroidAppProject: (
+      _: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteAndroidProject(id);
+    },
+    saveAndroidBuildConfiguration: (
+      _: unknown,
+      { input }: { input: SaveAndroidBuildConfigurationInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.saveAndroidConfiguration(input);
+    },
+    deleteAndroidBuildConfiguration: (
+      _: unknown,
+      { id }: { id: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.deleteAndroidConfiguration(id);
+    },
+    startAndroidBuild: (
+      _: unknown,
+      { input }: { input: StartAndroidBuildInput },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.startAndroidBuild({
+        ...input,
+        telemetryRequestOrigin: context.requestOrigin,
+      });
+    },
     deleteIosAppProject: (
       _root: unknown,
       { id }: { id: string },

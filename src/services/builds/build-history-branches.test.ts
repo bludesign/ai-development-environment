@@ -11,7 +11,7 @@ let database: Database.Database;
 let prisma: Pick<PrismaClient, "$queryRaw">;
 beforeEach(() => {
   database = new Database(":memory:");
-  database.exec(`CREATE TABLE Build (id TEXT PRIMARY KEY, createdAt INTEGER, status TEXT, repositoryId TEXT, configurationId TEXT, codebaseId TEXT, worktreeId TEXT, snapshotJson TEXT);
+  database.exec(`CREATE TABLE Build (id TEXT PRIMARY KEY, createdAt INTEGER, status TEXT, repositoryId TEXT, configurationId TEXT, codebaseId TEXT, worktreeId TEXT, snapshotJson TEXT, androidConfigurationId TEXT);
     CREATE TABLE AppRepository (appId TEXT, repositoryId TEXT);
     INSERT INTO AppRepository VALUES ('app', 'repo');`);
   prisma = {
@@ -33,7 +33,7 @@ function build(
   } = {},
 ) {
   database
-    .prepare("INSERT INTO Build VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    .prepare("INSERT INTO Build VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)")
     .run(
       id,
       options.createdAt ?? 1,

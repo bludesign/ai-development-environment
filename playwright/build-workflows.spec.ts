@@ -469,6 +469,54 @@ for (const device of ["iPhone", "iPad"] as const) {
   });
 }
 
+test("Android APK installation downloads a signed artifact from the build page", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-light");
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "userAgent", {
+      get: () =>
+        "Mozilla/5.0 (Linux; Android 16; Pixel 9) AppleWebKit/537.36 Chrome/141.0.0.0 Mobile Safari/537.36",
+    });
+  });
+  const artifactPath = `/api/public/builds/${ids.builds.android}/artifacts/artifact-android-debug-apk`;
+  await page.route(
+    (url) => url.pathname === artifactPath,
+    async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "content-type": "application/vnd.android.package-archive",
+          "content-disposition": 'attachment; filename="app-qa-debug.apk"',
+        },
+        body: "Mock Android APK",
+      });
+    },
+  );
+  await page.goto(`/en/dashboard/builds/${ids.builds.android}`);
+  await page
+    .getByRole("button", { name: "Install on Android", exact: true })
+    .click();
+  await expect(page.getByText(/open it from your downloads/)).toBeVisible();
+  const [request, download] = await Promise.all([
+    page.waitForRequest(
+      (request) => new URL(request.url()).pathname === artifactPath,
+      { timeout: 10_000 },
+    ),
+    page.waitForEvent("download", { timeout: 10_000 }),
+    page
+      .getByRole("dialog")
+      .getByRole("button", { name: "Download APK", exact: true })
+      .click(),
+  ]);
+  const link = new URL(request.url());
+  expect(link.origin).toBe(new URL(page.url()).origin);
+  expect(link.searchParams.get("token")).toBeTruthy();
+  expect(link.searchParams.get("expires")).toBeTruthy();
+  expect(download.suggestedFilename()).toBe("app-qa-debug.apk");
+});
+
 test("custom is selected automatically when a project has no configurations", async ({
   page,
 }, testInfo) => {

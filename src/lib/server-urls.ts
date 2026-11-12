@@ -8,7 +8,7 @@ export const SERVER_URL_KINDS = ["LOCAL", "REMOTE", "PROXY"] as const;
 export type ServerUrlKind = (typeof SERVER_URL_KINDS)[number];
 
 export type BuildServerUrlDestination = {
-  type: BuildDestinationType;
+  type: BuildDestinationType | "HOST";
   platform: BuildPlatform;
 };
 

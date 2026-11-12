@@ -79,12 +79,19 @@ import {
 import { BUILD_LIST_FIELDS } from "./graphql-fields";
 import { BuildConfigurationLabel } from "./build-configuration-label";
 import { IosInstallButton, latestInstallArtifact } from "./ios-install-button";
+import { AndroidInstallButton } from "./android-install-button";
 import type { PublicOrigin } from "@/lib/public-origin";
 import { BuildConfigurations } from "./build-configurations";
 import { BuildIconPicker } from "./build-icon-picker";
 import { ConfigurationIcon } from "./configuration-icon";
 import { RebuildButton } from "./rebuild-button";
-import { platformLabel, type BuildRecord, type BuildScript } from "./types";
+import {
+  isRunnableBuildArtifact,
+  isInstallableApk,
+  platformLabel,
+  type BuildRecord,
+  type BuildScript,
+} from "./types";
 import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
@@ -623,12 +630,12 @@ export function BuildsPage({
                         const installArtifact = latestInstallArtifact(
                           build.artifacts,
                         );
+                        const androidInstallArtifact =
+                          build.artifacts.find(isInstallableApk);
                         const startedAt = build.startedAt ?? build.createdAt;
                         const runnable =
                           build.status === "SUCCEEDED" &&
-                          build.artifacts.some(
-                            (artifact) => artifact.kind === "RUNNABLE_APP",
-                          );
+                          build.artifacts.some(isRunnableBuildArtifact);
                         const highlightColor = build.worktree?.highlightColor;
                         return (
                           <TableRow
@@ -773,6 +780,19 @@ export function BuildsPage({
                                     metadata={installArtifact.metadata}
                                     publicOrigin={publicOrigin}
                                   />
+                                )}
+                                {androidInstallArtifact && (
+                                  <span
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) =>
+                                      event.stopPropagation()
+                                    }
+                                  >
+                                    <AndroidInstallButton
+                                      artifactId={androidInstallArtifact.id}
+                                      buildId={build.id}
+                                    />
+                                  </span>
                                 )}
                               </div>
                             </TableCell>

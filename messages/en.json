@@ -1102,6 +1102,14 @@
         "title": "iOS build failed",
         "description": "An iOS build finishes with a failure."
       },
+      "ANDROID_BUILD_SUCCEEDED": {
+        "title": "Android build succeeded",
+        "description": "An Android build finishes successfully."
+      },
+      "ANDROID_BUILD_FAILED": {
+        "title": "Android build failed",
+        "description": "An Android build finishes with a failure."
+      },
       "COMMAND_RUN_SUCCEEDED": {
         "title": "Command run succeeded",
         "description": "A saved command finishes successfully."
@@ -1609,8 +1617,10 @@
     }
   },
   "simulators": {
+    "androidEmptyTitle": "No Android emulators found",
+    "androidEmptyDescription": "Install an Android system image on an online agent to create an emulator.",
     "title": "Simulators",
-    "description": "Manage Xcode simulators on enrolled Macs.",
+    "description": "Manage Apple simulators and Android emulators on enrolled agents.",
     "loading": "Loading simulator inventories…",
     "search": "Search simulators",
     "allPlatforms": "All platforms",
@@ -1696,11 +1706,20 @@
     "eraseDescription": "Erase all content and settings for {name} on {agent}?",
     "eraseTitle": "Erase simulator contents?",
     "renameDescription": "Enter a new name for {name}.",
-    "cloneDescription": "Create a copy of {name} with a new name."
+    "cloneDescription": "Create a copy of {name} with a new name.",
+    "simulatorFamily": "Simulator family",
+    "appleSimulators": "Apple simulators",
+    "androidEmulators": "Android emulators",
+    "createEmulator": "Create emulator",
+    "androidToolsRequired": "Android emulator tools are unavailable on this agent.",
+    "emulatorIdentifier": "Emulator identifier",
+    "androidAppsDescription": "Launch or stop an installed app on this emulator.",
+    "openEmulatorFolder": "Open data folder on {agent}",
+    "emulatorFolderOpened": "Data folder opened on {agent}."
   },
   "buildData": {
     "title": "Build Data",
-    "description": "Inspect and clean up Xcode DerivedData across enrolled agents.",
+    "description": "Inspect and clean up Xcode Derived Data and managed Gradle caches across enrolled agents.",
     "derivedDataTitle": "Derived Data",
     "derivedDataDescription": "Per-project build products, indexes, logs, and shared Xcode caches.",
     "deviceSupportTitle": "Device Support",
@@ -1770,7 +1789,12 @@
       "OFFLINE": "offline",
       "UNSUPPORTED": "agent update required",
       "INVALID": "invalid response"
-    }
+    },
+    "gradleTitle": "Gradle Build Data",
+    "gradleDescription": "Gradle project caches created by Android builds.",
+    "gradleEmptyTitle": "No Gradle Build Data found",
+    "gradleEmptyDescription": "Run an Android build to create a managed project cache.",
+    "selectAllGradle": "Select all Gradle Build Data entries"
   },
   "cacheServerSettings": {
     "title": "Actions Cache Server",
@@ -4162,7 +4186,8 @@
     "commitsBehindBase": "{count} commits behind base",
     "defaultBranchUpdateEnabled": "Keep up to date",
     "defaultBranchUpdatePaused": "Keep up to date paused",
-    "defaultBranch": "Default branch"
+    "defaultBranch": "Default branch",
+    "mobileBuildNotConfigured": "Add a mobile build configuration in repository settings first."
   },
   "worktreeDetail": {
     "loading": "Loading worktree details…",
@@ -4537,6 +4562,42 @@
     "missingResultFile": "Add this file to the result or select another package file.",
     "useManualVersion": "Use edited version"
   },
+  "androidBuilds": {
+    "discoverProjects": "Discover Gradle projects",
+    "inspectModules": "Inspect Gradle modules",
+    "discoveredProject": "Gradle project",
+    "useModuleVariant": "Application module and variant",
+    "noDiscoveredProjects": "No Gradle Wrapper projects found in this checkout.",
+    "noDiscoveredModules": "No Android application variants found in this project.",
+    "project": "Android App",
+    "projectDescription": "Configure Gradle builds for this repository. Select a worktree to build an APK.",
+    "noCheckout": "Check out this repository on an enrolled agent to configure Android builds.",
+    "enableProject": "Enable Android builds",
+    "noConfigurations": "No Android build configurations yet.",
+    "addConfiguration": "Add Android configuration",
+    "editConfiguration": "Edit Android configuration",
+    "deleteConfiguration": "Delete Android configuration",
+    "deleteProject": "Remove Android project",
+    "deleteProjectDescription": "Remove this Android project and its configurations? Build history is retained.",
+    "deleteConfigurationDescription": "Remove this Android configuration? Existing builds are retained.",
+    "configurationDescription": "Use the repository’s Gradle Wrapper. The optional APK path is relative to the worktree.",
+    "name": "Name",
+    "projectPath": "Gradle project path",
+    "module": "Application module",
+    "variant": "Build variant",
+    "apkPath": "APK path (optional)",
+    "configuration": "Android configuration",
+    "start": "Start Android build",
+    "startDescription": "Assemble the selected APK on the worktree’s agent. You can run it on an emulator or connected device after it builds.",
+    "startFailed": "Could not start the Android build.",
+    "install": "Install on Android",
+    "installInstructions": "Download the APK, then open it from your downloads to start the Android installer. Android may ask you to allow installs from your browser.",
+    "download": "Download APK",
+    "export": "Export APK",
+    "applicationId": "Application ID",
+    "version": "Version",
+    "unsignedApk": "This APK needs a valid signature before it can be installed."
+  },
   "builds": {
     "filterRepository": "Filter builds by repository",
     "allRepositories": "All repositories",
@@ -4740,6 +4801,7 @@
     "runAgents": "Run agents",
     "buildAgent": "Build agent",
     "runAgentUnavailable": {
+      "ANDROID_TOOLS_UNAVAILABLE": "Android SDK tools are unavailable on this agent.",
       "OFFLINE": "Offline",
       "AGENT_UPDATE_REQUIRED": "Update required",
       "BUILD_AGENT_UNAVAILABLE": "Build artifact unavailable",

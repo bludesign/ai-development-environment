@@ -19,7 +19,7 @@ import {
   type ApnsAuthentication,
 } from "@/services/push-notifications/apns-client";
 import type { ApnsEnvironment } from "@/services/push-notifications/validation";
-import webpush from "web-push";
+import * as webpush from "web-push";
 
 import {
   parseNotificationDeviceInput,

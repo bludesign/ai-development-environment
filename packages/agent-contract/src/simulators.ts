@@ -3,6 +3,8 @@ export const SIMULATOR_INSPECT_JOB_KIND = "simulators.inspect";
 export const SIMULATOR_CREATE_JOB_KIND = "simulators.create";
 export const SIMULATOR_RESET_JOB_KIND = "simulators.reset";
 export const SIMULATOR_ACTION_JOB_KIND = "simulators.action";
+export const ANDROID_SIMULATORS_CAPABILITY = "android.simulators";
+export type SimulatorPlatform = "APPLE" | "ANDROID";
 
 export const SIMULATOR_JOB_KINDS = [
   SIMULATOR_INVENTORY_JOB_KIND,
@@ -106,11 +108,54 @@ function items<T>(value: unknown, parse: (item: unknown) => T): T[] {
   return value.map(parse);
 }
 
-export function simulatorId(value: unknown): string {
+export function simulatorId(
+  value: unknown,
+  platform?: SimulatorPlatform,
+): string {
   const id = text(value, "Simulator ID");
-  if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id))
+  if (platform !== "APPLE" && id.startsWith("android:")) {
+    return `android:${androidAvdName(id.slice("android:".length))}`;
+  }
+  if (
+    platform === "ANDROID" ||
+    !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id)
+  )
     throw new Error("Simulator ID must be a UUID");
   return id.toUpperCase();
+}
+
+export function androidAvdName(value: unknown): string {
+  const result = text(value, "Android emulator name");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/.test(result))
+    throw new Error(
+      "Use 1–80 letters, numbers, dots, underscores, or hyphens for the Android emulator name",
+    );
+  return result;
+}
+
+export function androidSystemImage(value: unknown): string {
+  const result = text(value, "Android system image");
+  if (
+    !/^system-images;android-[A-Za-z0-9._-]+;[A-Za-z0-9._-]+;[A-Za-z0-9._-]+$/.test(
+      result,
+    )
+  )
+    throw new Error("Android system image ID is invalid");
+  return result;
+}
+
+export function simulatorPlatform(
+  value: unknown,
+  id?: string,
+): SimulatorPlatform {
+  if (value == null) return id?.startsWith("android:") ? "ANDROID" : "APPLE";
+  if (value !== "APPLE" && value !== "ANDROID")
+    throw new Error("Unsupported simulator platform");
+  return value;
+}
+
+function platformField(platform: SimulatorPlatform): { platform?: "ANDROID" } {
+  return platform === "ANDROID" ? { platform } : {};
 }
 
 function name(value: unknown): string {
@@ -140,23 +185,37 @@ export function simulatorEmptyPayload(value: unknown) {
   return {};
 }
 
+export function simulatorInventoryPayload(value: unknown) {
+  const input = object(value, "Simulator inventory payload");
+  exactFields(input, ["platform"]);
+  return platformField(simulatorPlatform(input.platform));
+}
+
 export function simulatorInspectPayload(value: unknown) {
   const input = object(value, "Simulator details payload");
-  exactFields(input, ["simulatorId"]);
-  return { simulatorId: simulatorId(input.simulatorId) };
+  exactFields(input, ["simulatorId", "platform"]);
+  const id = simulatorId(input.simulatorId);
+  const platform = simulatorPlatform(input.platform, id);
+  return { simulatorId: simulatorId(id, platform), ...platformField(platform) };
 }
 
 export function simulatorCreatePayload(value: unknown) {
   const input = object(value, "Create simulator payload");
-  exactFields(input, ["name", "runtimeId", "deviceTypeId"]);
+  exactFields(input, ["name", "runtimeId", "deviceTypeId", "platform"]);
+  const platform = simulatorPlatform(input.platform);
   return {
-    name: name(input.name),
-    runtimeId: identifier(input.runtimeId, "Runtime ID"),
+    ...platformField(platform),
+    name:
+      platform === "ANDROID" ? androidAvdName(input.name) : name(input.name),
+    runtimeId:
+      platform === "ANDROID"
+        ? androidSystemImage(input.runtimeId)
+        : identifier(input.runtimeId, "Runtime ID"),
     deviceTypeId: identifier(input.deviceTypeId, "Device type ID"),
   };
 }
 
-export type SimulatorActionPayload =
+export type SimulatorActionPayload = { platform?: "ANDROID" } & (
   | { simulatorId: string; action: "RENAME" | "CLONE"; name: string }
   | {
       simulatorId: string;
@@ -176,23 +235,38 @@ export type SimulatorActionPayload =
         | "ERASE"
         | "DELETE"
         | "OPEN_DATA_FOLDER";
-    };
+    }
+);
 
 export function simulatorActionPayload(value: unknown): SimulatorActionPayload {
   const input = object(value, "Simulator action payload");
-  const id = simulatorId(input.simulatorId);
+  const targetId = simulatorId(input.simulatorId);
+  const platform = simulatorPlatform(input.platform, targetId);
+  const id = simulatorId(targetId, platform);
+  const target = { simulatorId: id, ...platformField(platform) };
   switch (input.action) {
     case "RENAME":
     case "CLONE":
-      exactFields(input, ["simulatorId", "action", "name"]);
-      return { simulatorId: id, action: input.action, name: name(input.name) };
+      exactFields(input, ["simulatorId", "action", "name", "platform"]);
+      return {
+        ...target,
+        action: input.action,
+        name:
+          platform === "ANDROID"
+            ? androidAvdName(input.name)
+            : name(input.name),
+      };
     case "LAUNCH_APP":
     case "TERMINATE_APP":
     case "OPEN_APP_BUNDLE_FOLDER":
     case "OPEN_APP_DATA_FOLDER":
-      exactFields(input, ["simulatorId", "action", "bundleId"]);
+      exactFields(input, ["simulatorId", "action", "bundleId", "platform"]);
+      if (platform === "ANDROID" && input.action.startsWith("OPEN_"))
+        throw new Error(
+          "Android app folders are not available on the Mac host",
+        );
       return {
-        simulatorId: id,
+        ...target,
         action: input.action,
         bundleId: identifier(input.bundleId, "Bundle ID"),
       };
@@ -202,8 +276,8 @@ export function simulatorActionPayload(value: unknown): SimulatorActionPayload {
     case "ERASE":
     case "DELETE":
     case "OPEN_DATA_FOLDER":
-      exactFields(input, ["simulatorId", "action"]);
-      return { simulatorId: id, action: input.action };
+      exactFields(input, ["simulatorId", "action", "platform"]);
+      return { ...target, action: input.action };
     default:
       throw new Error("Unsupported simulator action");
   }

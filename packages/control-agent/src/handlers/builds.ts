@@ -169,7 +169,7 @@ function requireSuccess(
   return result;
 }
 
-async function validateWorktree(
+export async function validateWorktree(
   input: {
     folder: string;
     gitDirectory: string;
@@ -212,7 +212,48 @@ async function validateWorktree(
   return folder;
 }
 
-function containedPath(root: string, relativePath: string): string {
+export async function verifyQueuedBuildCheckout(
+  folder: string,
+  expected: { branch?: string | null; headSha?: string | null },
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  await withRepositoryMetadata(
+    folder,
+    async () => {
+      const [branch, head] = await Promise.all([
+        command(
+          "git",
+          ["-C", folder, "symbolic-ref", "--quiet", "--short", "HEAD"],
+          timeoutMs,
+          signal,
+        ),
+        command(
+          "git",
+          ["-C", folder, "rev-parse", "--verify", "--quiet", "HEAD"],
+          timeoutMs,
+          signal,
+        ),
+      ]);
+      signal.throwIfAborted();
+      if (
+        (expected.branch !== undefined &&
+          (branch.exitCode === 0 ? branch.stdout.trim() : null) !==
+            expected.branch) ||
+        (expected.headSha !== undefined &&
+          (head.exitCode === 0 ? head.stdout.trim() : null) !==
+            expected.headSha)
+      ) {
+        throw new Error(
+          "The build worktree branch or commit changed while queued; refresh and start a new build",
+        );
+      }
+    },
+    signal,
+  );
+}
+
+export function containedPath(root: string, relativePath: string): string {
   const target = resolve(root, relativePath);
   const difference = relative(root, target);
   if (
@@ -1557,7 +1598,7 @@ export function createRedactor(env: NodeJS.ProcessEnv) {
   };
 }
 
-class BuildLogger {
+export class BuildLogger {
   private static readonly MAX_CHUNK_BYTES = 128 * 1024;
   private static readonly MAX_BATCH_BYTES = 128 * 1024;
   private readonly stream;
@@ -1705,7 +1746,7 @@ function terminateProcess(
   return timer;
 }
 
-function runLoggedCommand(options: {
+export function runLoggedCommand(options: {
   command: string;
   args: string[];
   cwd: string;
@@ -2086,8 +2127,11 @@ type ScriptExecutionResult = {
   error: string | null;
 };
 
-async function runHook(options: {
-  input: BuildJobPayload;
+export async function runHook(options: {
+  input: Pick<
+    BuildJobPayload,
+    "buildId" | "artifactDirectory" | "server" | "telemetry" | "endpointPaths"
+  >;
   folder: string;
   script: BuildJobPayload["scripts"][number];
   phase: "PRE_BUILD" | "POST_BUILD";
@@ -2232,7 +2276,7 @@ async function pathSize(path: string): Promise<number> {
   return size;
 }
 
-async function fileChecksum(path: string): Promise<string | null> {
+export async function fileChecksum(path: string): Promise<string | null> {
   try {
     const information = await stat(path);
     if (!information.isFile()) return null;
@@ -2926,6 +2970,8 @@ function destinationSDK(destination: BuildDestination) {
     case "MACOS":
     case "MAC_CATALYST":
       return { name: "macosx", minimum: "MACOSX_DEPLOYMENT_TARGET" };
+    case "ANDROID":
+      throw new Error("Android does not use an Xcode SDK");
   }
 }
 
@@ -3373,35 +3419,15 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     signal,
   );
   const snapshot = payload as Record<string, unknown>;
-  await withRepositoryMetadata(
+  await verifyQueuedBuildCheckout(
     folder,
-    async () => {
-      const [branch, head] = await Promise.all([
-        command(
-          "git",
-          ["-C", folder, "symbolic-ref", "--quiet", "--short", "HEAD"],
-          Math.min(timeoutMs, 60_000),
-          signal,
-        ),
-        command(
-          "git",
-          ["-C", folder, "rev-parse", "--verify", "--quiet", "HEAD"],
-          Math.min(timeoutMs, 60_000),
-          signal,
-        ),
-      ]);
-      if (
-        (Object.hasOwn(snapshot, "branch") &&
-          (branch.exitCode === 0 ? branch.stdout.trim() : null) !==
-            (input.branch ?? null)) ||
-        (Object.hasOwn(snapshot, "headSha") &&
-          (head.exitCode === 0 ? head.stdout.trim() : null) !== input.headSha)
-      ) {
-        throw new Error(
-          "The build worktree branch or commit changed while queued; refresh and start a new build",
-        );
-      }
+    {
+      ...(Object.hasOwn(snapshot, "branch")
+        ? { branch: input.branch ?? null }
+        : {}),
+      ...(Object.hasOwn(snapshot, "headSha") ? { headSha: input.headSha } : {}),
     },
+    Math.min(timeoutMs, 60_000),
     signal,
   );
   await validateSource(folder, input.source);
@@ -3937,6 +3963,8 @@ export const downloadIosBuildArtifact: AgentJobHandler = async (
   let uploadPath = target;
   let filename = basename(target);
   let contentType = "application/octet-stream";
+  if (filename.endsWith(".apk"))
+    contentType = "application/vnd.android.package-archive";
   let temporaryArchive: string | null = null;
   try {
     if (information.isDirectory()) {
@@ -4009,6 +4037,8 @@ export const uploadTransferredIosBuildArtifact: AgentJobHandler = async (
   let uploadPath = target;
   let filename = basename(target);
   let contentType = "application/octet-stream";
+  if (filename.endsWith(".apk"))
+    contentType = "application/vnd.android.package-archive";
   let temporaryArchive: string | null = null;
   try {
     if (information.isDirectory()) {

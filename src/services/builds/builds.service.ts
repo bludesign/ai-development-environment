@@ -13,6 +13,19 @@ import {
   BUILD_PLATFORMS,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   BUILD_SCRIPT_LOCK_SCOPES,
+  ANDROID_BUILD_DESTINATION,
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+  ANDROID_BUILD_DELETE_JOB_KIND,
+  ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
+  ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_REMOTE_DEPLOY_JOB_KIND,
+  androidAssembleTask,
+  parseAndroidBuildSettings,
+  parseAndroidDestination,
   DEFAULT_BUILD_ADVANCED_SETTINGS,
   GENERIC_BUILD_DESTINATION_ACTIONS,
   IOS_BUILD_JOB_KIND,
@@ -47,6 +60,7 @@ import {
   type BuildPlatform,
   type BuildProgressReport,
   type BuildReportKind,
+  type BuildScriptSnapshot,
   type BuildSigningRequirement,
   type BuildSourceKind,
 } from "@ai-development-environment/agent-contract/builds";
@@ -505,6 +519,9 @@ const buildInclude = {
     },
   },
   configuration: { include: { source: true, project: true } },
+  androidConfiguration: {
+    include: { project: { include: { repository: true } } },
+  },
   artifacts: { orderBy: { createdAt: "asc" as const } },
   scriptExecutions: {
     orderBy: [{ phase: "asc" as const }, { position: "asc" as const }],
@@ -534,6 +551,49 @@ export type SaveBuildConfigurationInput = {
   exportSettings?: unknown;
   platformConfigurations?: BuildPlatformConfigurationInput[] | null;
 };
+
+export type SaveAndroidBuildConfigurationInput = ReturnType<
+  typeof parseAndroidBuildSettings
+> & {
+  id?: string | null;
+  codebaseId: string;
+  name: string;
+};
+
+export type StartAndroidBuildInput = {
+  worktreeId: string;
+  configurationId: string;
+  requestId: string;
+  scriptIds?: string[] | null;
+  serverUrlKind?: ServerUrlKind | null;
+  telemetryRequestOrigin?: string | null;
+};
+
+function androidScriptExecutions(scripts: BuildScriptSnapshot[]) {
+  return scripts.flatMap((script) =>
+    (
+      [
+        ["PRE_BUILD", script.preBuildScript],
+        ["POST_BUILD", script.postBuildScript],
+      ] as const
+    ).flatMap(([phase, source]) =>
+      source
+        ? [
+            {
+              id: randomUUID(),
+              scriptId: script.id,
+              phase,
+              position: script.position,
+              nameSnapshot: script.name,
+              sourceSnapshot: source,
+              timeoutSeconds: script.timeoutSeconds,
+              failureBehavior: script.failureBehavior,
+            },
+          ]
+        : [],
+    ),
+  );
+}
 
 export type SaveBuildScriptInput = {
   id?: string | null;
@@ -667,6 +727,27 @@ export class BuildsService {
   ) {
     this.agentControl.registerCompletionHandler(IOS_BUILD_JOB_KIND, (job) =>
       this.projectBuildCompletion(job),
+    );
+    this.agentControl.registerCompletionHandler(ANDROID_BUILD_JOB_KIND, (job) =>
+      this.projectBuildCompletion(job),
+    );
+    for (const kind of [
+      ANDROID_DEPLOY_JOB_KIND,
+      ANDROID_REMOTE_DEPLOY_JOB_KIND,
+    ]) {
+      this.agentControl.registerCompletionHandler(kind, (job) =>
+        this.projectDeploymentCompletion(job),
+      );
+    }
+    this.agentControl.registerCompletionHandler(
+      ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+      async (job) => {
+        if (job.status !== "SUCCEEDED")
+          await failBuildArtifactTransferForJob(
+            job.id,
+            job.error || "The build agent could not upload the APK",
+          );
+      },
     );
     this.agentControl.registerCompletionHandler(IOS_DEPLOY_JOB_KIND, (job) =>
       this.projectDeploymentCompletion(job),
@@ -829,11 +910,14 @@ export class BuildsService {
   async deleteProject(id: string) {
     const prisma = await getPrismaClient();
     const repositoryId = await prisma.$transaction(async (tx) => {
-      const project = await tx.codebaseProject.findUnique({ where: { id } });
+      const project = await tx.codebaseProject.findUnique({
+        where: { id, type: "IOS_APP" },
+      });
       if (!project) return null;
       const active = await tx.build.findFirst({
         where: {
           repositoryId: project.repositoryId,
+          androidConfigurationId: null,
           status: { in: ACTIVE_BUILD_STATUSES },
         },
       });
@@ -842,6 +926,159 @@ export class BuildsService {
       await tx.buildConfiguration.deleteMany({ where: { projectId: id } });
       await tx.codebaseProject.delete({ where: { id } });
       return project.repositoryId;
+    });
+    if (repositoryId) this.publishRepository(repositoryId);
+    return repositoryId !== null;
+  }
+
+  async repositoryAndroidProject(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    const project = await prisma.codebaseProject.findUnique({
+      where: { repositoryId_type: { repositoryId, type: "ANDROID_APP" } },
+      include: {
+        repository: true,
+        androidConfigurations: {
+          include: { project: { include: { repository: true } } },
+          orderBy: [{ name: "asc" }, { id: "asc" }],
+        },
+      },
+    });
+    if (!project) return null;
+    return {
+      ...project,
+      allowedScripts: await this.androidAllowedScripts(repositoryId),
+    };
+  }
+
+  private async androidAllowedScripts(repositoryId: string) {
+    const prisma = await getPrismaClient();
+    return prisma.codebaseRepositoryBuildScript.findMany({
+      where: { repositoryId, script: { deletedAt: null } },
+      include: { script: true },
+      orderBy: [{ position: "asc" }, { scriptId: "asc" }],
+    });
+  }
+
+  async androidProject(codebaseId: string) {
+    const prisma = await getPrismaClient();
+    const codebase = await prisma.codebase.findUnique({
+      where: { id: codebaseId },
+      select: { repositoryId: true },
+    });
+    return codebase
+      ? this.repositoryAndroidProject(codebase.repositoryId)
+      : null;
+  }
+
+  async createAndroidProject(codebaseId: string) {
+    const prisma = await getPrismaClient();
+    const { repositoryId } = await prisma.codebase.findUniqueOrThrow({
+      where: { id: codebaseId },
+      select: { repositoryId: true },
+    });
+    await prisma.codebaseProject.upsert({
+      where: { repositoryId_type: { repositoryId, type: "ANDROID_APP" } },
+      create: {
+        id: randomUUID(),
+        repositoryId,
+        type: "ANDROID_APP",
+        defaultDestinationType: "HOST",
+      },
+      update: {},
+    });
+    this.publishRepository(repositoryId);
+    return this.repositoryAndroidProject(repositoryId);
+  }
+
+  async deleteAndroidProject(id: string) {
+    const prisma = await getPrismaClient();
+    const repositoryId = await prisma.$transaction(async (tx) => {
+      const project = await tx.codebaseProject.findUnique({
+        where: { id, type: "ANDROID_APP" },
+      });
+      if (!project) return null;
+      const active = await tx.build.findFirst({
+        where: {
+          androidConfiguration: { projectId: id },
+          status: { in: ACTIVE_BUILD_STATUSES },
+        },
+      });
+      if (active)
+        throw new Error("The Android app project has an active build");
+      await tx.codebaseProject.delete({ where: { id } });
+      return project.repositoryId;
+    });
+    if (repositoryId) this.publishRepository(repositoryId);
+    return repositoryId !== null;
+  }
+
+  async androidConfigurations(input: {
+    repositoryId?: string | null;
+    appId?: string | null;
+  }) {
+    const prisma = await getPrismaClient();
+    return prisma.androidBuildConfiguration.findMany({
+      where: {
+        project: {
+          ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
+          ...(input.appId
+            ? { repository: { apps: { some: { appId: input.appId } } } }
+            : {}),
+        },
+      },
+      include: { project: { include: { repository: true } } },
+      orderBy: [{ name: "asc" }, { id: "asc" }],
+    });
+  }
+
+  async androidConfiguration(id: string) {
+    const prisma = await getPrismaClient();
+    return prisma.androidBuildConfiguration.findUnique({
+      where: { id },
+      include: { project: { include: { repository: true } } },
+    });
+  }
+
+  async saveAndroidConfiguration(input: SaveAndroidBuildConfigurationInput) {
+    const name = cleanName(input.name, "Configuration name", 120);
+    const settings = parseAndroidBuildSettings(input);
+    const project = await this.androidProject(input.codebaseId);
+    if (!project)
+      throw new Error("Enable Android builds for this repository first");
+    const prisma = await getPrismaClient();
+    const include = { project: { include: { repository: true } } } as const;
+    const configuration = input.id
+      ? await prisma.androidBuildConfiguration.update({
+          where: { id: input.id, projectId: project.id },
+          data: { name, ...settings },
+          include,
+        })
+      : await prisma.androidBuildConfiguration.create({
+          data: { id: randomUUID(), projectId: project.id, name, ...settings },
+          include,
+        });
+    this.publishRepository(project.repositoryId);
+    return configuration;
+  }
+
+  async deleteAndroidConfiguration(id: string) {
+    const prisma = await getPrismaClient();
+    const repositoryId = await prisma.$transaction(async (tx) => {
+      const config = await tx.androidBuildConfiguration.findUnique({
+        where: { id },
+        include: { project: true },
+      });
+      if (!config) return null;
+      const active = await tx.build.findFirst({
+        where: {
+          androidConfigurationId: id,
+          status: { in: ACTIVE_BUILD_STATUSES },
+        },
+      });
+      if (active)
+        throw new Error("This Android configuration has an active build");
+      await tx.androidBuildConfiguration.delete({ where: { id } });
+      return config.project.repositoryId;
     });
     if (repositoryId) this.publishRepository(repositoryId);
     return repositoryId !== null;
@@ -1411,6 +1648,87 @@ export class BuildsService {
     return objectValue(parseJson(job.resultJson, {}), "agent result");
   }
 
+  private async androidSourceOperation(
+    worktreeId: string,
+    requestId: string,
+    projectPath?: string,
+  ) {
+    const kind =
+      projectPath == null
+        ? ANDROID_SOURCE_DISCOVER_JOB_KIND
+        : ANDROID_SOURCE_INSPECT_JOB_KIND;
+    const worktree = await this.requireWorktree(
+      worktreeId,
+      kind,
+      "Android Gradle discovery is unavailable on this agent",
+    );
+    const prisma = await getPrismaClient();
+    const job = await this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId,
+      kind,
+      payload: {
+        ...this.identity(worktree),
+        ...(projectPath == null ? {} : { projectPath }),
+      },
+      idempotencyKey: `${kind}:${worktreeId}:${cleanName(requestId, "Request ID", 200)}`,
+      timeoutSeconds: 120,
+      visibility: "SYSTEM",
+    });
+    try {
+      return this.result(await this.waitForJob(job.id));
+    } finally {
+      await prisma.agentJob.deleteMany({
+        where: {
+          AND: [SETTLED_AGENT_JOB_WHERE],
+          id: job.id,
+          visibility: "SYSTEM",
+        },
+      });
+    }
+  }
+
+  async discoverAndroidSources(worktreeId: string, requestId: string) {
+    const result = await this.androidSourceOperation(worktreeId, requestId);
+    return stringArray(result.sources);
+  }
+
+  async inspectAndroidSource(
+    worktreeId: string,
+    projectPath: string,
+    requestId: string,
+  ) {
+    const { projectPath: normalized } = parseAndroidBuildSettings({
+      projectPath,
+      module: ":",
+      variant: "debug",
+    });
+    const result = await this.androidSourceOperation(
+      worktreeId,
+      requestId,
+      normalized,
+    );
+    if (!Array.isArray(result.modules)) return [];
+    return result.modules.map((entry) => {
+      const gradleModule = objectValue(entry, "Gradle module");
+      const variants = stringArray(gradleModule.variants).map(
+        (variant) =>
+          parseAndroidBuildSettings({
+            projectPath: normalized,
+            module: gradleModule.module,
+            variant,
+          }).variant,
+      );
+      const validated = parseAndroidBuildSettings({
+        projectPath: normalized,
+        module: gradleModule.module,
+        variant: "debug",
+      });
+      return { module: validated.module, variants };
+    });
+  }
+
   async discoverSources(worktreeId: string, requestId: string) {
     const worktree = await this.requireWorktree(
       worktreeId,
@@ -1754,8 +2072,9 @@ export class BuildsService {
       where: { id: buildId },
       include: { artifacts: true, agent: true, worktree: true },
     });
+    const android = build && storedBuildPlatform(build) === "ANDROID";
     const artifact = build?.artifacts.find(
-      (entry) => entry.kind === "RUNNABLE_APP",
+      (entry) => entry.kind === (android ? "APK" : "RUNNABLE_APP"),
     );
     if (!build || build.status !== "SUCCEEDED" || !artifact || !build.agentId) {
       throw new Error("A successful runnable build is required");
@@ -1777,7 +2096,30 @@ export class BuildsService {
       .map((agent) => {
         const isBuildAgent = agent.id === build.agentId;
         let unavailableReason: string | null = null;
-        if (!agent.osVersion.toLocaleLowerCase().startsWith("macos")) {
+        if (android) {
+          const agentCapabilities = capabilities(agent);
+          if (!online(agent)) unavailableReason = "OFFLINE";
+          else if (
+            !agentCapabilities.includes(ANDROID_RUN_DESTINATIONS_JOB_KIND) ||
+            !agentCapabilities.includes(
+              isBuildAgent
+                ? ANDROID_DEPLOY_JOB_KIND
+                : ANDROID_REMOTE_DEPLOY_JOB_KIND,
+            )
+          ) {
+            unavailableReason = "ANDROID_TOOLS_UNAVAILABLE";
+          } else if (
+            !isBuildAgent &&
+            !cached &&
+            (!build.agent ||
+              !online(build.agent) ||
+              !sourceCapabilities.includes(
+                ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+              ))
+          ) {
+            unavailableReason = "BUILD_AGENT_UNAVAILABLE";
+          }
+        } else if (!agent.osVersion.toLocaleLowerCase().startsWith("macos")) {
           unavailableReason = "NOT_MACOS";
         } else if (!online(agent)) {
           unavailableReason = "OFFLINE";
@@ -1838,6 +2180,42 @@ export class BuildsService {
       where: { id: buildId },
       include: { artifacts: true },
     });
+    if (build && storedBuildPlatform(build) === "ANDROID") {
+      const agentId = targetAgentId ?? build.agentId;
+      if (!agentId) throw new Error("Build agent is unavailable");
+      const option = (await this.runAgentsForBuild(buildId)).find(
+        (entry) => entry.agent.id === agentId,
+      );
+      if (!option?.available)
+        throw new Error("The selected Android run agent is unavailable");
+      const job = await this.agentControl.createJob({
+        agentId,
+        kind: ANDROID_RUN_DESTINATIONS_JOB_KIND,
+        payload: {},
+        idempotencyKey: `android:destinations:${cleanName(requestId, "Request ID", 200)}:${buildId}:${agentId}`,
+        timeoutSeconds: 120,
+        visibility: "SYSTEM",
+      });
+      try {
+        const result = this.result(await this.waitForJob(job.id));
+        if (!Array.isArray(result.destinations)) return [];
+        return result.destinations.flatMap((destination) => {
+          try {
+            return [parseAndroidDestination(destination)];
+          } catch {
+            return [];
+          }
+        });
+      } finally {
+        await prisma.agentJob.deleteMany({
+          where: {
+            AND: [SETTLED_AGENT_JOB_WHERE],
+            id: job.id,
+            visibility: "SYSTEM",
+          },
+        });
+      }
+    }
     if (
       !build ||
       build.status !== "SUCCEEDED" ||
@@ -2592,6 +2970,207 @@ export class BuildsService {
     });
   }
 
+  async startAndroidBuild(
+    input: StartAndroidBuildInput,
+    capturedSettings?: ReturnType<typeof parseAndroidBuildSettings>,
+  ): Promise<Prisma.BuildGetPayload<{ include: typeof buildInclude }>> {
+    const prisma = await getPrismaClient();
+    const requestId = cleanName(input.requestId, "Request ID", 200);
+    const requestKey = `android:${input.worktreeId}:${requestId}`;
+    const existing = await prisma.build.findUnique({
+      where: { requestKey },
+      include: buildInclude,
+    });
+    if (existing) {
+      if (
+        existing.status === "QUEUED" &&
+        !existing.jobId &&
+        existing.queuePayloadJson &&
+        existing.agentId &&
+        existing.codebaseId &&
+        existing.worktreeId
+      ) {
+        return this.queueBuild({
+          id: existing.id,
+          agentId: existing.agentId,
+          codebaseId: existing.codebaseId,
+          worktreeId: existing.worktreeId,
+          requestId,
+          payload: JSON.parse(existing.queuePayloadJson),
+          kind: ANDROID_BUILD_JOB_KIND,
+        });
+      }
+      return existing;
+    }
+    const worktree = await this.requireWorktree(
+      input.worktreeId,
+      ANDROID_BUILD_JOB_KIND,
+      "Android build tooling is unavailable on this agent. Install the Android SDK command-line tools, Build Tools, and a compatible JDK.",
+    );
+    await this.diskSpace?.assertWorktreeCanStart(worktree.id);
+    const configuration = await prisma.androidBuildConfiguration.findFirst({
+      where: {
+        id: input.configurationId,
+        project: {
+          repositoryId: worktree.codebase.repositoryId,
+          type: "ANDROID_APP",
+        },
+      },
+    });
+    if (!configuration)
+      throw new Error(
+        "Android build configuration is unavailable for this repository",
+      );
+    const settings =
+      capturedSettings ?? parseAndroidBuildSettings(configuration);
+    const allowedScripts = await this.androidAllowedScripts(
+      worktree.codebase.repositoryId,
+    );
+    const scriptIds = input.scriptIds == null ? null : new Set(input.scriptIds);
+    if (
+      scriptIds &&
+      [...scriptIds].some(
+        (id) => !allowedScripts.some(({ scriptId }) => scriptId === id),
+      )
+    ) {
+      throw new Error(
+        "A selected build script is not allowed for this repository",
+      );
+    }
+    const scripts: BuildScriptSnapshot[] = allowedScripts
+      .filter(({ script }) =>
+        scriptIds ? scriptIds.has(script.id) : script.enabledByDefault,
+      )
+      .map(({ position, script }) => ({
+        id: script.id,
+        name: script.name,
+        position,
+        preBuildScript: script.preBuildScript,
+        postBuildScript: script.postBuildScript,
+        timeoutSeconds: script.timeoutSeconds,
+        failureBehavior:
+          script.failureBehavior as BuildScriptSnapshot["failureBehavior"],
+        lockScope: script.lockScope as BuildScriptSnapshot["lockScope"],
+      }));
+    const buildId = randomUUID();
+    const buildRoot = effectiveBuildsDirectory(worktree.codebase.agent);
+    if (!buildRoot)
+      throw new Error("The agent builds directory is unavailable");
+    if (!/^[A-Za-z0-9_-]+$/.test(worktree.id))
+      throw new Error("Invalid worktree ID for Android build cache");
+    const artifactDirectory = join(buildRoot, buildId);
+    const projectKey = createHash("sha256")
+      .update(settings.projectPath)
+      .digest("hex")
+      .slice(0, 16);
+    const gradleCachePath = join(
+      buildRoot,
+      ".android-gradle",
+      worktree.id,
+      projectKey,
+    );
+    const destination = ANDROID_BUILD_DESTINATION;
+    const server = await serverUrlSettingsService.buildSettings(
+      { type: destination.type, platform: destination.platformId },
+      input.serverUrlKind,
+      { requestOrigin: input.telemetryRequestOrigin },
+    );
+    const telemetry = await this.telemetry?.buildSettings();
+    const hookSettings = {
+      server,
+      endpointPaths: BUILD_ENDPOINT_PATHS,
+      ...(telemetry ? { telemetry } : {}),
+    };
+    const snapshot = {
+      platform: "ANDROID",
+      repository: {
+        id: worktree.codebase.repository.id,
+        name: worktree.codebase.repository.name,
+        canonicalOrigin: worktree.codebase.repository.canonicalOrigin,
+      },
+      codebase: { id: worktree.codebaseId, folder: worktree.codebase.folder },
+      worktree: {
+        id: worktree.id,
+        folder: worktree.folder,
+        branch: worktree.branch,
+        headSha: worktree.headSha,
+        codeStateHash: worktree.codeStateHash,
+        hasStagedChanges: worktree.hasStagedChanges,
+        hasUnstagedChanges: worktree.hasUnstagedChanges,
+      },
+      agent: {
+        id: worktree.codebase.agent.id,
+        name: worktree.codebase.agent.name,
+        hostname: worktree.codebase.agent.hostname,
+      },
+      configuration: {
+        id: configuration.id,
+        name: configuration.name,
+        ...settings,
+      },
+      destination,
+      scripts,
+      ...hookSettings,
+    };
+    const payload = {
+      ...this.identity(worktree),
+      buildId,
+      artifactDirectory,
+      gradleCachePath,
+      settings,
+      scripts,
+      ...hookSettings,
+    };
+    try {
+      await prisma.build.create({
+        data: {
+          id: buildId,
+          requestKey,
+          requestId,
+          agentId: worktree.codebase.agentId,
+          repositoryId: worktree.codebase.repositoryId,
+          codebaseId: worktree.codebaseId,
+          worktreeId: worktree.id,
+          androidConfigurationId: configuration.id,
+          status: "QUEUED",
+          action: "BUILD",
+          destinationType: "HOST",
+          destinationJson: JSON.stringify(destination),
+          snapshotJson: JSON.stringify(snapshot),
+          commandSummary: `./gradlew ${androidAssembleTask(settings)}`,
+          artifactDirectory,
+          queuePayloadJson: JSON.stringify(payload),
+          scriptExecutions: { create: androidScriptExecutions(scripts) },
+        },
+      });
+    } catch (error) {
+      if (!(
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "P2002"
+      ))
+        throw error;
+      if (
+        !(await prisma.build.findUnique({
+          where: { requestKey },
+          select: { id: true },
+        }))
+      )
+        throw error;
+      return this.startAndroidBuild(input, capturedSettings);
+    }
+    return this.queueBuild({
+      id: buildId,
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      requestId,
+      payload,
+      kind: ANDROID_BUILD_JOB_KIND,
+    });
+  }
+
   private async queueBuild(input: {
     id: string;
     agentId: string;
@@ -2599,17 +3178,26 @@ export class BuildsService {
     worktreeId: string;
     requestId: string;
     payload: unknown;
+    kind?: typeof IOS_BUILD_JOB_KIND | typeof ANDROID_BUILD_JOB_KIND;
   }) {
-    const { id, agentId, codebaseId, worktreeId, requestId, payload } = input;
+    const {
+      id,
+      agentId,
+      codebaseId,
+      worktreeId,
+      requestId,
+      payload,
+      kind = IOS_BUILD_JOB_KIND,
+    } = input;
     const prisma = await getPrismaClient();
-    const idempotencyKey = `ios:build:${requestId}:${worktreeId}`;
+    const idempotencyKey = `${kind === ANDROID_BUILD_JOB_KIND ? "android" : "ios"}:build:${requestId}:${worktreeId}`;
     let job;
     try {
       job = await this.agentControl.createJob({
         agentId,
         codebaseId,
         worktreeId,
-        kind: IOS_BUILD_JOB_KIND,
+        kind,
         payload,
         idempotencyKey,
         timeoutSeconds: 7 * 24 * 60 * 60,
@@ -2666,6 +3254,8 @@ export class BuildsService {
       select: {
         worktreeId: true,
         configurationId: true,
+        androidConfigurationId: true,
+        destinationType: true,
         destinationJson: true,
         action: true,
         snapshotJson: true,
@@ -2685,6 +3275,29 @@ export class BuildsService {
       snapshot.configuration ?? {},
       "build configuration snapshot",
     );
+    const serverUrlKind = (
+      snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
+    )?.selectedUrlKind;
+    if (storedBuildPlatform(build) === "ANDROID") {
+      if (!build.worktreeId || !build.androidConfigurationId)
+        throw new Error("The original Android build settings are unavailable");
+      const scriptIds = Array.isArray(snapshot.scripts)
+        ? snapshot.scripts.flatMap((script) =>
+            script && typeof script.id === "string" ? [script.id] : [],
+          )
+        : [];
+      return this.startAndroidBuild(
+        {
+          worktreeId: build.worktreeId,
+          configurationId: build.androidConfigurationId,
+          requestId,
+          scriptIds,
+          serverUrlKind,
+          telemetryRequestOrigin,
+        },
+        parseAndroidBuildSettings(snapshotConfiguration),
+      );
+    }
     const { source, scheme, buildConfiguration } = snapshotConfiguration;
     const capturedSource =
       snapshot.platform ||
@@ -2742,9 +3355,7 @@ export class BuildsService {
           ),
         },
       }),
-      serverUrlKind: (
-        snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
-      )?.selectedUrlKind,
+      serverUrlKind,
       destination: parseJson(build.destinationJson, {}),
       scriptIds: snapshotScripts.flatMap((script) => {
         if (!script || typeof script !== "object" || Array.isArray(script)) {
@@ -3249,7 +3860,12 @@ export class BuildsService {
       where: {
         ...(input.repositoryId ? { repositoryId: input.repositoryId } : {}),
         ...(input.configurationId
-          ? { configurationId: input.configurationId }
+          ? {
+              OR: [
+                { configurationId: input.configurationId },
+                { androidConfigurationId: input.configurationId },
+              ],
+            }
           : {}),
         ...(input.status ? { status: input.status } : {}),
         ...(input.codebaseId ? { codebaseId: input.codebaseId } : {}),
@@ -3302,6 +3918,8 @@ export class BuildsService {
         artifactDirectory: true,
         snapshotJson: true,
         agentId: true,
+        destinationType: true,
+        destinationJson: true,
         agent: { select: { capabilitiesJson: true } },
         codebaseId: true,
         worktreeId: true,
@@ -3336,23 +3954,24 @@ export class BuildsService {
       }
       if (build.agentId) {
         const codebaseId = coordinationCodebaseId(build);
-        if (
-          !build.agent ||
-          !capabilities(build.agent).includes(IOS_BUILD_DELETE_JOB_KIND)
-        ) {
+        const android = storedBuildPlatform(build) === "ANDROID";
+        const deleteKind = android
+          ? ANDROID_BUILD_DELETE_JOB_KIND
+          : IOS_BUILD_DELETE_JOB_KIND;
+        if (!build.agent || !capabilities(build.agent).includes(deleteKind)) {
           throw new Error("Build agent must be updated to delete builds");
         }
         await this.agentControl.createJob({
           agentId: build.agentId,
           codebaseId,
           worktreeId: build.worktreeId,
-          kind: IOS_BUILD_DELETE_JOB_KIND,
+          kind: deleteKind,
           payload: {
             buildId: build.id,
             artifactDirectory: build.artifactDirectory,
             codebaseId,
           },
-          idempotencyKey: `ios:build:delete:${build.id}`,
+          idempotencyKey: `${android ? "android" : "ios"}:build:delete:${build.id}`,
           timeoutSeconds: 300,
           visibility: "SYSTEM",
         });
@@ -3411,7 +4030,11 @@ export class BuildsService {
       throw new Error("The build agent is no longer available");
     }
     if (!online(build.agent)) throw new Error("Build agent is offline");
-    if (!capabilities(build.agent).includes(IOS_ARTIFACT_DOWNLOAD_JOB_KIND)) {
+    const android = storedBuildPlatform(build) === "ANDROID";
+    const downloadKind = android
+      ? ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND
+      : IOS_ARTIFACT_DOWNLOAD_JOB_KIND;
+    if (!capabilities(build.agent).includes(downloadKind)) {
       throw new Error("Build agent must be updated to download artifacts");
     }
     const codebaseId = coordinationCodebaseId(build);
@@ -3419,7 +4042,7 @@ export class BuildsService {
       agentId: build.agentId,
       codebaseId,
       worktreeId: build.worktreeId,
-      kind: IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+      kind: downloadKind,
       payload: {
         buildId: build.id,
         artifactDirectory: build.artifactDirectory,
@@ -3427,7 +4050,7 @@ export class BuildsService {
         uploadId,
         codebaseId,
       },
-      idempotencyKey: `ios:artifact:download:${uploadId}`,
+      idempotencyKey: `${android ? "android" : "ios"}:artifact:download:${uploadId}`,
       timeoutSeconds: Math.ceil(timeoutMs / 1_000) + 10,
       visibility: "SYSTEM",
     });
@@ -3779,8 +4402,12 @@ export class BuildsService {
     if (!build || build.status !== "SUCCEEDED") {
       throw new Error("A successful build is required");
     }
+    const platform = storedBuildPlatform(build);
+    if (!platform)
+      throw new Error("The runnable build platform is unavailable");
+    const android = platform === "ANDROID";
     const artifact = build.artifacts.find(
-      (entry) => entry.kind === "RUNNABLE_APP",
+      (entry) => entry.kind === (android ? "APK" : "RUNNABLE_APP"),
     );
     if (!artifact) throw new Error("Build does not contain a runnable app");
     const metadata = objectValue(
@@ -3788,11 +4415,23 @@ export class BuildsService {
       "runnable metadata",
     );
     const bundleIdentifier = cleanName(
-      String(metadata.bundleIdentifier ?? ""),
-      "Runnable bundle identifier",
+      String(
+        (android ? metadata.applicationId : metadata.bundleIdentifier) ?? "",
+      ),
+      android ? "APK application ID" : "Runnable bundle identifier",
       512,
     );
-    let destinations = input.destinations.map(parseBuildDestination);
+    if (android && (metadata.signed !== true || !artifact.checksum))
+      throw new Error("A verified APK is required to run this build");
+    const androidApk = {
+      applicationId: bundleIdentifier,
+      checksum: artifact.checksum,
+      minSdk: typeof metadata.minSdk === "number" ? metadata.minSdk : null,
+      abis: stringArray(metadata.abis),
+    };
+    let destinations = input.destinations.map(
+      android ? parseAndroidDestination : parseBuildDestination,
+    );
     if (!destinations.length)
       throw new Error("Select at least one destination");
     if (
@@ -3804,9 +4443,6 @@ export class BuildsService {
     const targetAgentId = input.targetAgentId ?? buildAgentId;
     if (!targetAgentId) throw new Error("Build agent is unavailable");
     const sameAgent = targetAgentId === buildAgentId;
-    const platform = storedBuildPlatform(build);
-    if (!platform)
-      throw new Error("The runnable build platform is unavailable");
     const compatiblePlatforms = artifactRunPlatforms(
       platform,
       build.destinationType,
@@ -3814,6 +4450,7 @@ export class BuildsService {
       sameAgent,
     );
     if (
+      !android &&
       destinations.some(
         (destination) =>
           !isArtifactRunDestination(
@@ -3827,7 +4464,7 @@ export class BuildsService {
         "Run destinations must match the build destination type and platform",
       );
     }
-    if (!sameAgent) {
+    if (!sameAgent || android) {
       const runAgent = (await this.runAgentsForBuild(build.id)).find(
         (entry) => entry.agent.id === targetAgentId,
       );
@@ -3853,12 +4490,13 @@ export class BuildsService {
     if (destinations.some((destination) => destination.available === false)) {
       throw new Error("A selected run destination is no longer available");
     }
-    if (sameAgent && !build.worktree) {
+    if (sameAgent && !android && !build.worktree) {
       throw new Error("The build worktree is unavailable");
     }
-    const worktree = sameAgent
-      ? await this.requireWorktree(build.worktree!.id, IOS_DEPLOY_JOB_KIND)
-      : null;
+    const worktree =
+      sameAgent && !android
+        ? await this.requireWorktree(build.worktree!.id, IOS_DEPLOY_JOB_KIND)
+        : null;
     const existingDeployments = await Promise.all(
       destinations.map((destination) =>
         prisma.buildDeployment.findUnique({
@@ -3891,7 +4529,9 @@ export class BuildsService {
               destinationKey: key,
               targetAgentId,
               status: sameAgent ? "QUEUED" : "TRANSFERRING",
-              commandSummary: deploymentCommandSummary(destination),
+              commandSummary: android
+                ? "adb install and launch"
+                : deploymentCommandSummary(destination),
             },
           })),
       );
@@ -3900,21 +4540,23 @@ export class BuildsService {
       id: row.id,
       destination: destinations[index]!,
     }));
-    if (sameAgent && worktree) {
+    if (sameAgent && (worktree || android)) {
       const job = await this.agentControl.createJob({
-        agentId: worktree.codebase.agentId,
-        codebaseId: worktree.codebaseId,
-        worktreeId: worktree.id,
-        kind: IOS_DEPLOY_JOB_KIND,
+        agentId: targetAgentId,
+        codebaseId: worktree?.codebaseId ?? null,
+        worktreeId: worktree?.id ?? null,
+        kind: android ? ANDROID_DEPLOY_JOB_KIND : IOS_DEPLOY_JOB_KIND,
         payload: {
-          ...this.identity(worktree),
+          ...(worktree
+            ? this.identity(worktree)
+            : { codebaseId: coordinationCodebaseId(build) }),
           buildId: build.id,
           artifactDirectory: build.artifactDirectory,
           artifactRelativePath: artifact.relativePath,
-          bundleIdentifier,
+          ...(android ? androidApk : { bundleIdentifier }),
           deployments,
         },
-        idempotencyKey: `ios:deploy:${build.id}:${input.requestId}`,
+        idempotencyKey: `${android ? "android" : "ios"}:deploy:${build.id}:${input.requestId}`,
         timeoutSeconds: 3_600,
       });
       await prisma.buildDeployment.updateMany({
@@ -3950,14 +4592,16 @@ export class BuildsService {
           if (!cached) {
             const sourceJob = await this.agentControl.createJob({
               agentId: build.agentId!,
-              kind: IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
+              kind: android
+                ? ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND
+                : IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
               payload: {
                 transferId,
                 buildId: build.id,
                 artifactDirectory: build.artifactDirectory,
                 artifactRelativePath: artifact.relativePath,
               },
-              idempotencyKey: `ios:artifact-transfer:${transferId}`,
+              idempotencyKey: `${android ? "android" : "ios"}:artifact-transfer:${transferId}`,
               timeoutSeconds: 3_600,
               visibility: "SYSTEM",
             });
@@ -3969,14 +4613,16 @@ export class BuildsService {
           }
           const targetJob = await this.agentControl.createJob({
             agentId: targetAgentId,
-            kind: IOS_REMOTE_DEPLOY_JOB_KIND,
+            kind: android
+              ? ANDROID_REMOTE_DEPLOY_JOB_KIND
+              : IOS_REMOTE_DEPLOY_JOB_KIND,
             payload: {
               transferId,
               buildId: build.id,
-              bundleIdentifier,
+              ...(android ? androidApk : { bundleIdentifier }),
               deployments,
             },
-            idempotencyKey: `ios:remote-deploy:${build.id}:${input.requestId}:${targetAgentId}`,
+            idempotencyKey: `${android ? "android" : "ios"}:remote-deploy:${build.id}:${input.requestId}:${targetAgentId}`,
             timeoutSeconds: 7_200,
           });
           await prisma.$transaction([
@@ -4226,6 +4872,7 @@ export class BuildsService {
       include: { worktree: { select: { highlightColor: true } } },
     });
     if (!build) return;
+    const android = storedBuildPlatform(build) === "ANDROID";
     const result = objectValue(parseJson(job.resultJson, {}), "build result");
     const status =
       build.status === "CANCELLED"
@@ -4284,7 +4931,9 @@ export class BuildsService {
               : job.status === "TIMED_OUT"
                 ? "TIMEOUT"
                 : status === "FAILED"
-                  ? "XCODEBUILD_FAILED"
+                  ? android
+                    ? "GRADLE_BUILD_FAILED"
+                    : "XCODEBUILD_FAILED"
                   : build.errorCode,
           error:
             job.error ??
@@ -4428,9 +5077,12 @@ export class BuildsService {
         notification = await this.notifications.recordInTransaction(
           transaction,
           {
-            dedupeKey: `ios-build:${build.id}:${status}`,
-            typeKey:
-              status === "SUCCEEDED"
+            dedupeKey: `${android ? "android" : "ios"}-build:${build.id}:${status}`,
+            typeKey: android
+              ? status === "SUCCEEDED"
+                ? "ANDROID_BUILD_SUCCEEDED"
+                : "ANDROID_BUILD_FAILED"
+              : status === "SUCCEEDED"
                 ? "IOS_BUILD_SUCCEEDED"
                 : "IOS_BUILD_FAILED",
             title: `${buildPlatformName(storedBuildPlatform(build))} build ${status === "SUCCEEDED" ? "succeeded" : "failed"}`,
@@ -4446,7 +5098,7 @@ export class BuildsService {
     });
     this.publish(build.id);
     this.notifications?.created(notification);
-    if (status === "SUCCEEDED") {
+    if (status === "SUCCEEDED" && !android) {
       await this.queueAutomaticExport(build.id, snapshotJson);
     }
   }
@@ -4573,9 +5225,12 @@ export class BuildsService {
         !deployment ||
         deployment.jobId !== input.jobId ||
         deployment.job?.agentId !== agentId ||
-        ![IOS_DEPLOY_JOB_KIND, IOS_REMOTE_DEPLOY_JOB_KIND].includes(
-          deployment.job.kind,
-        )
+        ![
+          IOS_DEPLOY_JOB_KIND,
+          IOS_REMOTE_DEPLOY_JOB_KIND,
+          ANDROID_DEPLOY_JOB_KIND,
+          ANDROID_REMOTE_DEPLOY_JOB_KIND,
+        ].includes(deployment.job.kind)
       ) {
         throw new Error("Deployment not found for this agent job");
       }

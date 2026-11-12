@@ -11,6 +11,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
+import { AndroidProjectSection } from "@/components/builds/android-project-section";
 import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
 import { CodeReviewersSettings } from "@/components/reviewers/code-reviewers-settings";
 import { AutoRetryDialog } from "@/components/github/auto-retry-dialog";
@@ -72,6 +73,7 @@ export function RepositoryDetailPage({
 }) {
   const t = useTranslations("codebases");
   const buildsT = useTranslations("builds");
+  const androidT = useTranslations("androidBuilds");
   const externalT = useTranslations("externalPipelineActions");
   const reviewersT = useTranslations("reviewers");
   const externalTitle = externalT("title");
@@ -352,6 +354,7 @@ export function RepositoryDetailPage({
             { value: "preparations", label: t("preparations") },
             { value: "external-pipelines", label: externalTitle },
             { value: "ios-app", label: buildsT("iosApp") },
+            { value: "android-app", label: androidT("project") },
             { value: "auto-retry", label: t("autoRetry") },
             { value: "quick-actions", label: t("quickActions") },
           ].map(({ value, label }) => (
@@ -510,6 +513,16 @@ export function RepositoryDetailPage({
           <IosProjectSection
             checkouts={checkouts}
             codebaseId={checkouts[0]?.codebaseId ?? ""}
+          />
+        </TabsContent>
+        <TabsContent value="android-app">
+          <AndroidProjectSection
+            repositoryId={repositoryId}
+            codebaseId={
+              checkouts.find((checkout) => checkout.available)?.codebaseId ??
+              checkouts[0]?.codebaseId ??
+              ""
+            }
           />
         </TabsContent>
         <TabsContent value="auto-retry">

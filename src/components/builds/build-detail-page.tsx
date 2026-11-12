@@ -5,6 +5,7 @@ import {
   useBreadcrumbFallback,
 } from "@/components/breadcrumb-labels-provider";
 import { BuildArtifactDownload } from "./build-artifact-download";
+import { AndroidInstallButton } from "./android-install-button";
 
 import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
@@ -82,6 +83,8 @@ import {
 import { RebuildButton } from "./rebuild-button";
 import { RunBuildControls } from "./run-build-controls";
 import {
+  isRunnableBuildArtifact,
+  isInstallableApk,
   platformLabel,
   type BuildLogChunk,
   type BuildRecord,
@@ -96,6 +99,7 @@ const BUILD_DETAIL_FIELDS = `
   id name iconKey scheme buildConfiguration defaultAction advancedSettings autoExport exportSettings createdAt updatedAt
     source { id kind relativePath }
   }
+  androidConfiguration { id name }
   artifacts { id kind relativePath sizeBytes checksum metadata createdAt }
   reports {
     id kind source status summary error createdAt updatedAt finishedAt
@@ -114,7 +118,7 @@ const LOG_FIELDS = `id scope scopeId sequence phase stream dataBase64 byteLength
 const EMPTY_LOG_CHUNKS: BuildLogChunk[] = [];
 
 /** Acronyms that title casing would otherwise mangle, such as IPA into "Ipa". */
-const PRESERVED_ACRONYMS = new Set(["IPA", "PKG"]);
+const PRESERVED_ACRONYMS = new Set(["APK", "IPA", "PKG"]);
 
 function humanizeConstant(value: string): string {
   return value
@@ -234,6 +238,7 @@ export function BuildDetailPage({
   publicOrigin: PublicOrigin | null;
 }) {
   const t = useTranslations("builds");
+  const androidT = useTranslations("androidBuilds");
   const locale = useLocale();
   const router = useRouter();
   const [build, setBuild] = useState<BuildRecord | null>(null);
@@ -572,9 +577,8 @@ export function BuildDetailPage({
     }
   };
 
-  const runnable = build?.artifacts.some(
-    (artifact) => artifact.kind === "RUNNABLE_APP",
-  );
+  const runnable = build?.artifacts.some(isRunnableBuildArtifact);
+  const apk = build?.artifacts.find((artifact) => artifact.kind === "APK");
   const installArtifact = build
     ? latestInstallArtifact(build.artifacts)
     : undefined;
@@ -603,6 +607,9 @@ export function BuildDetailPage({
         name?: string;
         scheme?: string;
         buildConfiguration?: string;
+        projectPath?: string;
+        module?: string;
+        variant?: string;
         advancedSettings?: Record<string, unknown>;
       }
     | undefined;
@@ -805,6 +812,20 @@ export function BuildDetailPage({
               size="default"
             />
           )}
+          {apk && (
+            <>
+              <BuildArtifactDownload artifactId={apk.id} buildId={build.id}>
+                {androidT("export")}
+              </BuildArtifactDownload>
+              {isInstallableApk(apk) && (
+                <AndroidInstallButton
+                  artifactId={apk.id}
+                  buildId={build.id}
+                  size="default"
+                />
+              )}
+            </>
+          )}
           {build.status === "SUCCEEDED" && archive && (
             <Button onClick={() => setExportOpen(true)} variant="outline">
               <Archive /> {t("exportArchive")}
@@ -986,16 +1007,38 @@ export function BuildDetailPage({
             <CardContent>
               <DetailList className="gap-3">
                 <Detail label={t("buildId")} value={build.id} mono />
-                <Detail
-                  label={t("scheme")}
-                  value={configuration?.scheme ?? "—"}
-                  mono
-                />
-                <Detail
-                  label={t("configuration")}
-                  value={configuration?.buildConfiguration ?? "—"}
-                  mono
-                />
+                {build.platform === "ANDROID" ? (
+                  <>
+                    <Detail
+                      label={androidT("projectPath")}
+                      value={configuration?.projectPath ?? "—"}
+                      mono
+                    />
+                    <Detail
+                      label={androidT("module")}
+                      value={configuration?.module ?? "—"}
+                      mono
+                    />
+                    <Detail
+                      label={androidT("variant")}
+                      value={configuration?.variant ?? "—"}
+                      mono
+                    />
+                  </>
+                ) : (
+                  <>
+                    <Detail
+                      label={t("scheme")}
+                      value={configuration?.scheme ?? "—"}
+                      mono
+                    />
+                    <Detail
+                      label={t("configuration")}
+                      value={configuration?.buildConfiguration ?? "—"}
+                      mono
+                    />
+                  </>
+                )}
                 <Detail
                   label={t("head")}
                   value={worktree?.headSha ?? "—"}
@@ -1017,7 +1060,9 @@ export function BuildDetailPage({
               </DetailList>
             </CardContent>
           </Card>
-          <AdvancedSettingsCard settings={configuration?.advancedSettings} />
+          {build.platform !== "ANDROID" && (
+            <AdvancedSettingsCard settings={configuration?.advancedSettings} />
+          )}
           <Card>
             <CardHeader>
               <CardTitle>{t("artifacts")}</CardTitle>
@@ -1042,12 +1087,41 @@ export function BuildDetailPage({
                           buildId={build.id}
                           artifactId={artifact.id}
                         >
-                          {ipa ? t("downloadIpa") : t("downloadArtifact")}
+                          {ipa
+                            ? t("downloadIpa")
+                            : artifact.kind === "APK"
+                              ? androidT("download")
+                              : t("downloadArtifact")}
                         </BuildArtifactDownload>
                       </div>
                       <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
                         {artifact.relativePath}
                       </p>
+                      {artifact.kind === "APK" && (
+                        <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          <dl className="space-y-1">
+                            {typeof metadata.applicationId === "string" && (
+                              <div className="flex justify-between gap-2">
+                                <dt>{androidT("applicationId")}</dt>
+                                <dd className="break-all font-mono">
+                                  {metadata.applicationId}
+                                </dd>
+                              </div>
+                            )}
+                            {typeof metadata.versionName === "string" && (
+                              <div className="flex justify-between gap-2">
+                                <dt>{androidT("version")}</dt>
+                                <dd className="font-mono">
+                                  {metadata.versionName}
+                                </dd>
+                              </div>
+                            )}
+                          </dl>
+                          {metadata.signed !== true && (
+                            <p>{androidT("unsignedApk")}</p>
+                          )}
+                        </div>
+                      )}
                       {artifact.kind === "DSYMS" && (
                         <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
                           <span>
@@ -1231,7 +1305,7 @@ export function BuildDetailPage({
           </Card>
         </div>
       </div>
-      {exportOpen && (
+      {exportOpen && build.platform !== "ANDROID" && (
         <ExportArchiveDialog
           buildId={build.id}
           platform={build.platform ?? undefined}

@@ -57,15 +57,18 @@ export const ids = {
   builds: {
     archive: "build-ios-archive-1",
     test: "build-ios-test-1",
+    android: "build-android-debug-1",
   },
   buildProjects: {
     ios: "project-acme-ios-app",
+    android: "project-acme-android-app",
   },
   buildSources: {
     ios: "source-acme-ios-app",
   },
   buildConfigurations: {
     release: "config-ios-release",
+    android: "config-android-debug",
   },
   buildScripts: {
     swiftlint: "script-swiftlint",
@@ -199,12 +202,14 @@ export const ids = {
   },
   simulators: {
     inventoryRequest: "07c93715-49a2-4f41-b71e-e291ba85197f",
+    androidInventoryRequest: "6a2efb40-d460-4f7b-a63c-f2a7a2f6dc58",
     detailRequest: "142f927c-3b4a-4f2e-8388-849670509cf8",
     ios: "240CD115-9AC5-4FC9-88B1-7316E2EDC47D",
     tvos: "7FAF42B0-8350-440C-B69D-97BDE4A5A6DB",
     watchos: "2B6049F8-D05B-4614-AD6D-4CC8726013AF",
     visionos: "8E081D35-B353-47DA-8909-618B4051AB9A",
     legacyIOS: "A0A6EFAD-E3C9-4769-A426-5CE2AAC54F66",
+    android: "android:Pixel_9_QA",
   },
   tailscaleTemplates: {
     dashboard: "tailscale-template-dashboard",
