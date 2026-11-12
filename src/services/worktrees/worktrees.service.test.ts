@@ -999,7 +999,7 @@ describe("WorktreesService", () => {
     );
   });
 
-  test("includes repository preparations when changing a worktree branch", async () => {
+  test("includes repository preparations without a source guard for single branch changes", async () => {
     const preparation = {
       id: "preparation-1",
       kind: "DELETE",
@@ -1068,6 +1068,9 @@ describe("WorktreesService", () => {
           preparations: [expect.objectContaining({ id: "preparation-1" })],
         }),
       }),
+    );
+    expect(createJob.mock.calls[0]?.[0].payload).not.toHaveProperty(
+      "expectedBranch",
     );
   });
 
@@ -1227,6 +1230,7 @@ describe("WorktreesService", () => {
           id: "repository-1",
           canonicalOrigin: "github.com/acme/widgets",
           jiraBranchRegex: null,
+          _count: { preparations: 1 },
         },
       },
     };
@@ -1300,12 +1304,18 @@ describe("WorktreesService", () => {
       outOfDate: true,
     });
     expect(initial.agents[0]?.codebases[0]?.blockingJob).toBe(blockingJob);
+    expect(initial.agents[0]?.codebases[0]?.hasPreparations).toBe(true);
     expect(initial.agents[0]?.codebases[0]?.worktrees[0]?.activeJob).toBeNull();
     expect(findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         include: expect.objectContaining({
           codebase: expect.objectContaining({
             include: expect.objectContaining({
+              repository: expect.objectContaining({
+                include: expect.objectContaining({
+                  _count: { select: { preparations: true } },
+                }),
+              }),
               jobs: expect.objectContaining({
                 where: expect.objectContaining({
                   OR: expect.arrayContaining([

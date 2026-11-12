@@ -27,6 +27,8 @@ export const WORKTREE_GIT_INSPECT_JOB_KIND = "worktree.git.inspect";
 export const WORKTREE_GIT_OPERATION_JOB_KIND = "worktree.git.operation";
 export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
+export const WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY =
+  "worktree.branch.expected-source";
 export const WORKTREE_POST_MERGE_SWITCH_JOB_KIND = "worktree.post-merge-switch";
 export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
@@ -766,6 +768,7 @@ export function worktreeBranchJobPayload(value: unknown): {
   folder: string | null;
   gitDirectory: string | null;
   expectedOrigin: string;
+  expectedBranch?: string | null;
   baseBranch: string;
   action: WorktreeBranchAction;
   mode: WorktreeBranchJobMode;
@@ -781,6 +784,7 @@ export function worktreeBranchJobPayload(value: unknown): {
     "folder",
     "gitDirectory",
     "expectedOrigin",
+    "expectedBranch",
     "baseBranch",
     "action",
     "mode",
@@ -796,6 +800,15 @@ export function worktreeBranchJobPayload(value: unknown): {
   if (!(payload.action === "CREATE" || payload.action === "CHANGE")) {
     throw new Error("worktree branch payload.action is invalid");
   }
+  const expectedBranch =
+    payload.expectedBranch === undefined
+      ? undefined
+      : nullableString(
+          payload.expectedBranch,
+          "worktree branch payload.expectedBranch",
+        );
+  if (expectedBranch !== undefined && payload.action !== "CHANGE")
+    throw new Error("An expected source branch requires a branch change");
   if (!(payload.mode === "NEW" || payload.mode === "EXISTING")) {
     throw new Error("worktree branch payload.mode is invalid");
   }
@@ -856,6 +869,7 @@ export function worktreeBranchJobPayload(value: unknown): {
       payload.expectedOrigin,
       "worktree branch payload.expectedOrigin",
     ),
+    ...(expectedBranch !== undefined ? { expectedBranch } : {}),
     baseBranch: stringValue(
       payload.baseBranch,
       "worktree branch payload.baseBranch",

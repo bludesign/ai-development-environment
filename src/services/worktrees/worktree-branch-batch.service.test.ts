@@ -4,6 +4,10 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+  WORKTREE_BRANCH_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
 import Database from "better-sqlite3";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
 import {
@@ -128,7 +132,10 @@ beforeEach(async () => {
         version: "1",
         osVersion: "macOS",
         architecture: "arm64",
-        capabilitiesJson: '["worktree.branch"]',
+        capabilitiesJson: JSON.stringify([
+          WORKTREE_BRANCH_JOB_KIND,
+          WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+        ]),
         secretHash: agentId,
         lastSeenAt: new Date(),
       },
@@ -219,6 +226,7 @@ test.each(["NEW", "TICKET"] as const)(
             mode: "NEW",
             candidates: [batch.branchName],
             baseBranch: "main",
+            expectedBranch: "feature/first",
             stashOnFailure: false,
           }),
         ],
@@ -228,6 +236,7 @@ test.each(["NEW", "TICKET"] as const)(
             mode: "NEW",
             candidates: [batch.branchName],
             baseBranch: "develop",
+            expectedBranch: "feature/other",
             stashOnFailure: false,
           }),
         ],
@@ -240,6 +249,40 @@ test.each(["NEW", "TICKET"] as const)(
     ).toEqual(["RUNNING", "RUNNING"]);
   },
 );
+
+test("guards a detached source and skips agents without source guard support", async () => {
+  await prisma.worktree.update({
+    where: { id: "first" },
+    data: { branch: null },
+  });
+  await prisma.agent.update({
+    where: { id: "two" },
+    data: { capabilitiesJson: JSON.stringify([WORKTREE_BRANCH_JOB_KIND]) },
+  });
+  const service = worktrees().branchBatches;
+  const batch = await service.start({
+    ...input,
+    items: [
+      { ...select("first"), expectedBranch: null },
+      select("other", "develop"),
+    ],
+  });
+  expect(batch.items).toMatchObject([
+    { status: "PENDING" },
+    {
+      status: "SKIPPED",
+      error: "Agent must be updated to use Bulk Change Branch",
+    },
+  ]);
+
+  await service.reconcile();
+  expect(createJob).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      worktreeId: "first",
+      payload: expect.objectContaining({ expectedBranch: null }),
+    }),
+  );
+});
 
 test("rechecks hidden sibling occupancy and retains independent job failures", async () => {
   const service = worktrees().branchBatches;

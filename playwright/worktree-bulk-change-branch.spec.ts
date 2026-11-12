@@ -1,4 +1,8 @@
 import { mkdir } from "node:fs/promises";
+import {
+  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+  WORKTREE_BRANCH_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { expect, test } from "@playwright/test";
 
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
@@ -104,12 +108,16 @@ for (const appId of [null, ids.apps.customerPortal]) {
                 id: agentId,
                 name: agentName,
                 connectionStatus: "ONLINE",
-                capabilities: ["worktree.branch"],
+                capabilities: [
+                  WORKTREE_BRANCH_JOB_KIND,
+                  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+                ],
               },
               codebases: [
                 {
                   ...group,
                   blockingJob: null,
+                  hasPreparations: false,
                   repository: { ...group.repository, name: "Customer Portal" },
                   codebase: {
                     ...group.codebase,

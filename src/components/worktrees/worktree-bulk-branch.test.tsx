@@ -1,4 +1,9 @@
 import {
+  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+  WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
+import {
   cleanup,
   fireEvent,
   render,
@@ -48,7 +53,10 @@ function agent(
       id: name,
       name,
       connectionStatus: "ONLINE",
-      capabilities: ["worktree.branch"],
+      capabilities: [
+        WORKTREE_BRANCH_JOB_KIND,
+        WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+      ],
     },
     codebases: [
       {
@@ -220,6 +228,104 @@ test("submits the chosen visible worktrees with their own bases and shows mixed 
     screen.getByText("Git could not carry over local changes"),
   ).toBeDefined();
   expect(onReload).toHaveBeenCalledOnce();
+});
+
+test("replaces a temporarily blocked selection with another worktree in its clone", async () => {
+  const first = worktree("one");
+  const second = worktree("two");
+  const onReload = vi.fn().mockResolvedValue(undefined);
+  const picker = (worktrees: Worktree[]) => {
+    const agents = [agent("Studio", worktrees)];
+    return (
+      <WorktreeBulkBranch
+        agents={agents}
+        allAgents={agents}
+        agentId={null}
+        disabled={false}
+        onReload={onReload}
+      />
+    );
+  };
+  const { rerender } = render(picker([first, second]));
+
+  fireEvent.click(screen.getByRole("button", { name: "Bulk Change Branch" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Existing branch" }));
+  await choose("Existing branch", /^release,/);
+
+  const firstChoice = screen.getByRole("checkbox", {
+    name: "Select feature/one",
+  });
+  const secondChoice = screen.getByRole("checkbox", {
+    name: "Select feature/two",
+  });
+  fireEvent.click(firstChoice);
+  expect(secondChoice.hasAttribute("disabled")).toBe(true);
+
+  rerender(picker([{ ...first, hasConflicts: true }, second]));
+  expect(secondChoice.hasAttribute("disabled")).toBe(false);
+  fireEvent.click(secondChoice);
+
+  rerender(picker([first, second]));
+  expect(firstChoice.getAttribute("aria-checked")).toBe("false");
+  expect(secondChoice.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Change branch on 1 worktree" }),
+  );
+  expect(request).toHaveBeenCalledWith(
+    expect.stringContaining("mutation StartWorktreeBranchBatch"),
+    {
+      input: expect.objectContaining({
+        items: [
+          {
+            worktreeId: "two",
+            expectedBranch: "feature/two",
+            baseBranch: "develop",
+          },
+        ],
+      }),
+    },
+  );
+  await screen.findByRole("heading", { name: "Bulk Change Branch completed" });
+});
+
+test("requires source checking and preparation support when applicable", async () => {
+  const unguarded = agent("Legacy", [worktree("unguarded")]);
+  unguarded.agent.capabilities = [WORKTREE_BRANCH_JOB_KIND];
+  const unprepared = agent("Mini", [worktree("unprepared")]);
+  unprepared.codebases[0]!.hasPreparations = true;
+  const prepared = agent("Studio", [worktree("prepared")]);
+  prepared.codebases[0]!.hasPreparations = true;
+  prepared.agent.capabilities.push(WORKTREE_PREPARATION_JOB_KIND);
+  const agents = [unguarded, unprepared, prepared];
+
+  render(
+    <WorktreeBulkBranch
+      agents={agents}
+      allAgents={agents}
+      agentId={null}
+      disabled={false}
+      onReload={vi.fn().mockResolvedValue(undefined)}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Bulk Change Branch" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Existing branch" }));
+  await choose("Existing branch", /^release,/);
+
+  for (const branch of ["unguarded", "unprepared"]) {
+    expect(
+      screen
+        .getByRole("checkbox", { name: `Select feature/${branch}` })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+  }
+  expect(
+    screen
+      .getByRole("checkbox", { name: "Select feature/prepared" })
+      .hasAttribute("disabled"),
+  ).toBe(false);
+  expect(
+    screen.getAllByText("Update the agent to enable branch changes."),
+  ).toHaveLength(2);
 });
 
 test("uses the selected Jira checkout to resolve one destination and applies a shared base", async () => {

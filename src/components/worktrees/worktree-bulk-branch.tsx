@@ -2,7 +2,9 @@
 
 import {
   validGitBranchName,
+  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_PREPARATION_JOB_KIND,
 } from "@ai-development-environment/agent-contract/worktrees";
 import { ExternalLink, GitBranch } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -258,6 +260,13 @@ function worktreeCandidates(
     codebases.flatMap((group) => {
       const { codebase, repository, worktrees } = group;
       const remote = new Set(codebase.remoteBranches);
+      const supported =
+        agent.capabilities.includes(WORKTREE_BRANCH_JOB_KIND) &&
+        agent.capabilities.includes(
+          WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
+        ) &&
+        (!group.hasPreparations ||
+          agent.capabilities.includes(WORKTREE_PREPARATION_JOB_KIND));
       const exists = branch
         ? remote.has(branch) || codebase.localBranches.includes(branch)
         : false;
@@ -275,8 +284,7 @@ function worktreeCandidates(
         )
           blocked = "unavailable";
         else if (agent.connectionStatus !== "ONLINE") blocked = "offline";
-        else if (!agent.capabilities.includes(WORKTREE_BRANCH_JOB_KIND))
-          blocked = "unsupported";
+        else if (!supported) blocked = "unsupported";
         else if (
           group.blockingJob ||
           worktree.blockingJob ||
@@ -338,7 +346,7 @@ export function WorktreeBulkBranch({
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<{
     target: string;
-    items: Set<string>;
+    items: Map<string, string>;
   } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [namingCheckout, setNamingCheckout] = useState("");
@@ -412,7 +420,10 @@ export function WorktreeBulkBranch({
     const rows = worktreeCandidates(agents, allAgents, batches, selection);
     const ready = validGitBranchName(branchName);
     const selectedRows = ready
-      ? rows.filter((row) => !row.blocked && checked?.has(itemKey(row)))
+      ? rows.filter(
+          (row) =>
+            !row.blocked && checked?.get(row.codebaseId) === itemKey(row),
+        )
       : [];
     return { rows, selectedRows, targetKey, branchName, ready };
   }
@@ -456,11 +467,11 @@ export function WorktreeBulkBranch({
                       id={`bulk-branch-${worktree.id}`}
                       onCheckedChange={(next) =>
                         setSelected((current) => {
-                          const items = new Set(
+                          const items = new Map(
                             current?.target === targetKey ? current.items : [],
                           );
-                          if (next) items.add(itemKey(row));
-                          else items.delete(itemKey(row));
+                          if (next) items.set(row.codebaseId, itemKey(row));
+                          else items.delete(row.codebaseId);
                           return { target: targetKey, items };
                         })
                       }

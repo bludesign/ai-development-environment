@@ -20,6 +20,7 @@ import {
   parseWorktreeInventoryItem,
   parseWorktreeRefreshState,
   validGitBranchName,
+  WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
   WORKTREE_BRANCH_JOB_KIND,
   WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   worktreePostMergeSwitchJobPayload,
@@ -229,6 +230,7 @@ const worktreeInclude = {
       },
       repository: {
         include: {
+          _count: { select: { preparations: true } },
           projects: {
             where: { type: { in: ["IOS_APP", "ANDROID_APP"] as string[] } },
             include: {
@@ -1959,6 +1961,7 @@ export class WorktreesService {
       repository: View["codebase"]["repository"];
       worktrees: View[];
       blockingJob: View["codebase"]["jobs"][number] | null;
+      hasPreparations: boolean;
       iosBuildConfigured: boolean;
       androidBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
@@ -1985,6 +1988,9 @@ export class WorktreesService {
           worktrees: [],
           blockingJob:
             worktree.codebase.jobs.find(jobHasRepositoryBarrier) ?? null,
+          hasPreparations: Boolean(
+            worktree.codebase.repository._count?.preparations,
+          ),
           iosBuildConfigured:
             worktree.codebase.repository.projects?.some(
               (project) => project.type === "IOS_APP",
@@ -3084,8 +3090,11 @@ export class WorktreesService {
       return "The worktree is already on the destination branch";
     if (!online(codebase.agent)) return "Agent is offline";
     const supported = capabilities(codebase.agent);
-    if (!supported.includes(WORKTREE_BRANCH_JOB_KIND))
-      return "Agent must be updated to use worktrees";
+    if (
+      !supported.includes(WORKTREE_BRANCH_JOB_KIND) ||
+      !supported.includes(WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY)
+    )
+      return "Agent must be updated to use Bulk Change Branch";
     if (
       codebase.repository.preparations.length > 0 &&
       !supported.includes(WORKTREE_PREPARATION_JOB_KIND)
@@ -3146,6 +3155,7 @@ export class WorktreesService {
         baseBranch: selection.baseBranch,
         mode: selection.mode === "EXISTING" ? "EXISTING" : "NEW",
         candidates: [selection.branchName],
+        expectedBranch: selection.expectedBranch,
       },
       bulkBranchChangeJobKey(snapshot.id, target.id),
       false,
@@ -3163,6 +3173,7 @@ export class WorktreesService {
       baseBranch: string;
       mode: "NEW" | "EXISTING";
       candidates: string[];
+      expectedBranch?: string | null;
       aiNaming?: Awaited<
         ReturnType<WorktreesService["resolveBranchSelection"]>
       >["aiNaming"];
@@ -3185,6 +3196,9 @@ export class WorktreesService {
         action: "CHANGE",
         mode: resolved.mode,
         candidates: resolved.candidates,
+        ...(resolved.expectedBranch !== undefined
+          ? { expectedBranch: resolved.expectedBranch }
+          : {}),
         ...(resolved.aiNaming ? { aiNaming: resolved.aiNaming } : {}),
         stashOnFailure,
         preparations: (worktree.codebase.repository.preparations ?? []).map(

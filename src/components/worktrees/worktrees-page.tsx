@@ -802,7 +802,7 @@ export function WorktreesPage({
             agents {
               agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
-                iosBuildConfigured androidBuildConfigured
+                hasPreparations iosBuildConfigured androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
