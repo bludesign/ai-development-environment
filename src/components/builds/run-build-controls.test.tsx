@@ -1,3 +1,4 @@
+import { ANDROID_BUILD_DESTINATION } from "@ai-development-environment/agent-contract/builds";
 import {
   cleanup,
   fireEvent,
@@ -612,5 +613,147 @@ describe("RunBuildControls", () => {
         }),
       ),
     );
+  });
+
+  test("refreshes Android emulators and physical devices on an available run agent", async () => {
+    const buildAgent = buildRunAgents[0]!;
+    const targetAgent = {
+      ...buildAgent,
+      isBuildAgent: false,
+      agent: { ...buildAgent.agent, id: "adb-agent", name: "Android Lab" },
+    };
+    const emulator = {
+      type: "SIMULATOR",
+      id: "android:Pixel_API_35",
+      name: "Pixel API 35",
+      platform: "Android",
+      platformId: "ANDROID",
+      osVersion: null,
+      state: "Shutdown",
+      available: true,
+    };
+    const physical = {
+      ...emulator,
+      type: "PHYSICAL_DEVICE",
+      id: "pixel-8",
+      name: "Pixel 8",
+      state: "device",
+    };
+    const unauthorized = {
+      ...physical,
+      id: "pixel-9",
+      name: "Pixel 9",
+      state: "unauthorized",
+      available: false,
+      unavailableReason: "Approve USB debugging on the Android device",
+    };
+    let destinations = [emulator, physical, unauthorized];
+    let inspectionError: Error | null = null;
+    request.mockImplementation(async (query) => {
+      if (query.includes("BuildRunAgents")) {
+        return {
+          buildRunAgents: [
+            {
+              ...buildAgent,
+              available: false,
+              unavailableReason: "ANDROID_TOOLS_UNAVAILABLE",
+            },
+            targetAgent,
+          ],
+        } as never;
+      }
+      if (query.includes("BuildRunDestinations")) {
+        if (inspectionError) throw inspectionError;
+        return { inspectBuildRunDestinations: destinations } as never;
+      }
+      if (query.includes("RunCompletedBuild")) {
+        return {
+          runBuild: [{ id: "deployment", status: "SUCCEEDED" }],
+        } as never;
+      }
+      throw new Error("Unexpected request");
+    });
+    const completed = vi.fn();
+    const error = vi.fn();
+    render(
+      <RunBuildControls
+        buildId="android-build"
+        destinationType="HOST"
+        onCompleted={completed}
+        onError={error}
+        preferredDestination={ANDROID_BUILD_DESTINATION}
+      />,
+    );
+
+    const openRunMenu = () => {
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+        button: 0,
+        ctrlKey: false,
+      });
+    };
+    openRunMenu();
+    fireEvent.click(
+      await screen.findByRole("menuitemcheckbox", {
+        name: /Pixel API 35.*Emulator.*Shutdown/,
+      }),
+    );
+    expect(
+      screen
+        .getByRole("tab", { name: "Android Lab" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.click(
+      screen.getByRole("menuitemcheckbox", {
+        name: /Pixel 8.*Physical Device.*Connected/,
+      }),
+    );
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Run on Pixel 9" })
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Run Selected" }));
+    await waitFor(() => expect(completed).toHaveBeenCalledOnce());
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("RunCompletedBuild"),
+      {
+        input: expect.objectContaining({
+          buildId: "android-build",
+          targetAgentId: "adb-agent",
+          destinations: [emulator, physical],
+        }),
+      },
+    );
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    destinations = [{ ...emulator, state: "Booted" }];
+    openRunMenu();
+    await screen.findByRole("menuitemcheckbox", {
+      name: /Pixel API 35.*Emulator.*Booted/,
+    });
+    expect(screen.queryByRole("button", { name: "Run on Pixel 8" })).toBeNull();
+    expect(
+      request.mock.calls.filter(([query]) =>
+        query.includes("BuildRunDestinations"),
+      ),
+    ).toEqual([
+      [expect.any(String), expect.objectContaining({ agentId: "adb-agent" })],
+      [expect.any(String), expect.objectContaining({ agentId: "adb-agent" })],
+    ]);
+
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    inspectionError = new Error("Android Lab disconnected");
+    openRunMenu();
+    await waitFor(() =>
+      expect(error).toHaveBeenLastCalledWith("Android Lab disconnected"),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Run on Pixel API 35" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Run Selected" })
+        .disabled,
+    ).toBe(true);
   });
 });

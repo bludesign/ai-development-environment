@@ -88,6 +88,50 @@ describe("agent inventory", () => {
     },
   );
 
+  test.skipIf(process.platform !== "darwin")(
+    "advertises Gradle inspection with Java and requires APK tools to build",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "ade-android-sdk-"));
+      const bin = join(directory, "bin");
+      const sdk = join(directory, "sdk");
+      const commandLineTools = join(sdk, "cmdline-tools", "latest", "bin");
+      const buildTools = join(sdk, "build-tools", "35.0.0");
+      try {
+        await mkdir(bin);
+        await writeFile(
+          join(bin, "java"),
+          '#!/bin/sh\ntest "$1" = "-version"\n',
+          {
+            mode: 0o700,
+          },
+        );
+        vi.stubEnv("JAVA_HOME", directory);
+        vi.stubEnv("ANDROID_HOME", sdk);
+
+        const inspection = await collectInventory();
+        expect(inspection.capabilities).toContain("android.source.inspect");
+        expect(inspection.capabilities).not.toContain("android.build.run");
+
+        await mkdir(commandLineTools, { recursive: true });
+        await writeFile(join(commandLineTools, "apkanalyzer"), "", {
+          mode: 0o700,
+        });
+        expect((await collectInventory()).capabilities).not.toContain(
+          "android.build.run",
+        );
+
+        await mkdir(buildTools, { recursive: true });
+        await writeFile(join(buildTools, "apksigner"), "", { mode: 0o700 });
+        expect((await collectInventory()).capabilities).toContain(
+          "android.build.run",
+        );
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   test("advertises scoped execution only where process-group recovery is supported", () => {
     expect(capabilitiesForPlatform("darwin")).toContain(
       "operation.resources.v1",

@@ -489,20 +489,32 @@ test.describe("app screenshots", () => {
         ).toContainText("Simulator");
       }
       if (route.buildWorkflow === "android-configuration") {
-        await page
-          .getByRole("tab", { name: "Android App", exact: true })
-          .click();
+        await expect(
+          page.getByRole("tab", { name: "Android App", exact: true }),
+        ).toHaveAttribute("aria-selected", "true");
         await page
           .getByRole("button", {
             name: "Edit Android configuration",
             exact: true,
           })
           .click();
-        await expect(page.getByLabel("Gradle project path")).toHaveValue(
-          "android",
-        );
+        await expect(
+          page.getByRole("combobox", { name: "Gradle project path" }),
+        ).toHaveText("android");
         await expect(page.getByLabel("Application module")).toHaveValue(":app");
         await expect(page.getByLabel("Build variant")).toHaveValue("qaDebug");
+        await expect(
+          page.getByRole("button", { name: "Icon: Release", exact: true }),
+        ).toBeVisible();
+        await page
+          .getByRole("button", { name: "Inspect build variants" })
+          .click();
+        await expect(
+          page.getByRole("combobox", { name: "Application module" }),
+        ).toContainText(":app");
+        await expect(
+          page.getByRole("combobox", { name: "Build variant" }),
+        ).toContainText("qaDebug");
         await expect(
           page
             .getByRole("dialog")
@@ -525,10 +537,12 @@ test.describe("app screenshots", () => {
       if (route.buildWorkflow === "android-run") {
         await page.getByRole("button", { name: "Run", exact: true }).click();
         await expect(
-          page.getByRole("menuitemcheckbox", { name: /Pixel_9_QA/ }),
+          page.getByRole("menuitemcheckbox", { name: /Pixel_9_QA.*Emulator/ }),
         ).toBeVisible();
         await expect(
-          page.getByRole("menuitemcheckbox", { name: /Connected Pixel/ }),
+          page.getByRole("menuitemcheckbox", {
+            name: /Connected Pixel.*Physical Device/,
+          }),
         ).toBeVisible();
       }
       if (route.buildWorkflow === "android-install") {

@@ -481,7 +481,9 @@ type WorktreeCodebaseGroup {
   hasPreparations: Boolean!
   "Whether the iOS build configured condition is true for this worktree codebase group."
   iosBuildConfigured: Boolean!
-  "Whether Android builds are enabled for this codebase's repository."
+  "Whether an Android app project is enabled for this codebase's repository."
+  androidProjectEnabled: Boolean!
+  "Whether this codebase's repository has a saved Android build configuration."
   androidBuildConfigured: Boolean!
   "Quick actions associated with this worktree codebase group."
   quickActions: [Workflow!]!

@@ -3,7 +3,7 @@ export const BUILD_PLATFORM_CONFIGURATION_FIELDS = `
 `;
 
 export const ANDROID_BUILD_CONFIGURATION_FIELDS = `
-  id name projectPath module variant apkPath
+  id name iconKey projectPath module variant apkPath
 `;
 
 export const BUILD_LIST_FIELDS = `

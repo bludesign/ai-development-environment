@@ -1,5 +1,6 @@
 "use client";
 
+import type { ANDROID_BUILD_DESTINATION } from "@ai-development-environment/agent-contract/builds";
 import { ChevronDown, Play } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -60,15 +61,19 @@ export function RunBuildControls({
 }: {
   buildId: string;
   destinationType: BuildRecord["destinationType"];
-  preferredDestination?: BuildDestination | null;
+  preferredDestination?:
+    BuildDestination | typeof ANDROID_BUILD_DESTINATION | null;
   onCompleted?: () => void | Promise<void>;
   onError: (error: string | null) => void;
   size?: "xs" | "sm" | "default";
   compact?: boolean;
 }) {
   const t = useTranslations("builds");
+  const android = preferredDestination?.platformId === "ANDROID";
   const preferred =
-    destinationType === "HOST" || preferredDestination?.generic
+    destinationType === "HOST" ||
+    preferredDestination?.type === "HOST" ||
+    preferredDestination?.generic
       ? null
       : (preferredDestination ?? null);
   const [destinations, setDestinations] = useState<BuildDestination[]>(
@@ -83,8 +88,7 @@ export function RunBuildControls({
   const [runAgents, setRunAgents] = useState<BuildRunAgent[]>([]);
   const [runAgentsLoaded, setRunAgentsLoaded] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
-  const activeAgentId = useRef<string | null>(null);
-  const loadingAgentId = useRef<string | null>(null);
+  const discoveryRequest = useRef<symbol | null>(null);
   const agentTabRefs = useRef(new Map<string, HTMLButtonElement>());
   const destinationCache = useRef(new Map<string, BuildDestination[]>());
   const [destinationSearch, setDestinationSearch] = useState("");
@@ -99,6 +103,7 @@ export function RunBuildControls({
     () => () => {
       runTask.current?.abort();
       runTask.current = null;
+      discoveryRequest.current = null;
     },
     [buildId],
   );
@@ -146,86 +151,87 @@ export function RunBuildControls({
     setDestinationsLoaded(true);
   };
 
-  const loadDestinations = async (agentId: string) => {
-    const cached = destinationCache.current.get(agentId);
-    if (cached) {
-      if (activeAgentId.current === agentId) applyDestinations(cached);
-      return;
-    }
-    loadingAgentId.current = agentId;
+  const loadDestinations = async (
+    agentId: string | null,
+    discoverAgents = false,
+  ) => {
+    const request = Symbol();
+    discoveryRequest.current = request;
     setLoadingDestinations(true);
     onError(null);
     try {
+      let targetAgentId = agentId;
+      if (discoverAgents) {
+        const data = await controlPlaneRequest<{
+          buildRunAgents: BuildRunAgent[];
+        }>(
+          `query BuildRunAgents($buildId: ID!) {
+            buildRunAgents(buildId: $buildId) {
+              isBuildAgent available unavailableReason
+              agent { id name hostname osVersion architecture connectionStatus }
+            }
+          }`,
+          { buildId },
+        );
+        if (discoveryRequest.current !== request) return;
+        const agents = data.buildRunAgents;
+        const buildAgent = agents.find((option) => option.isBuildAgent);
+        const availableAgent = agents.find((option) => option.available);
+        const selected = android
+          ? (agents.find(
+              (option) => option.available && option.agent.id === agentId,
+            ) ?? (buildAgent?.available ? buildAgent : availableAgent))
+          : (buildAgent ?? availableAgent);
+        const nextAgentId = selected?.agent.id ?? null;
+        if (agentId && nextAgentId !== agentId) {
+          setSelectedDestinations(new Set());
+        }
+        setRunAgents(agents);
+        setRunAgentsLoaded(true);
+        setSelectedAgentId(nextAgentId);
+        targetAgentId = selected?.available ? nextAgentId : null;
+      }
+      if (!targetAgentId) {
+        applyDestinations([]);
+        return;
+      }
+      const cached = android
+        ? undefined
+        : destinationCache.current.get(targetAgentId);
+      if (cached) {
+        applyDestinations(cached);
+        return;
+      }
       const data = await controlPlaneRequest<{
         inspectBuildRunDestinations: BuildDestination[];
       }>(
         `mutation BuildRunDestinations($buildId: ID!, $agentId: ID, $requestId: ID!) {
           inspectBuildRunDestinations(buildId: $buildId, agentId: $agentId, requestId: $requestId)
         }`,
-        { buildId, agentId, requestId: createClientId() },
+        { buildId, agentId: targetAgentId, requestId: createClientId() },
       );
+      if (discoveryRequest.current !== request) return;
       const compatible = data.inspectBuildRunDestinations.filter(
         (destination) =>
           !destination.generic &&
           (destination.platformId || destination.type === destinationType),
       );
-      destinationCache.current.set(agentId, compatible);
-      if (activeAgentId.current === agentId) applyDestinations(compatible);
+      if (!android) destinationCache.current.set(targetAgentId, compatible);
+      applyDestinations(compatible);
     } catch (value) {
-      if (activeAgentId.current === agentId) {
+      if (discoveryRequest.current === request) {
         onError(value instanceof Error ? value.message : String(value));
       }
     } finally {
-      if (loadingAgentId.current === agentId) {
-        loadingAgentId.current = null;
+      if (discoveryRequest.current === request) {
+        discoveryRequest.current = null;
         setLoadingDestinations(false);
       }
     }
   };
 
-  const loadRunAgents = async () => {
-    onError(null);
-    setLoadingDestinations(true);
-    try {
-      const data = await controlPlaneRequest<{
-        buildRunAgents: BuildRunAgent[];
-      }>(
-        `query BuildRunAgents($buildId: ID!) {
-          buildRunAgents(buildId: $buildId) {
-            isBuildAgent available unavailableReason
-            agent { id name hostname osVersion architecture connectionStatus }
-          }
-        }`,
-        { buildId },
-      );
-      setRunAgents(data.buildRunAgents);
-      setRunAgentsLoaded(true);
-      const selected =
-        data.buildRunAgents.find((option) => option.isBuildAgent) ??
-        data.buildRunAgents.find((option) => option.available);
-      if (!selected) {
-        activeAgentId.current = null;
-        setDestinations([]);
-        setDestinationsLoaded(true);
-        return;
-      }
-      activeAgentId.current = selected.agent.id;
-      setSelectedAgentId(selected.agent.id);
-      if (selected.available) await loadDestinations(selected.agent.id);
-      else {
-        setDestinations([]);
-        setDestinationsLoaded(true);
-      }
-    } catch (value) {
-      onError(value instanceof Error ? value.message : String(value));
-    } finally {
-      if (!loadingAgentId.current) setLoadingDestinations(false);
-    }
-  };
-
   const selectAgent = (option: BuildRunAgent) => {
     if (!option.available || option.agent.id === selectedAgentId) return;
-    activeAgentId.current = option.agent.id;
     setSelectedAgentId(option.agent.id);
     setRunPlatform(null);
     setSelectedDestinations(new Set());
@@ -313,11 +319,24 @@ export function RunBuildControls({
   };
 
   const handleMenuOpenChange = (open: boolean) => {
-    if (open && !runAgentsLoaded) void loadRunAgents();
-    else if (open && selectedAgentId && !destinationsLoaded) {
+    if (!open) {
+      if (android) {
+        discoveryRequest.current = null;
+        setLoadingDestinations(false);
+      }
+      setDestinationSearch("");
+      return;
+    }
+    if (android) {
+      setRunAgents([]);
+      setDestinations([]);
+      setDestinationsLoaded(false);
+    }
+    if (android || !runAgentsLoaded) {
+      void loadDestinations(selectedAgentId, true);
+    } else if (selectedAgentId && !destinationsLoaded) {
       void loadDestinations(selectedAgentId);
     }
-    if (!open) setDestinationSearch("");
   };
 
   const destinationMenu = (

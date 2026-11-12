@@ -127,6 +127,12 @@ const ACTIVE_BUILD_STATUSES = ["QUEUED", "PREPARING", "RUNNING"];
 
 type JsonObject = Record<string, unknown>;
 
+function buildIconKey(value?: string | null) {
+  const iconKey = value?.trim() || null;
+  if (iconKey && !ICON_KEYS.has(iconKey)) throw new Error("Icon is invalid");
+  return iconKey;
+}
+
 function parseJson(value: string | null, fallback: unknown = null): unknown {
   if (value === null) return fallback;
   try {
@@ -558,6 +564,7 @@ export type SaveAndroidBuildConfigurationInput = ReturnType<
   id?: string | null;
   codebaseId: string;
   name: string;
+  iconKey?: string | null;
 };
 
 export type StartAndroidBuildInput = {
@@ -1041,6 +1048,7 @@ export class BuildsService {
 
   async saveAndroidConfiguration(input: SaveAndroidBuildConfigurationInput) {
     const name = cleanName(input.name, "Configuration name", 120);
+    const iconKey = buildIconKey(input.iconKey);
     const settings = parseAndroidBuildSettings(input);
     const project = await this.androidProject(input.codebaseId);
     if (!project)
@@ -1050,11 +1058,21 @@ export class BuildsService {
     const configuration = input.id
       ? await prisma.androidBuildConfiguration.update({
           where: { id: input.id, projectId: project.id },
-          data: { name, ...settings },
+          data: {
+            name,
+            ...settings,
+            ...(input.iconKey !== undefined ? { iconKey } : {}),
+          },
           include,
         })
       : await prisma.androidBuildConfiguration.create({
-          data: { id: randomUUID(), projectId: project.id, name, ...settings },
+          data: {
+            id: randomUUID(),
+            projectId: project.id,
+            name,
+            iconKey,
+            ...settings,
+          },
           include,
         });
     this.publishRepository(project.repositoryId);
@@ -1323,8 +1341,7 @@ export class BuildsService {
     if (!BUILD_ACTIONS.includes(input.defaultAction)) {
       throw new Error("Build action is invalid");
     }
-    const iconKey = input.iconKey?.trim() || null;
-    if (iconKey && !ICON_KEYS.has(iconKey)) throw new Error("Icon is invalid");
+    const iconKey = buildIconKey(input.iconKey);
     const advanced = parseBuildAdvancedSettings(
       input.advancedSettings ?? DEFAULT_BUILD_ADVANCED_SETTINGS,
     );
@@ -1493,8 +1510,7 @@ export class BuildsService {
     }
     const prisma = await getPrismaClient();
     const id = input.id ?? randomUUID();
-    const iconKey = input.iconKey?.trim() || null;
-    if (iconKey && !ICON_KEYS.has(iconKey)) throw new Error("Icon is invalid");
+    const iconKey = buildIconKey(input.iconKey);
     const repositoryIds =
       input.repositoryIds == null ? null : [...new Set(input.repositoryIds)];
     const { script, changedRepositories } = await prisma.$transaction(

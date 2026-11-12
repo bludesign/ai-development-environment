@@ -10,6 +10,7 @@ import { useTranslations } from "next-intl";
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
+import { ANDROID_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
 import { AndroidProjectSection } from "@/components/builds/android-project-section";
 import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
@@ -67,8 +68,10 @@ const REPOSITORY_FIELDS = `
 `;
 
 export function RepositoryDetailPage({
+  initialTab = "details",
   repositoryId,
 }: {
+  initialTab?: "details" | "android-app";
   repositoryId: string;
 }) {
   const t = useTranslations("codebases");
@@ -86,7 +89,7 @@ export function RepositoryDetailPage({
     Array<{ id: string; name: string }>
   >([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState<string>(initialTab);
   const groupsRevision = useRef(0);
   const groupsLoadedRevision = useRef(-1);
   const loadOwner = useRef<RefreshCoalescer | null>(null);
@@ -297,6 +300,14 @@ export function RepositoryDetailPage({
     available:
       codebase.agent.connectionStatus === "ONLINE" &&
       codebase.availability === "AVAILABLE",
+    androidBuildStatus:
+      codebase.agent.connectionStatus !== "ONLINE"
+        ? ("offline" as const)
+        : !codebase.agent.capabilities.includes(ANDROID_BUILD_JOB_KIND)
+          ? ("missingTools" as const)
+          : codebase.availability !== "AVAILABLE"
+            ? ("unavailable" as const)
+            : ("ready" as const),
   }));
   const hasUnsavedChanges =
     preparationsDirty ||
@@ -517,6 +528,7 @@ export function RepositoryDetailPage({
         </TabsContent>
         <TabsContent value="android-app">
           <AndroidProjectSection
+            checkouts={checkouts}
             repositoryId={repositoryId}
             codebaseId={
               checkouts.find((checkout) => checkout.available)?.codebaseId ??

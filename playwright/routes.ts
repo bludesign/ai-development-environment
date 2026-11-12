@@ -398,7 +398,8 @@ export const routes: RouteEntry[] = [
   },
   {
     name: "android-build-configuration",
-    path: `/dashboard/codebases/repositories/${ids.repositories.web}`,
+    path: `/dashboard/codebases/repositories/${ids.repositories.web}?tab=android-app`,
+    stubWorktree: true,
     buildWorkflow: "android-configuration",
   },
   {

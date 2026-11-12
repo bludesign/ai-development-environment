@@ -1963,6 +1963,7 @@ export class WorktreesService {
       blockingJob: View["codebase"]["jobs"][number] | null;
       hasPreparations: boolean;
       iosBuildConfigured: boolean;
+      androidProjectEnabled: boolean;
       androidBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
       mergeConflictQuickActions: typeof eligibleQuickActions;
@@ -1982,6 +1983,9 @@ export class WorktreesService {
       }
       let codebaseGroup = agentGroup.codebaseMap.get(worktree.codebase.id);
       if (!codebaseGroup) {
+        const androidProject = worktree.codebase.repository.projects?.find(
+          (project) => project.type === "ANDROID_APP",
+        );
         codebaseGroup = {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
@@ -1995,12 +1999,10 @@ export class WorktreesService {
             worktree.codebase.repository.projects?.some(
               (project) => project.type === "IOS_APP",
             ) ?? false,
-          androidBuildConfigured:
-            worktree.codebase.repository.projects?.some(
-              (project) =>
-                project.type === "ANDROID_APP" &&
-                project.androidConfigurations.length > 0,
-            ) ?? false,
+          androidProjectEnabled: Boolean(androidProject),
+          androidBuildConfigured: Boolean(
+            androidProject?.androidConfigurations.length,
+          ),
           quickActions: eligibleQuickActions.filter(
             (workflow) =>
               workflow.quickActionKind === "STANDARD" &&

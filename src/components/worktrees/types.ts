@@ -171,6 +171,7 @@ export type WorktreeCodebaseGroup = {
   blockingJob?: AgentJob | null;
   hasPreparations?: boolean;
   iosBuildConfigured?: boolean;
+  androidProjectEnabled?: boolean;
   androidBuildConfigured?: boolean;
   quickActions?: WorktreeQuickAction[];
   mergeConflictQuickActions?: WorktreeQuickAction[];

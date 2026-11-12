@@ -305,6 +305,7 @@ export async function seedBuilds(prisma: PrismaClient): Promise<void> {
         create: {
           id: ids.buildConfigurations.android,
           name: "Android QA Debug",
+          iconKey: "rocket",
           projectPath: "android",
           module: ":app",
           variant: "qaDebug",

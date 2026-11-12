@@ -4,12 +4,16 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
-import { AndroidProjectSection } from "./android-project-section";
+import {
+  AndroidBuildConfigurationDialog,
+  AndroidProjectSection,
+} from "./android-project-section";
 
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
@@ -20,6 +24,13 @@ const availableWorktree = (id: string, primary = true) => ({
   id,
   primary,
   availability: "AVAILABLE",
+});
+
+beforeEach(() => {
+  Element.prototype.hasPointerCapture = vi.fn(() => false);
+  Element.prototype.setPointerCapture = vi.fn();
+  Element.prototype.releasePointerCapture = vi.fn();
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
@@ -97,37 +108,62 @@ test.each([true, false])(
 
     render(
       <AndroidProjectSection
+        checkouts={[
+          {
+            codebaseId: "online",
+            label: "Builder",
+            androidBuildStatus: "ready",
+          },
+          {
+            codebaseId: "offline",
+            label: "Laptop",
+            androidBuildStatus: "offline",
+          },
+          {
+            codebaseId: "tools",
+            label: "Runner",
+            androidBuildStatus: "missingTools",
+          },
+        ]}
         codebaseId="codebase-1"
         repositoryId="repository-1"
       />,
     );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Add Android configuration" }),
-    );
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Discover Gradle projects" }),
-    );
-    await waitFor(() =>
-      expect(
-        screen.getByLabelText<HTMLInputElement>("Gradle project path").value,
-      ).toBe("mobile"),
-    );
+    const add = await screen.findByRole("button", {
+      name: "Add Android configuration",
+    });
+    expect(
+      screen.getByText(/Save a configuration to enable the Build button/),
+    ).toBeDefined();
+    expect(screen.getByText("Agent offline")).toBeDefined();
+    expect(screen.getByText("Android build tools ready")).toBeDefined();
+    expect(screen.getByText("Android build support unavailable")).toBeDefined();
+    expect(screen.getByText(/Android SDK Command-line Tools/)).toBeDefined();
+    fireEvent.click(add);
+    const projectPath = await screen.findByRole("combobox", {
+      name: "Gradle project path",
+    });
+    expect(projectPath.textContent).toContain("mobile");
 
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation DiscoverAndroidBuildSources"),
       expect.objectContaining({
         worktreeId: canInspect ? "sdk-checkout" : "discover-only",
       }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
     if (!canInspect) {
       expect(
-        screen.queryByRole("button", { name: "Inspect Gradle modules" }),
+        screen.queryByRole("button", { name: "Inspect build variants" }),
       ).toBeNull();
+      expect(
+        screen.getByText(/You can enter the module and variant manually/),
+      ).toBeDefined();
       return;
     }
     fireEvent.click(
-      screen.getByRole("button", { name: "Inspect Gradle modules" }),
+      screen.getByRole("button", { name: "Inspect build variants" }),
     );
     await screen.findByText(
       "No Android application variants found in this project.",
@@ -139,5 +175,119 @@ test.each([true, false])(
         projectPath: "mobile",
       }),
     );
+    expect(screen.getByLabelText<HTMLInputElement>("Build variant").value).toBe(
+      "debug",
+    );
   },
 );
+
+test("preserves saved fields during discovery and saves a selected flavor and icon", async () => {
+  const configuration = {
+    id: "configuration-1",
+    name: "Development",
+    iconKey: "hammer",
+    projectPath: "saved-project",
+    module: ":app",
+    variant: "customDebug",
+    apkPath: null,
+  };
+  const saved = {
+    ...configuration,
+    iconKey: "smartphone",
+    module: ":demo",
+    variant: "demoRelease",
+  };
+  request.mockImplementation(async (query) => {
+    const operation = String(query);
+    if (operation.includes("query AndroidDiscoveryCheckout")) {
+      return {
+        worktreeOverview: {
+          agents: [
+            {
+              agent: {
+                connectionStatus: "ONLINE",
+                capabilities: [
+                  "android.source.discover",
+                  "android.source.inspect",
+                ],
+              },
+              codebases: [
+                {
+                  repository: { id: "repository-1" },
+                  worktrees: [availableWorktree("checkout")],
+                },
+              ],
+            },
+          ],
+        },
+      } as never;
+    }
+    if (operation.includes("mutation DiscoverAndroidBuildSources")) {
+      return { discoverAndroidBuildSources: ["other-project"] } as never;
+    }
+    if (operation.includes("mutation InspectAndroidBuildSource")) {
+      return {
+        inspectAndroidBuildSource: [
+          { module: ":app", variants: ["debug", "release"] },
+          { module: ":demo", variants: ["demoDebug", "demoRelease"] },
+        ],
+      } as never;
+    }
+    if (operation.includes("mutation SaveAndroidBuildConfiguration")) {
+      return { saveAndroidBuildConfiguration: saved } as never;
+    }
+    throw new Error(`Unexpected operation: ${operation}`);
+  });
+
+  const onSaved = vi.fn();
+  render(
+    <AndroidBuildConfigurationDialog
+      codebaseId="codebase-1"
+      configuration={configuration}
+      onClose={vi.fn()}
+      onSaved={onSaved}
+      repositoryId="repository-1"
+    />,
+  );
+
+  const dialog = within(await screen.findByRole("dialog"));
+  await dialog.findByRole("combobox", { name: "Gradle project path" });
+  expect(
+    dialog.getByLabelText<HTMLInputElement>("Manual Gradle project path").value,
+  ).toBe("saved-project");
+  fireEvent.click(
+    dialog.getByRole("button", { name: "Inspect build variants" }),
+  );
+  const moduleSelect = await dialog.findByRole("combobox", {
+    name: "Application module",
+  });
+  expect(
+    dialog.getByLabelText<HTMLInputElement>("Manual build variant").value,
+  ).toBe("customDebug");
+
+  fireEvent.keyDown(moduleSelect, { key: "ArrowDown" });
+  fireEvent.click(await screen.findByRole("option", { name: ":demo" }));
+  fireEvent.keyDown(dialog.getByRole("combobox", { name: "Build variant" }), {
+    key: "ArrowDown",
+  });
+  fireEvent.click(await screen.findByRole("option", { name: "demoRelease" }));
+
+  fireEvent.pointerDown(dialog.getByRole("button", { name: "Icon: Build" }), {
+    button: 0,
+    ctrlKey: false,
+    pointerType: "mouse",
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitemradio", { name: "Mobile app" }),
+  );
+  expect(
+    dialog.getByRole("button", { name: "Icon: Mobile app" }),
+  ).toBeDefined();
+  fireEvent.click(dialog.getByRole("button", { name: "Save" }));
+
+  await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
+  expect(request).toHaveBeenCalledWith(
+    expect.stringContaining("mutation SaveAndroidBuildConfiguration"),
+    { input: { ...saved, codebaseId: "codebase-1" } },
+  );
+});

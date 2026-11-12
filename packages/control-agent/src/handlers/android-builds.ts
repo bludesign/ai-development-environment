@@ -122,6 +122,8 @@ export const discoverAndroidSources: AgentJobHandler = async (
 
 const discoveryPrefix = "ADE_ANDROID_VARIANT=";
 const discoveryInit = `
+if (gradle.parent != null) return
+
 gradle.beforeProject { project ->
     project.pluginManager.withPlugin('com.android.application') {
         def components = project.extensions.findByName('androidComponents')

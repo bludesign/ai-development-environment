@@ -130,7 +130,7 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
     agents {
       agent { id name hostname capabilities baseRepoDirectory connectionStatus }
       codebases {
-        iosBuildConfigured androidBuildConfigured
+        iosBuildConfigured androidProjectEnabled androidBuildConfigured
         blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
         quickActions {
             id name description quickActionIconKey quickActionButtonVariant
@@ -201,7 +201,10 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const buildPagination = useRef<AbortController | null>(null);
   const loadedBuildCount = useRef(50);
   const latestPipelinesLoad = useRef(0);
-  const displayedCodebaseId = useRef<string | null>(null);
+  const displayedGroup = useRef<{
+    codebaseId: string;
+    repositoryId: string;
+  } | null>(null);
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const loadOverview = useCallback(
@@ -226,9 +229,13 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           { signal },
         );
         if (requestId !== latestOverviewLoad.current || signal.aborted) return;
-        displayedCodebaseId.current =
-          findWorktreeOverviewEntry(data.worktreeOverview, worktreeId)?.group
-            .codebase.id ?? null;
+        const group = findWorktreeOverviewEntry(
+          data.worktreeOverview,
+          worktreeId,
+        )?.group;
+        displayedGroup.current = group
+          ? { codebaseId: group.codebase.id, repositoryId: group.repository.id }
+          : null;
         const history = await readWorktreeBuildWindow(
           worktreeId,
           data.builds ?? { items: [], nextCursor: null },
@@ -349,7 +356,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   }, [fetchOverview]);
 
   useEffect(() => {
-    displayedCodebaseId.current = null;
+    displayedGroup.current = null;
     const initial = window.setTimeout(() => void load(), 0);
     const poll = window.setInterval(() => void load(), 30_000);
     const subscriptions = controlPlaneSubscriptions();
@@ -371,7 +378,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             changed.worktreeId === null ||
             changed.worktreeId === worktreeId ||
             (changed.codebaseId !== null &&
-              changed.codebaseId === displayedCodebaseId.current)
+              changed.codebaseId === displayedGroup.current?.codebaseId)
           ) {
             void loadOverview();
           }
@@ -390,6 +397,30 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       },
       {
         next: () => void loadOverview(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const unsubscribeRepositorySettings = subscriptions.subscribe<{
+      codebaseOverviewChanged: {
+        codebaseId: string | null;
+        repositoryId: string | null;
+      };
+    }>(
+      {
+        query:
+          "subscription WorktreeDetailRepositorySettingsChanged { codebaseOverviewChanged { codebaseId repositoryId } }",
+      },
+      {
+        next: (value) => {
+          const change = value.data?.codebaseOverviewChanged;
+          if (
+            change?.codebaseId === null &&
+            change.repositoryId === displayedGroup.current?.repositoryId
+          ) {
+            void loadOverview();
+          }
+        },
         error: () => undefined,
         complete: () => undefined,
       },
@@ -430,6 +461,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       latestPipelinesLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
+      unsubscribeRepositorySettings();
       unsubscribeWorkflows();
       unsubscribeAgentRuns();
     };

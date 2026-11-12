@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import RepositoryDetailRoute from "@/app/[locale]/(dashboard)/dashboard/codebases/repositories/[repositoryId]/page";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -107,6 +108,9 @@ describe("RepositoryDetailPage", () => {
       if (String(query).includes("mutation UpdateCodebaseRepository")) {
         return { updateCodebaseRepository: { id: "repository-1" } } as never;
       }
+      if (String(query).includes("query AndroidAppProject")) {
+        return { androidAppProject: null } as never;
+      }
       if (String(query).includes("mutation SaveRepositoryPreparations")) {
         return {
           saveCodebaseRepositoryPreparations: {
@@ -122,6 +126,21 @@ describe("RepositoryDetailPage", () => {
     cleanup();
     request.mockReset();
     subscriptions.mockReset();
+  });
+
+  test("opens the Android App tab from a repository settings link", async () => {
+    render(
+      await RepositoryDetailRoute({
+        params: Promise.resolve({ locale: "en", repositoryId: "repository-1" }),
+        searchParams: Promise.resolve({ tab: "android-app" }),
+      }),
+    );
+
+    const tab = await screen.findByRole("tab", { name: "Android App" });
+    expect(tab.getAttribute("aria-selected")).toBe("true");
+    expect(
+      await screen.findByRole("button", { name: "Enable Android builds" }),
+    ).toBeDefined();
   });
 
   test("edits shared repository settings and hosts iOS settings across agents", async () => {

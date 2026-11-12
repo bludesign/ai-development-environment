@@ -245,6 +245,15 @@ export async function stubWorktreeAgent(page: Page): Promise<void> {
         body: JSON.stringify({ data }),
       });
 
+    if (query.includes("discoverAndroidBuildSources("))
+      return respond({ discoverAndroidBuildSources: ["android"] });
+    if (query.includes("inspectAndroidBuildSource("))
+      return respond({
+        inspectAndroidBuildSource: [
+          { module: ":app", variants: ["qaDebug", "qaRelease"] },
+          { module: ":demo", variants: ["debug", "release"] },
+        ],
+      });
     if (query.includes("discoverBuildSources("))
       return respond({
         discoverBuildSources: [

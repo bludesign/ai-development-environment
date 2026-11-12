@@ -24,7 +24,20 @@ import { cn } from "@/lib/utils";
 import { buildDestinationState } from "./build-format";
 import { destinationPlatform, type BuildDestination } from "./types";
 
-type Translate = Parameters<typeof buildDestinationState>[1];
+type DestinationStateMessage = Parameters<
+  Parameters<typeof buildDestinationState>[1]
+>[0];
+type Translate = (
+  key: DestinationStateMessage | "emulator" | "physicalDevice",
+) => string;
+
+function androidDeviceType(destination: BuildDestination, t: Translate) {
+  if (destination.platformId !== "ANDROID") return null;
+  if (destination.type === "SIMULATOR") return t("emulator");
+  if (destination.type === "PHYSICAL_DEVICE") return t("physicalDevice");
+  return null;
+}
+
 export function destinationName(destination: BuildDestination) {
   return destination.type === "SIMULATOR" &&
     destination.deviceType &&
@@ -47,6 +60,7 @@ export function filterDestinations(
         destination.platform,
         destination.osVersion,
         destination.state,
+        androidDeviceType(destination, translate),
         buildDestinationState(destination, translate),
       ].some((value) => value?.toLocaleLowerCase().includes(query)),
   );
@@ -61,16 +75,22 @@ function DestinationLabel({ destination }: { destination: BuildDestination }) {
             : "anyPhysicalDevice",
         )
       : destinationName(destination);
-  const detail = [destination.platform, destination.osVersion]
+  const platform = [destination.platform, destination.osVersion]
     .filter(Boolean)
     .join(" ");
+  const detail = [
+    platform,
+    androidDeviceType(destination, t),
+    buildDestinationState(destination, t),
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <span className="min-w-0 flex-1">
       <span className="block truncate text-sm font-medium">{name}</span>
       {!destination.generic && (
         <span className="block truncate text-xs text-muted-foreground">
-          {detail ? `${detail} · ` : ""}
-          {buildDestinationState(destination, t)}
+          {detail}
         </span>
       )}
       {destination.unavailableReason && (

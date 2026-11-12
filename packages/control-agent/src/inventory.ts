@@ -126,15 +126,13 @@ async function androidCapabilities(signal?: AbortSignal): Promise<string[]> {
   if (process.platform !== "darwin") return [];
   const { adb, emulator, avdmanager, apkanalyzer, apksigner, hasWorkingJava } =
     androidTools();
-  const java =
-    (apkanalyzer || (adb && emulator && avdmanager)) &&
-    (await hasWorkingJava(signal));
+  const java = await hasWorkingJava(signal);
   return [
     ANDROID_BUILD_DELETE_JOB_KIND,
     ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
     ANDROID_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
     ANDROID_SOURCE_DISCOVER_JOB_KIND,
-    ...(java && apkanalyzer ? [ANDROID_SOURCE_INSPECT_JOB_KIND] : []),
+    ...(java ? [ANDROID_SOURCE_INSPECT_JOB_KIND] : []),
     ...(java && apkanalyzer && apksigner ? [ANDROID_BUILD_JOB_KIND] : []),
     ...(adb
       ? [

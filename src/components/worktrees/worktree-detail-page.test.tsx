@@ -903,6 +903,81 @@ describe("WorktreeDetailPage", () => {
     await waitFor(() => expect(overviewRequestCount()).toBe(beforeEvents + 1));
   });
 
+  test("adds and removes Android in the build picker when repository settings change", async () => {
+    const response = overview({ iosBuildConfigured: true });
+    const { agent, codebases } = response.agents[0]!;
+    const group = codebases[0]!;
+    agent.capabilities.push("ios.build.run", "android.build.run");
+    group.androidProjectEnabled = true;
+    group.androidBuildConfigured = false;
+    group.worktrees[0]!.latestBuild = null;
+    let settingsSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (
+            operation.query.includes("WorktreeDetailRepositorySettingsChanged")
+          )
+            settingsSink = sink;
+          return vi.fn();
+        },
+      ),
+    } as never);
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: structuredClone(response) } as never;
+      }
+      if (query.includes("GitHubWorktreeWorkflowRuns")) {
+        return { githubWorktreeWorkflowRuns: [] } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+    const notifySettingsChange = (repositoryId: string) =>
+      settingsSink!.next({
+        data: { codebaseOverviewChanged: { repositoryId, codebaseId: null } },
+      });
+    const buildButton = () => screen.getByRole("button", { name: "Build" });
+    const overviewRequestCount = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("WorktreeDetailOverview"),
+      ).length;
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    expect(
+      (await screen.findByRole("button", { name: "Build" })).getAttribute(
+        "aria-haspopup",
+      ),
+    ).toBeNull();
+    group.androidBuildConfigured = true;
+    const requestCountBeforeChange = overviewRequestCount();
+    notifySettingsChange("unrelated-repository");
+    expect(overviewRequestCount()).toBe(requestCountBeforeChange);
+
+    notifySettingsChange(group.repository.id);
+    await waitFor(() =>
+      expect(buildButton().getAttribute("aria-haspopup")).toBe("menu"),
+    );
+    fireEvent.pointerDown(buildButton(), { button: 0, ctrlKey: false });
+    const androidItem = await screen.findByRole("menuitem", {
+      name: "Android App",
+    });
+    expect(screen.getByRole("menuitem", { name: "iOS App" })).toBeDefined();
+    fireEvent.keyDown(androidItem, { key: "Escape" });
+
+    group.androidBuildConfigured = false;
+    notifySettingsChange(group.repository.id);
+    await waitFor(() =>
+      expect(buildButton().getAttribute("aria-haspopup")).toBeNull(),
+    );
+    expect((buildButton() as HTMLButtonElement).disabled).toBe(false);
+  });
+
   test("does not reload GitHub pipelines from subscription events", async () => {
     let worktreeSink: { next: (value: unknown) => void } | undefined;
     let buildsSink: { next: (value: unknown) => void } | undefined;
