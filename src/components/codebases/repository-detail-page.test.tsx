@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -43,7 +44,7 @@ const agent = {
   id: "agent-1",
   name: "Studio Mac",
   hostname: "studio.local",
-  capabilities: [],
+  capabilities: [] as string[],
   connectionStatus: "ONLINE",
 };
 
@@ -86,7 +87,10 @@ const repository = {
 };
 
 describe("RepositoryDetailPage", () => {
+  let currentRepository: typeof repository;
+
   beforeEach(() => {
+    currentRepository = repository;
     global.ResizeObserver = ResizeObserverMock;
     Element.prototype.hasPointerCapture = vi.fn(() => false);
     Element.prototype.setPointerCapture = vi.fn();
@@ -96,7 +100,7 @@ describe("RepositoryDetailPage", () => {
     request.mockImplementation(async (query) => {
       if (String(query).includes("query RepositoryDetail")) {
         return {
-          codebaseRepository: repository,
+          codebaseRepository: currentRepository,
           skillsOverview: {
             groups: [
               { id: "group-1", name: "Mobile" },
@@ -124,6 +128,7 @@ describe("RepositoryDetailPage", () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     request.mockReset();
     subscriptions.mockReset();
   });
@@ -141,6 +146,68 @@ describe("RepositoryDetailPage", () => {
     expect(
       await screen.findByRole("button", { name: "Enable Android builds" }),
     ).toBeDefined();
+  });
+
+  test("refreshes Android readiness when a checkout agent changes", async () => {
+    type AgentUpdate = Pick<
+      typeof agent,
+      "id" | "connectionStatus" | "capabilities"
+    >;
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    let publishAgentChange: ((changed: AgentUpdate) => void) | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn<
+        ReturnType<typeof controlPlaneSubscriptions>["subscribe"]
+      >((operation, sink) => {
+        if (operation.query.includes("agentChanged")) {
+          publishAgentChange = (changed) =>
+            sink.next({ data: { agentChanged: changed } } as never);
+        }
+        return vi.fn();
+      }),
+    });
+
+    render(
+      <RepositoryDetailPage
+        initialTab="android-app"
+        repositoryId="repository-1"
+      />,
+    );
+    const checkout = within(
+      (await screen.findByText(/Studio Mac ·/)).closest("li")!,
+    );
+    expect(
+      checkout.getByText("Android build support unavailable"),
+    ).toBeDefined();
+    expect(publishAgentChange).toBeDefined();
+
+    const callCount = request.mock.calls.length;
+    const ready = { ...agent, capabilities: ["android.build.run"] };
+    await act(async () => {
+      publishAgentChange!(agent);
+      publishAgentChange!({ ...ready, id: "unrelated-agent" });
+    });
+    expect(request).toHaveBeenCalledTimes(callCount);
+
+    const setCheckoutSnapshot = (changed: AgentUpdate) => {
+      currentRepository = {
+        ...repository,
+        codebases: repository.codebases.map((codebase) =>
+          codebase.agent.id === changed.id
+            ? { ...codebase, agent: { ...codebase.agent, ...changed } }
+            : codebase,
+        ),
+      };
+    };
+
+    setCheckoutSnapshot(ready);
+    act(() => publishAgentChange!(ready));
+    expect(
+      await checkout.findByText("Android build tools ready"),
+    ).toBeDefined();
+    setCheckoutSnapshot({ ...ready, connectionStatus: "OFFLINE" });
+    await act(async () => vi.advanceTimersByTimeAsync(30_000));
+    expect(checkout.getByText("Agent offline")).toBeDefined();
   });
 
   test("edits shared repository settings and hosts iOS settings across agents", async () => {

@@ -50,15 +50,7 @@ function orderedDestinations(destinations: BuildDestination[]) {
   ];
 }
 
-export function RunBuildControls({
-  buildId,
-  destinationType,
-  preferredDestination,
-  onCompleted,
-  onError,
-  size = "default",
-  compact = false,
-}: {
+type RunBuildControlsProps = {
   buildId: string;
   destinationType: BuildRecord["destinationType"];
   preferredDestination?:
@@ -67,7 +59,21 @@ export function RunBuildControls({
   onError: (error: string | null) => void;
   size?: "xs" | "sm" | "default";
   compact?: boolean;
-}) {
+};
+
+export function RunBuildControls(props: RunBuildControlsProps) {
+  return <RunBuildMenu key={props.buildId} {...props} />;
+}
+
+function RunBuildMenu({
+  buildId,
+  destinationType,
+  preferredDestination,
+  onCompleted,
+  onError,
+  size = "default",
+  compact = false,
+}: RunBuildControlsProps) {
   const t = useTranslations("builds");
   const android = preferredDestination?.platformId === "ANDROID";
   const preferred =
@@ -93,11 +99,10 @@ export function RunBuildControls({
   const destinationCache = useRef(new Map<string, BuildDestination[]>());
   const [destinationSearch, setDestinationSearch] = useState("");
   const [runState, setRunState] = useState<{
-    buildId: string;
     destinationId: string | null;
   } | null>(null);
-  const running = runState?.buildId === buildId;
-  const runningDestinationId = running ? runState?.destinationId : null;
+  const running = runState !== null;
+  const runningDestinationId = runState?.destinationId ?? null;
   const runTask = useRef<AbortController | null>(null);
   useEffect(
     () => () => {
@@ -105,7 +110,7 @@ export function RunBuildControls({
       runTask.current = null;
       discoveryRequest.current = null;
     },
-    [buildId],
+    [],
   );
 
   const runPlatforms = useMemo(
@@ -260,7 +265,7 @@ export function RunBuildControls({
     if (runTask.current) return;
     const controller = new AbortController();
     runTask.current = controller;
-    setRunState({ buildId, destinationId: onlyDestination?.id ?? null });
+    setRunState({ destinationId: onlyDestination?.id ?? null });
     onError(null);
     try {
       const data = await controlPlaneRequest<{

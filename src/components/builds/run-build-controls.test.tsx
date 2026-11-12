@@ -1,5 +1,6 @@
 import { ANDROID_BUILD_DESTINATION } from "@ai-development-environment/agent-contract/builds";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -147,6 +148,70 @@ describe("RunBuildControls", () => {
 
     expect(screen.getByRole("button", { name: "Run" })).toBeDefined();
     expect(screen.getAllByRole("button", { name: "Run" })).toHaveLength(1);
+  });
+
+  test("discovers destinations for a replacement build while an earlier inspection is pending", async () => {
+    const destination = {
+      type: "SIMULATOR",
+      id: "simulator",
+      name: "QA Simulator",
+      platform: "iOS Simulator",
+      osVersion: "27.0",
+      state: "Booted",
+    } as const;
+    const firstInspection = Promise.withResolvers<{
+      inspectBuildRunDestinations: Array<typeof destination>;
+    }>();
+    request.mockImplementation(async (query, variables) => {
+      if (query.includes("BuildRunAgents")) return { buildRunAgents } as never;
+      if (query.includes("BuildRunDestinations")) {
+        if (variables?.buildId === "build-1")
+          return (await firstInspection.promise) as never;
+        return { inspectBuildRunDestinations: [destination] } as never;
+      }
+      throw new Error("Unexpected request");
+    });
+
+    const onError = vi.fn();
+    const controls = (buildId: string) => (
+      <RunBuildControls
+        buildId={buildId}
+        destinationType="SIMULATOR"
+        onError={onError}
+      />
+    );
+    const openRunMenu = () => {
+      fireEvent.pointerDown(screen.getByRole("button", { name: "Run" }), {
+        button: 0,
+        ctrlKey: false,
+      });
+    };
+    const { rerender } = render(controls("build-1"));
+    openRunMenu();
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("BuildRunDestinations"),
+        expect.objectContaining({ buildId: "build-1" }),
+      ),
+    );
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+
+    rerender(controls("build-2"));
+    await act(async () => {
+      firstInspection.resolve({ inspectBuildRunDestinations: [] });
+    });
+
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: /Run$/ }).disabled,
+    ).toBe(false);
+    openRunMenu();
+    expect(
+      await screen.findByRole("menuitemcheckbox", { name: /QA Simulator/ }),
+    ).toBeDefined();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("BuildRunDestinations"),
+      expect.objectContaining({ buildId: "build-2" }),
+    );
   });
 
   test("runs from one compact device-picker button", async () => {

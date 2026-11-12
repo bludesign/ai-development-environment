@@ -38,9 +38,13 @@ afterEach(() => {
   request.mockReset();
 });
 
-test.each([true, false])(
-  "finds source operations across repository checkouts (inspection available: %s)",
-  async (canInspect) => {
+test.each([
+  { buildReady: true, canInspect: true, checkout: "sdk-checkout" },
+  { buildReady: false, canInspect: true, checkout: "java-checkout" },
+  { buildReady: false, canInspect: false, checkout: "discover-only" },
+])(
+  "uses $checkout for source operations across repository checkouts",
+  async ({ buildReady, canInspect, checkout }) => {
     const discover = "android.source.discover";
     const inspect = "android.source.inspect";
     request.mockImplementation(async (query) => {
@@ -88,8 +92,20 @@ test.each([true, false])(
                     repository: { id: "repository-1" },
                     worktrees: [
                       availableWorktree("secondary", false),
-                      availableWorktree("sdk-checkout"),
+                      availableWorktree("java-checkout"),
                     ],
+                  },
+                ],
+              },
+              {
+                agent: {
+                  connectionStatus: buildReady ? "ONLINE" : "OFFLINE",
+                  capabilities: [discover, inspect, "android.build.run"],
+                },
+                codebases: [
+                  {
+                    repository: { id: "repository-1" },
+                    worktrees: [availableWorktree("sdk-checkout")],
                   },
                 ],
               },
@@ -147,9 +163,7 @@ test.each([true, false])(
 
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation DiscoverAndroidBuildSources"),
-      expect.objectContaining({
-        worktreeId: canInspect ? "sdk-checkout" : "discover-only",
-      }),
+      expect.objectContaining({ worktreeId: checkout }),
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
 
@@ -171,7 +185,7 @@ test.each([true, false])(
     expect(request).toHaveBeenCalledWith(
       expect.stringContaining("mutation InspectAndroidBuildSource"),
       expect.objectContaining({
-        worktreeId: "sdk-checkout",
+        worktreeId: checkout,
         projectPath: "mobile",
       }),
     );
@@ -180,6 +194,63 @@ test.each([true, false])(
     );
   },
 );
+
+test("preserves an explicitly entered root project path during discovery", async () => {
+  const discovery = Promise.withResolvers<{
+    discoverAndroidBuildSources: string[];
+  }>();
+  request.mockImplementation(async (query) => {
+    const operation = String(query);
+    if (operation.includes("query AndroidDiscoveryCheckout")) {
+      return {
+        worktreeOverview: {
+          agents: [
+            {
+              agent: {
+                connectionStatus: "ONLINE",
+                capabilities: ["android.source.discover"],
+              },
+              codebases: [
+                {
+                  repository: { id: "repository-1" },
+                  worktrees: [availableWorktree("checkout")],
+                },
+              ],
+            },
+          ],
+        },
+      } as never;
+    }
+    if (operation.includes("mutation DiscoverAndroidBuildSources")) {
+      return discovery.promise as never;
+    }
+    throw new Error(`Unexpected operation: ${operation}`);
+  });
+
+  render(
+    <AndroidBuildConfigurationDialog
+      codebaseId="codebase-1"
+      configuration={null}
+      onClose={vi.fn()}
+      onSaved={vi.fn()}
+      repositoryId="repository-1"
+    />,
+  );
+
+  const dialog = within(await screen.findByRole("dialog"));
+  await dialog.findByRole("button", { name: /Discover Gradle projects/ });
+  const projectPath = dialog.getByRole("textbox", {
+    name: "Gradle project path",
+  });
+  fireEvent.change(projectPath, { target: { value: "mobile" } });
+  fireEvent.change(projectPath, { target: { value: "." } });
+  discovery.resolve({ discoverAndroidBuildSources: ["mobile"] });
+
+  await dialog.findByRole("combobox", { name: "Gradle project path" });
+  expect(
+    dialog.getByLabelText<HTMLInputElement>("Manual Gradle project path").value,
+  ).toBe(".");
+});
 
 test("preserves saved fields during discovery and saves a selected flavor and icon", async () => {
   const configuration = {

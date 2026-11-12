@@ -1,12 +1,13 @@
 "use client";
 
 import {
+  ANDROID_BUILD_JOB_KIND,
   ANDROID_SOURCE_DISCOVER_JOB_KIND,
   ANDROID_SOURCE_INSPECT_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
 import { Hammer, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -346,6 +347,7 @@ export function AndroidBuildConfigurationDialog({
     variant: configuration?.variant ?? "debug",
     apkPath: configuration?.apkPath ?? "",
   });
+  const projectPathEdited = useRef(false);
   const [saving, setSaving] = useState(false);
   const [discovering, setDiscovering] = useState(false);
   const [inspecting, setInspecting] = useState(false);
@@ -380,7 +382,7 @@ export function AndroidBuildConfigurationDialog({
           );
         if (signal?.aborted) return;
         setProjects(sources);
-        if (creating && sources.length === 1) {
+        if (creating && !projectPathEdited.current && sources.length === 1) {
           const [projectPath] = sources;
           setValues((current) =>
             current.projectPath === "."
@@ -441,9 +443,13 @@ export function AndroidBuildConfigurationDialog({
                   : [];
               }),
           );
-        const inspection = checkouts.find(({ capabilities }) =>
+        const inspectableCheckouts = checkouts.filter(({ capabilities }) =>
           capabilities.includes(ANDROID_SOURCE_INSPECT_JOB_KIND),
         );
+        const inspection =
+          inspectableCheckouts.find(({ capabilities }) =>
+            capabilities.includes(ANDROID_BUILD_JOB_KIND),
+          ) ?? inspectableCheckouts[0];
         const discovery = inspection?.capabilities.includes(
           ANDROID_SOURCE_DISCOVER_JOB_KIND,
         )
@@ -471,6 +477,7 @@ export function AndroidBuildConfigurationDialog({
   )?.variants;
 
   function updateProjectPath(projectPath: string) {
+    projectPathEdited.current = true;
     setValues((current) => ({ ...current, projectPath }));
     setModules(null);
   }

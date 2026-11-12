@@ -7,9 +7,17 @@ import {
 
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
+import type { Agent } from "@/components/agents/types";
 import { ANDROID_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
 import { AndroidProjectSection } from "@/components/builds/android-project-section";
@@ -53,6 +61,8 @@ import {
 import type { CodebaseRepository } from "./types";
 import { ExternalPipelineActionsSettings } from "./external-pipeline-actions";
 import { RepositoryPreparations } from "./repository-preparations";
+
+type BuildAgentState = Pick<Agent, "id" | "capabilities" | "connectionStatus">;
 
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt
@@ -142,6 +152,21 @@ export function RepositoryDetailPage({
     () => loadOwner.current?.refresh() ?? Promise.resolve(),
     [],
   );
+  const refreshBuildReadiness = useEffectEvent((changed: BuildAgentState) => {
+    const agent = repository?.codebases.find(
+      (codebase) => codebase.agent.id === changed.id,
+    )?.agent;
+    if (
+      loading ||
+      (agent &&
+        (agent.connectionStatus !== changed.connectionStatus ||
+          agent.capabilities.includes(ANDROID_BUILD_JOB_KIND) !==
+            changed.capabilities.includes(ANDROID_BUILD_JOB_KIND)))
+    ) {
+      void load();
+    }
+  });
+
   const fetchDetail = useCallback(
     async (signal: AbortSignal) => {
       const groupsVersion = groupsRevision.current;
@@ -226,6 +251,33 @@ export function RepositoryDetailPage({
       if (loadOwner.current === owner) loadOwner.current = null;
     };
   }, [fetchDetail, load, repositoryId]);
+
+  useEffect(() => {
+    if (tab !== "android-app") return;
+    // An expired heartbeat changes connection status without emitting an event.
+    const poll = window.setInterval(() => void load(), 30_000);
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      agentChanged: BuildAgentState;
+    }>(
+      {
+        query: `subscription RepositoryBuildAgentChanged {
+          agentChanged { id capabilities connectionStatus }
+        }`,
+      },
+      {
+        next: (value) => {
+          const changed = value.data?.agentChanged;
+          if (changed) refreshBuildReadiness(changed);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      window.clearInterval(poll);
+      unsubscribe();
+    };
+  }, [load, repositoryId, tab]);
 
   const save = async (event: FormEvent) => {
     event.preventDefault();
