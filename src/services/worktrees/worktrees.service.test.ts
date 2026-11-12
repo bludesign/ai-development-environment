@@ -1208,7 +1208,14 @@ describe("WorktreesService", () => {
             state: "Booted",
           }),
           createdAt: new Date(4),
-          artifacts: [{ id: "artifact-1", kind: "RUNNABLE_APP" }],
+          artifacts: [
+            {
+              id: "artifact-1",
+              kind: "APK",
+              checksum: "sha256:artifact",
+              metadataJson: '{"signed":true,"applicationId":"com.example.app"}',
+            },
+          ],
         },
       ],
       codebase: {
@@ -1313,7 +1320,14 @@ describe("WorktreesService", () => {
             orderBy: { createdAt: "desc" },
             select: expect.objectContaining({
               destinationJson: true,
-              artifacts: { select: { id: true, kind: true } },
+              artifacts: {
+                select: {
+                  id: true,
+                  kind: true,
+                  checksum: true,
+                  metadataJson: true,
+                },
+              },
             }),
             take: 1,
           }),

@@ -4056,6 +4056,50 @@
         "ATTENTION_REQUIRED": "Requiere atención"
       }
     },
+    "bulkBranch": {
+      "button": "Cambiar ramas en lote",
+      "description": "Elige una rama de destino y selecciona los árboles de trabajo de esta vista. El lote seguirá en curso al cerrar este cuadro.",
+      "selection": "Árboles de trabajo de esta vista",
+      "empty": "No hay árboles de trabajo que coincidan con esta vista.",
+      "chooseBranch": "Elige una rama antes de seleccionar árboles de trabajo.",
+      "invalidBranch": "Introduce un nombre de rama de Git válido.",
+      "aiBranchHelp": "Genera o introduce un nombre de rama para todos los árboles de trabajo seleccionados.",
+      "baseBranch": "Rama base (opcional)",
+      "defaultBase": "Usar la base de cada árbol de trabajo",
+      "rowBase": "Rama base: {branch}",
+      "selectWorktree": "Seleccionar {branch}",
+      "start": "Cambiar la rama en {count} árboles de trabajo",
+      "startOne": "Cambiar la rama en {count} árbol de trabajo",
+      "running": "Cambio de ramas en lote en curso",
+      "completed": "Cambio de ramas en lote completado",
+      "progress": "{completed} de {total} árboles de trabajo procesados",
+      "job": "Ver registros de la tarea",
+      "monitoringError": "No se pudo actualizar el progreso del cambio de ramas. {message}",
+      "missingBatch": "El lote de cambio de ramas no está disponible temporalmente.",
+      "namingCheckout": "Copia para nombrar la rama",
+      "searchCheckouts": "Buscar copias del repositorio",
+      "noNamingCheckouts": "No hay copias coincidentes.",
+      "blocked": {
+        "unavailable": "Este árbol de trabajo no está disponible.",
+        "offline": "El agente está desconectado.",
+        "unsupported": "Actualiza el agente para permitir cambios de rama.",
+        "busy": "Hay otra operación en curso en esta copia del repositorio.",
+        "conflicts": "Termina el rebase o resuelve los conflictos primero.",
+        "missingBase": "La rama base no está disponible en esta copia del repositorio.",
+        "alreadyOnBranch": "Este árbol de trabajo ya está en la rama de destino.",
+        "branchUnavailable": "La rama de destino no está disponible en esta copia del repositorio.",
+        "branchExists": "La rama de destino ya existe en esta copia del repositorio.",
+        "branchCheckedOut": "Otro árbol de trabajo de esta copia del repositorio ya utiliza la rama de destino.",
+        "sameCheckout": "Solo un árbol de trabajo por copia del repositorio puede cambiar a esta rama."
+      },
+      "status": {
+        "PENDING": "En cola",
+        "RUNNING": "Cambiando de rama",
+        "SUCCEEDED": "Rama cambiada",
+        "SKIPPED": "Omitido",
+        "FAILED": "Error"
+      }
+    },
     "bulkSync": {
       "button": "Sincronización masiva",
       "description": "Selecciona los worktrees desactualizados para obtener los cambios, rebasar sobre su rama base y enviar con force-with-lease. Los worktrees bloqueados aparecen abajo.",

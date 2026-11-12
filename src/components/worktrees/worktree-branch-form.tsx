@@ -98,6 +98,8 @@ export function WorktreeBranchForm({
   onSubmitError,
   recovery,
   fixedTicketKey,
+  renderBulkSelection,
+  ticketTarget,
 }: {
   target: WorktreeBranchTarget;
   busy: boolean;
@@ -106,9 +108,15 @@ export function WorktreeBranchForm({
   onSubmitError?: (selection: WorktreeBranchSelection, error: Error) => void;
   recovery?: ReactNode;
   fixedTicketKey?: string;
+  renderBulkSelection?: (selection: WorktreeBranchSelection) => {
+    content: ReactNode;
+    count: number;
+  };
+  ticketTarget?: ReactNode;
 }) {
   const t = useTranslations("worktrees");
   const id = useId();
+  const bulk = Boolean(renderBulkSelection);
   const [rememberedMode, setRememberedMode] = useRememberedBranchMode();
   const mode: WorktreeBranchMode = fixedTicketKey ? "TICKET" : rememberedMode;
   const [branchName, setBranchName] = useState("");
@@ -116,7 +124,7 @@ export function WorktreeBranchForm({
     target.currentBranch ?? "",
   );
   const [baseBranch, setBaseBranch] = useState(
-    target.currentBaseBranch ?? target.defaultBranch ?? "",
+    bulk ? "" : (target.currentBaseBranch ?? target.defaultBranch ?? ""),
   );
   const [ticketKey, setTicketKey] = useState(fixedTicketKey ?? "");
   const [preview, setPreview] = useState<TicketPreview | null>(null);
@@ -253,23 +261,39 @@ export function WorktreeBranchForm({
     }
   };
 
+  const ticketBranch =
+    currentPreview?.branchNamingMode === "AI"
+      ? generatedName.trim()
+        ? generatedName
+        : undefined
+      : bulk
+        ? (currentPreview?.branchName ?? undefined)
+        : undefined;
+  const selection: WorktreeBranchSelection = {
+    mode,
+    baseBranch,
+    ...(mode === "NEW"
+      ? { branchName }
+      : mode === "EXISTING"
+        ? { branchName: existingBranch }
+        : {
+            ticketKey: parseJiraIssueKey(ticketKey),
+            ...(ticketBranch ? { branchName: ticketBranch } : {}),
+          }),
+  };
+  const bulkSelection = renderBulkSelection?.(selection);
+  const submitDisabled =
+    busy ||
+    generating ||
+    (!bulk && !baseBranch) ||
+    bulkSelection?.count === 0 ||
+    (mode === "NEW" && !branchName.trim()) ||
+    (mode === "EXISTING" && !existingBranch) ||
+    (mode === "TICKET" && (!currentPreview || previewLoading));
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const selection: WorktreeBranchSelection = {
-      mode,
-      baseBranch,
-      ...(mode === "NEW"
-        ? { branchName }
-        : mode === "EXISTING"
-          ? { branchName: existingBranch }
-          : {
-              ticketKey: parseJiraIssueKey(ticketKey),
-              ...(currentPreview?.branchNamingMode === "AI" &&
-              generatedName.trim()
-                ? { branchName: generatedName }
-                : {}),
-            }),
-    };
+    if (submitDisabled) return;
     try {
       setError(null);
       await onSubmit(selection);
@@ -280,14 +304,6 @@ export function WorktreeBranchForm({
       onSubmitError?.(selection, nextError);
     }
   };
-
-  const submitDisabled =
-    busy ||
-    generating ||
-    !baseBranch ||
-    (mode === "NEW" && !branchName.trim()) ||
-    (mode === "EXISTING" && !existingBranch) ||
-    (mode === "TICKET" && (!currentPreview || previewLoading));
 
   return (
     <form className="space-y-4" onSubmit={(event) => void submit(event)}>
@@ -322,6 +338,7 @@ export function WorktreeBranchForm({
           </Label>
           <Input
             autoComplete="off"
+            disabled={bulk && busy}
             id={`${id}-branch`}
             onChange={(event) => setBranchName(event.target.value)}
             placeholder="feature/TICKET-123-ticket-title"
@@ -335,6 +352,7 @@ export function WorktreeBranchForm({
           <Label className="mb-1.5 block">{t("existingBranch")}</Label>
           <SearchableSelect
             ariaLabel={t("existingBranch")}
+            disabled={bulk && busy}
             emptyMessage={t("noMatchingBranches")}
             onValueChange={setExistingBranch}
             options={existingOptions}
@@ -347,6 +365,7 @@ export function WorktreeBranchForm({
 
       {mode === "TICKET" && (
         <div className="space-y-2">
+          {ticketTarget}
           <div>
             <Label className="mb-1.5 block" htmlFor={`${id}-ticket`}>
               {t("ticketKey")}
@@ -397,7 +416,9 @@ export function WorktreeBranchForm({
                       placeholder={t("aiBranchPlaceholder")}
                     />
                     <p className="text-xs text-muted-foreground">
-                      {t("aiBranchSubmitHelp")}
+                      {t(
+                        bulk ? "bulkBranch.aiBranchHelp" : "aiBranchSubmitHelp",
+                      )}
                     </p>
                     <Button
                       disabled={busy || generating}
@@ -425,18 +446,23 @@ export function WorktreeBranchForm({
       )}
 
       <div>
-        <Label className="mb-1.5 block">{t("baseBranch")}</Label>
+        <Label className="mb-1.5 block">
+          {t(bulk ? "bulkBranch.baseBranch" : "baseBranch")}
+        </Label>
         <SearchableSelect
-          ariaLabel={t("baseBranch")}
+          ariaLabel={t(bulk ? "bulkBranch.baseBranch" : "baseBranch")}
+          clearLabel={bulk ? t("bulkBranch.defaultBase") : undefined}
+          disabled={bulk && busy}
           emptyMessage={t("noMatchingBranches")}
           onValueChange={setBaseBranch}
           options={baseOptions}
-          placeholder={t("selectBaseBranch")}
+          placeholder={t(bulk ? "bulkBranch.defaultBase" : "selectBaseBranch")}
           searchPlaceholder={t("searchBranches")}
           value={baseBranch}
         />
       </div>
 
+      {bulkSelection?.content}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -446,7 +472,16 @@ export function WorktreeBranchForm({
       <div className="flex justify-end">
         <Button disabled={submitDisabled} type="submit">
           {busy && <Spinner />}
-          {submitLabel}
+          {bulkSelection
+            ? t(
+                bulkSelection.count === 1
+                  ? "bulkBranch.startOne"
+                  : "bulkBranch.start",
+                {
+                  count: bulkSelection.count,
+                },
+              )
+            : submitLabel}
         </Button>
       </div>
     </form>

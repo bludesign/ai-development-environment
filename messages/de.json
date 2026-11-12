@@ -4056,6 +4056,50 @@
         "ATTENTION_REQUIRED": "Handlungsbedarf"
       }
     },
+    "bulkBranch": {
+      "button": "Branches gesammelt wechseln",
+      "description": "Wählen Sie einen Zielbranch und dann Worktrees in dieser Ansicht aus. Der Vorgang läuft nach dem Schließen dieses Dialogs weiter.",
+      "selection": "Worktrees in dieser Ansicht",
+      "empty": "Keine Worktrees passen zu dieser Ansicht.",
+      "chooseBranch": "Wählen Sie zuerst einen Branch aus.",
+      "invalidBranch": "Geben Sie einen gültigen Git-Branchnamen ein.",
+      "aiBranchHelp": "Erstellen Sie einen Branchnamen oder geben Sie einen Namen für alle ausgewählten Worktrees ein.",
+      "baseBranch": "Basisbranch (optional)",
+      "defaultBase": "Basis des jeweiligen Worktrees verwenden",
+      "rowBase": "Basisbranch: {branch}",
+      "selectWorktree": "{branch} auswählen",
+      "start": "Branch für {count} Worktrees wechseln",
+      "startOne": "Branch für {count} Worktree wechseln",
+      "running": "Gesammelter Branchwechsel läuft",
+      "completed": "Gesammelter Branchwechsel abgeschlossen",
+      "progress": "{completed} von {total} Worktrees verarbeitet",
+      "job": "Jobprotokoll ansehen",
+      "monitoringError": "Der Fortschritt des Branchwechsels konnte nicht geladen werden. {message}",
+      "missingBatch": "Der Branchwechsel ist vorübergehend nicht verfügbar.",
+      "namingCheckout": "Checkout für den Branchnamen",
+      "searchCheckouts": "Checkouts suchen",
+      "noNamingCheckouts": "Keine passenden Checkouts.",
+      "blocked": {
+        "unavailable": "Dieser Worktree ist nicht verfügbar.",
+        "offline": "Der Agent ist offline.",
+        "unsupported": "Aktualisieren Sie den Agenten, um Branchwechsel zu ermöglichen.",
+        "busy": "In diesem Checkout läuft bereits ein anderer Vorgang.",
+        "conflicts": "Schließen Sie zuerst den Rebase ab oder beheben Sie die Konflikte.",
+        "missingBase": "Der Basisbranch ist in diesem Checkout nicht verfügbar.",
+        "alreadyOnBranch": "Dieser Worktree ist bereits auf dem Zielbranch.",
+        "branchUnavailable": "Der Zielbranch ist in diesem Checkout nicht verfügbar.",
+        "branchExists": "Der Zielbranch existiert bereits in diesem Checkout.",
+        "branchCheckedOut": "Ein anderer Worktree in diesem Checkout verwendet bereits den Zielbranch.",
+        "sameCheckout": "Pro Checkout kann nur ein Worktree zu diesem Branch wechseln."
+      },
+      "status": {
+        "PENDING": "In Warteschlange",
+        "RUNNING": "Branch wird gewechselt",
+        "SUCCEEDED": "Branch gewechselt",
+        "SKIPPED": "Übersprungen",
+        "FAILED": "Fehlgeschlagen"
+      }
+    },
     "bulkSync": {
       "button": "Massen-Synchronisierung",
       "description": "Wähle veraltete Worktrees aus, um Änderungen abzurufen, auf den Basisbranch zu rebasen und mit force-with-lease zu pushen. Blockierte Worktrees werden unten angezeigt.",

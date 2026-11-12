@@ -203,6 +203,7 @@ import {
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
+import { WorktreeBulkBranch } from "./worktree-bulk-branch";
 import { WorktreeBulkMerge } from "./worktree-bulk-merge";
 import { WorktreeBulkSync } from "./worktree-bulk-sync";
 import {
@@ -1147,6 +1148,15 @@ export function WorktreesPage({
             appId={appId}
             disabled={busy || fetchOperation.active || !overview}
             key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+            onReload={refreshPage}
+          />
+          <WorktreeBulkBranch
+            agentId={globalAgent.activeAgentId}
+            agents={filteredAgents}
+            allAgents={overview?.agents ?? []}
+            appId={appId}
+            disabled={busy || fetchOperation.active || !overview}
+            key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
             onReload={refreshPage}
           />
           <Button onClick={() => setHiddenOpen(true)} variant="outline">

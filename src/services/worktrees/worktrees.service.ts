@@ -122,6 +122,16 @@ import {
   managedDerivedDataRoot,
 } from "@/services/builds/build-directory";
 import { overallPreparationState, preparationPayload } from "./preparations";
+import {
+  branchBatchScopeWhere,
+  branchBatchTargetInclude,
+  BranchBatchSkipError,
+  bulkBranchChangeJobKey,
+  WorktreeBranchBatchService,
+  type BranchBatchTarget,
+  type BranchBatchTargetGuard,
+  type BranchBatchTargetSelection,
+} from "./worktree-branch-batch.service";
 import { WorktreeSyncService } from "./worktree-sync.service";
 
 const SETTINGS_ID = "default";
@@ -247,7 +257,9 @@ const worktreeInclude = {
       snapshotJson: true,
       createdAt: true,
       finishedAt: true,
-      artifacts: { select: { id: true, kind: true } },
+      artifacts: {
+        select: { id: true, kind: true, checksum: true, metadataJson: true },
+      },
     },
   },
   autoSync: true,
@@ -611,9 +623,17 @@ function resultObject(job: {
 
 export class WorktreesService {
   private syncService?: WorktreeSyncService;
+  private branchBatchService?: WorktreeBranchBatchService;
 
   get syncBatches(): WorktreeSyncService {
     return (this.syncService ??= new WorktreeSyncService(
+      this,
+      this.agentControl,
+    ));
+  }
+
+  get branchBatches(): WorktreeBranchBatchService {
+    return (this.branchBatchService ??= new WorktreeBranchBatchService(
       this,
       this.agentControl,
     ));
@@ -3042,6 +3062,114 @@ export class WorktreesService {
       input.selection,
       { id: worktree.id, branch: worktree.branch },
     );
+    return this.enqueueBranchChange(
+      worktree,
+      resolved,
+      `worktree:branch:change:${input.requestId}:${worktree.id}`,
+      Boolean(input.stashOnFailure),
+    );
+  }
+
+  bulkBranchTargetIssue(
+    worktree: BranchBatchTarget,
+    selection: BranchBatchTargetSelection,
+  ): string | null {
+    const { codebase } = worktree;
+    if (worktree.missingAt || worktree.availability !== "AVAILABLE")
+      return "Worktree is unavailable";
+    if (codebase.availability !== "AVAILABLE") return "Codebase is unavailable";
+    if (worktree.branch !== selection.expectedBranch)
+      return "The worktree branch changed after selection";
+    if (worktree.branch === selection.branchName)
+      return "The worktree is already on the destination branch";
+    if (!online(codebase.agent)) return "Agent is offline";
+    const supported = capabilities(codebase.agent);
+    if (!supported.includes(WORKTREE_BRANCH_JOB_KIND))
+      return "Agent must be updated to use worktrees";
+    if (
+      codebase.repository.preparations.length > 0 &&
+      !supported.includes(WORKTREE_PREPARATION_JOB_KIND)
+    )
+      return "Agent must be updated to apply repository preparations";
+    if (worktree.rebaseInProgress || worktree.hasConflicts)
+      return "Resolve the current rebase or conflicts before changing branches";
+    const remoteBranches = parseBranches(codebase.remoteBranchesJson);
+    if (!remoteBranches.includes(selection.baseBranch))
+      return "The selected origin base branch is unavailable; fetch and try again";
+    const exists =
+      remoteBranches.includes(selection.branchName) ||
+      parseBranches(codebase.localBranchesJson).includes(selection.branchName);
+    if (
+      codebase.worktrees.some(({ branch }) => branch === selection.branchName)
+    )
+      return `Branch ${selection.branchName} is checked out in another worktree`;
+    if (selection.mode === "EXISTING")
+      return exists
+        ? null
+        : `Existing branch ${selection.branchName} is unavailable; refresh and try again`;
+    return exists ? `Branch ${selection.branchName} is already taken` : null;
+  }
+
+  async dispatchBulkBranchChange(
+    snapshot: BranchBatchTargetGuard,
+    selection: BranchBatchTargetSelection,
+    appId: string | null,
+  ) {
+    const prisma = await getPrismaClient();
+    const target = await prisma.worktree.findFirst({
+      where: {
+        id: snapshot.worktreeId,
+        ...branchBatchScopeWhere({ appId, agentId: snapshot.agentId }),
+      },
+      include: branchBatchTargetInclude,
+    });
+    if (!target)
+      throw new BranchBatchSkipError(
+        "The worktree was removed or left this scope",
+      );
+    if (
+      target.codebaseId !== snapshot.codebaseId ||
+      target.codebase.repositoryId !== snapshot.repositoryId ||
+      target.folder !== snapshot.folder ||
+      target.gitDirectory !== snapshot.gitDirectory ||
+      target.codebase.repository.canonicalOrigin !== snapshot.expectedOrigin
+    )
+      throw new BranchBatchSkipError(
+        "The worktree identity changed after selection",
+      );
+    const issue = this.bulkBranchTargetIssue(target, selection);
+    if (issue) throw new BranchBatchSkipError(issue);
+    await this.requireIdleLegacyCodebase(target.codebase);
+    return this.enqueueBranchChange(
+      target,
+      {
+        baseBranch: selection.baseBranch,
+        mode: selection.mode === "EXISTING" ? "EXISTING" : "NEW",
+        candidates: [selection.branchName],
+      },
+      bulkBranchChangeJobKey(snapshot.id, target.id),
+      false,
+    );
+  }
+
+  private enqueueBranchChange(
+    worktree: Pick<
+      BranchBatchTarget,
+      "id" | "codebaseId" | "folder" | "gitDirectory"
+    > & {
+      codebase: RunnableCodebase;
+    },
+    resolved: {
+      baseBranch: string;
+      mode: "NEW" | "EXISTING";
+      candidates: string[];
+      aiNaming?: Awaited<
+        ReturnType<WorktreesService["resolveBranchSelection"]>
+      >["aiNaming"];
+    },
+    idempotencyKey: string,
+    stashOnFailure: boolean,
+  ) {
     return this.agentControl.createJob({
       agentId: worktree.codebase.agentId,
       codebaseId: worktree.codebaseId,
@@ -3058,12 +3186,12 @@ export class WorktreesService {
         mode: resolved.mode,
         candidates: resolved.candidates,
         ...(resolved.aiNaming ? { aiNaming: resolved.aiNaming } : {}),
-        stashOnFailure: Boolean(input.stashOnFailure),
+        stashOnFailure,
         preparations: (worktree.codebase.repository.preparations ?? []).map(
           preparationPayload,
         ),
       },
-      idempotencyKey: `worktree:branch:change:${input.requestId}:${worktree.id}`,
+      idempotencyKey,
       timeoutSeconds: 600,
     });
   }
@@ -4127,32 +4255,28 @@ export class WorktreesService {
     if (!capabilities(worktree.codebase.agent).includes(capability)) {
       throw new Error("Agent must be updated to use worktrees");
     }
-    if (
-      !allowBusy &&
-      !capabilities(worktree.codebase.agent).includes(
-        OPERATION_RESOURCES_CAPABILITY,
-      )
-    ) {
-      const [active, activeMove] = await Promise.all([
-        prisma.agentJob.findFirst({
-          where: {
-            codebaseId: worktree.codebaseId,
-            ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE,
-          },
-        }),
-        prisma.worktreeMove.findFirst({
-          where: {
-            status: { in: ACTIVE_MOVE_STATUSES },
-            OR: [
-              { sourceCodebaseId: worktree.codebaseId },
-              { targetCodebaseId: worktree.codebaseId },
-            ],
-          },
-        }),
-      ]);
-      if (active || activeMove) throw new CodebaseBusyError();
-    }
+    if (!allowBusy) await this.requireIdleLegacyCodebase(worktree.codebase);
     return worktree;
+  }
+
+  private async requireIdleLegacyCodebase({
+    id,
+    agent,
+  }: Pick<RunnableCodebase, "id" | "agent">) {
+    if (capabilities(agent).includes(OPERATION_RESOURCES_CAPABILITY)) return;
+    const prisma = await getPrismaClient();
+    const [active, activeMove] = await Promise.all([
+      prisma.agentJob.findFirst({
+        where: { codebaseId: id, ...ACTIVE_CODEBASE_BLOCKING_JOB_WHERE },
+      }),
+      prisma.worktreeMove.findFirst({
+        where: {
+          status: { in: ACTIVE_MOVE_STATUSES },
+          OR: [{ sourceCodebaseId: id }, { targetCodebaseId: id }],
+        },
+      }),
+    ]);
+    if (active || activeMove) throw new CodebaseBusyError();
   }
 
   private async requireRunnableCodebase(

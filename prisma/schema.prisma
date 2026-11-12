@@ -2692,6 +2692,52 @@ model WorktreeMergeItem {
   @@index([requestKey, status])
 }
 
+// Batch rows retain their checkout and scope even after the source is removed.
+model WorktreeBranchBatch {
+  id          String               @id
+  requestId   String               @unique
+  fingerprint String
+  appId       String?
+  agentId     String?
+  mode        String
+  branchName  String
+  ticketKey   String?
+  status      String               @default("ACTIVE")
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  finishedAt  DateTime?
+  items       WorktreeBranchItem[]
+
+  @@index([status, createdAt])
+  @@index([appId, agentId, status, createdAt])
+}
+
+model WorktreeBranchItem {
+  id             String              @id
+  batchId        String
+  position       Int
+  worktreeId     String
+  codebaseId     String
+  agentId        String
+  agentName      String
+  repositoryId   String
+  repositoryName String
+  sourceBranch   String?
+  baseBranch     String
+  folder         String
+  gitDirectory   String
+  expectedOrigin String
+  status         String              @default("PENDING")
+  jobId          String?             @unique
+  error          String?
+  warning        String?
+  batch          WorktreeBranchBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, worktreeId])
+  @@unique([batchId, codebaseId])
+  @@index([status, codebaseId])
+}
+
 model WorktreeMove {
   operationHolderId String?
   id                String    @id

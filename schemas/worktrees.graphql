@@ -204,6 +204,10 @@ type WorktreeLatestBuildArtifact {
   id: ID!
   "Category of this worktree latest build artifact."
   kind: String!
+  "Checksum of the artifact, if available."
+  checksum: String
+  "Additional structured metadata for this build artifact."
+  metadata: JSON!
 }
 
 "Represents a worktree latest build in the GraphQL API."
@@ -618,6 +622,130 @@ extend type Mutation {
     "Selection and page scope."
     input: StartWorktreeSyncBatchInput!
   ): WorktreeSyncBatch!
+}
+
+"Whether a Bulk Change Branch batch has unfinished work."
+enum WorktreeBranchBatchStatus {
+  "The batch has worktrees awaiting dispatch or completion."
+  ACTIVE
+  "Every worktree has a final outcome."
+  COMPLETED
+}
+
+"Progress or final outcome for one Bulk Change Branch worktree."
+enum WorktreeBranchItemStatus {
+  "The worktree is awaiting dispatch."
+  PENDING
+  "An agent branch job was submitted."
+  RUNNING
+  "The worktree switched to the requested branch."
+  SUCCEEDED
+  "The worktree became ineligible before dispatch."
+  SKIPPED
+  "The branch job could not be submitted or completed."
+  FAILED
+}
+
+"A retained Bulk Change Branch submission."
+type WorktreeBranchBatch {
+  "Stable batch identifier."
+  id: ID!
+  "App scope, or null for the global worktrees page."
+  appId: ID
+  "Active Agent scope at submission, if any."
+  agentId: ID
+  "How the destination branch was chosen."
+  mode: WorktreeBranchMode!
+  "Exact destination branch name for every selected worktree."
+  branchName: String!
+  "Jira issue key when the name came from a ticket."
+  ticketKey: String
+  "Current batch progress."
+  status: WorktreeBranchBatchStatus!
+  "Selected worktrees and outcomes in submission order."
+  items: [WorktreeBranchItem!]!
+  "ISO 8601 submission timestamp."
+  createdAt: String!
+  "ISO 8601 timestamp of the last progress change."
+  updatedAt: String!
+  "ISO 8601 completion timestamp."
+  finishedAt: String
+}
+
+"A snapshotted worktree and its retained branch change outcome."
+type WorktreeBranchItem {
+  "Stable batch row identifier."
+  id: ID!
+  "Original checkout identifier."
+  worktreeId: ID!
+  "Original codebase identifier."
+  codebaseId: ID!
+  "Repository display name captured at submission."
+  repositoryName: String!
+  "Agent display name captured at submission."
+  agentName: String!
+  "Checkout path captured at submission."
+  folder: String!
+  "Source branch reviewed at submission, or null for a detached checkout."
+  sourceBranch: String
+  "Remote base branch selected for this checkout."
+  baseBranch: String!
+  "Current progress or final outcome."
+  status: WorktreeBranchItemStatus!
+  "Failure or skip details."
+  error: String
+  "Preparation errors reported after switching branches."
+  warning: String
+  "Submitted agent job identifier."
+  jobId: ID
+}
+
+"A reviewed checkout and its selected base branch."
+input WorktreeBranchBatchItemInput {
+  "Selected checkout identifier."
+  worktreeId: ID!
+  "Source branch shown at review, or null for a detached checkout."
+  expectedBranch: String
+  "Remote base branch to use for this checkout."
+  baseBranch: String!
+}
+
+"The reviewed branch, worktrees, and page scope for a background submission."
+input StartWorktreeBranchBatchInput {
+  "Idempotency identifier for this exact submission."
+  requestId: ID!
+  "App scope, or null for the global worktrees page."
+  appId: ID
+  "Active Agent scope, if any."
+  agentId: ID
+  "How the destination branch was chosen."
+  mode: WorktreeBranchMode!
+  "Exact destination branch name to use."
+  branchName: String!
+  "Jira issue key when the name came from a ticket."
+  ticketKey: String
+  "Selected checkouts and their reviewed source and base branches."
+  items: [WorktreeBranchBatchItemInput!]!
+}
+
+extend type Query {
+  "Find active Bulk Change Branch batches and the latest completed batch for this scope."
+  worktreeBranchBatches(
+    "App scope, or null for the global worktrees page."
+    appId: ID
+    "Active Agent scope, if any."
+    agentId: ID
+  ): [WorktreeBranchBatch!]!
+  "Load progress and retained outcomes of a Bulk Change Branch batch."
+  worktreeBranchBatch("Batch identifier." id: ID!): WorktreeBranchBatch
+}
+
+extend type Mutation {
+  "Persist and start a background Bulk Change Branch batch."
+  startWorktreeBranchBatch(
+    "Branch, selection, and page scope."
+    input: StartWorktreeBranchBatchInput!
+  ): WorktreeBranchBatch!
 }
 
 "Source control provider for a Bulk Merge item."

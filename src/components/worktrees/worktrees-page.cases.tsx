@@ -1574,6 +1574,27 @@ export function registerWorktreesPageTests(
         },
       );
 
+      test("offers Run for the latest signed APK", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const build =
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!
+            .latestBuild!;
+        build.artifacts = [
+          {
+            id: "apk-artifact",
+            kind: "APK",
+            checksum: "sha256:artifact",
+            metadata: { signed: true, applicationId: "com.example.app" },
+          },
+        ];
+        render(<WorktreesPage />);
+
+        const row = (await screen.findByText("Latest build")).parentElement!;
+        expect(within(row).getByRole("button", { name: "Run" })).toBeDefined();
+      });
+
       test.each(["GITHUB", "GITLAB"] as const)(
         "distinguishes required and requested %s reviews",
         async (provider) => {
