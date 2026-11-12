@@ -13,6 +13,7 @@ import {
   BUILD_PLATFORMS,
   BUILD_SCRIPT_FAILURE_BEHAVIORS,
   BUILD_SCRIPT_LOCK_SCOPES,
+  ANDROID_BUILD_DESTINATION,
   ANDROID_BUILD_JOB_KIND,
   ANDROID_SOURCE_DISCOVER_JOB_KIND,
   ANDROID_SOURCE_INSPECT_JOB_KIND,
@@ -564,6 +565,8 @@ export type StartAndroidBuildInput = {
   configurationId: string;
   requestId: string;
   scriptIds?: string[] | null;
+  serverUrlKind?: ServerUrlKind | null;
+  telemetryRequestOrigin?: string | null;
 };
 
 function androidScriptExecutions(scripts: BuildScriptSnapshot[]) {
@@ -2195,9 +2198,14 @@ export class BuildsService {
       });
       try {
         const result = this.result(await this.waitForJob(job.id));
-        return Array.isArray(result.destinations)
-          ? result.destinations.map(parseAndroidDestination)
-          : [];
+        if (!Array.isArray(result.destinations)) return [];
+        return result.destinations.flatMap((destination) => {
+          try {
+            return [parseAndroidDestination(destination)];
+          } catch {
+            return [];
+          }
+        });
       } finally {
         await prisma.agentJob.deleteMany({
           where: {
@@ -3061,14 +3069,17 @@ export class BuildsService {
       worktree.id,
       projectKey,
     );
-    const destination = {
-      type: "HOST",
-      platformId: "ANDROID",
-      platform: "Android",
-      id: "android",
-      name: "Android",
-      osVersion: null,
-      state: null,
+    const destination = ANDROID_BUILD_DESTINATION;
+    const server = await serverUrlSettingsService.buildSettings(
+      { type: destination.type, platform: destination.platformId },
+      input.serverUrlKind,
+      { requestOrigin: input.telemetryRequestOrigin },
+    );
+    const telemetry = await this.telemetry?.buildSettings();
+    const hookSettings = {
+      server,
+      endpointPaths: BUILD_ENDPOINT_PATHS,
+      ...(telemetry ? { telemetry } : {}),
     };
     const snapshot = {
       platform: "ANDROID",
@@ -3099,6 +3110,7 @@ export class BuildsService {
       },
       destination,
       scripts,
+      ...hookSettings,
     };
     const payload = {
       ...this.identity(worktree),
@@ -3107,6 +3119,7 @@ export class BuildsService {
       gradleCachePath,
       settings,
       scripts,
+      ...hookSettings,
     };
     try {
       await prisma.build.create({
@@ -3262,6 +3275,9 @@ export class BuildsService {
       snapshot.configuration ?? {},
       "build configuration snapshot",
     );
+    const serverUrlKind = (
+      snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
+    )?.selectedUrlKind;
     if (storedBuildPlatform(build) === "ANDROID") {
       if (!build.worktreeId || !build.androidConfigurationId)
         throw new Error("The original Android build settings are unavailable");
@@ -3276,6 +3292,8 @@ export class BuildsService {
           configurationId: build.androidConfigurationId,
           requestId,
           scriptIds,
+          serverUrlKind,
+          telemetryRequestOrigin,
         },
         parseAndroidBuildSettings(snapshotConfiguration),
       );
@@ -3337,9 +3355,7 @@ export class BuildsService {
           ),
         },
       }),
-      serverUrlKind: (
-        snapshot.server as { selectedUrlKind?: ServerUrlKind } | undefined
-      )?.selectedUrlKind,
+      serverUrlKind,
       destination: parseJson(build.destinationJson, {}),
       scriptIds: snapshotScripts.flatMap((script) => {
         if (!script || typeof script !== "object" || Array.isArray(script)) {

@@ -6,6 +6,11 @@ const cachedArtifact = vi.hoisted(() => vi.fn());
 vi.mock("./artifact-cache", () => ({ cachedArtifact }));
 
 import {
+  ANDROID_BUILD_DESTINATION,
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_DEPLOY_JOB_KIND,
+  ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  BUILD_ENDPOINT_PATHS,
   IOS_AGENT_RUN_DESTINATIONS_JOB_KIND,
   IOS_ARTIFACT_TRANSFER_UPLOAD_JOB_KIND,
   IOS_BUILD_JOB_KIND,
@@ -15,6 +20,7 @@ import {
   IOS_REMOTE_DEPLOY_JOB_KIND,
   IOS_RUN_DESTINATIONS_JOB_KIND,
   XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
+  parseAndroidBuildPayload,
   parseBuildJobPayload,
   type BuildDestination,
 } from "@ai-development-environment/agent-contract/builds";
@@ -726,6 +732,70 @@ describe("BuildsService", () => {
       ).toEqual(telemetrySettings);
     },
   );
+
+  test("captures the server and telemetry settings for Android build hooks", async () => {
+    const buildWorktree = worktree();
+    buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([
+      ANDROID_BUILD_JOB_KIND,
+    ]);
+    const buildCreate = vi.fn().mockResolvedValue({});
+    const createJob = vi.fn().mockResolvedValue({ id: "android-job" });
+    const telemetry = {
+      consoleCollectionEnabled: true,
+      analyticsCollectionEnabled: false,
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue(null),
+        create: buildCreate,
+        update: vi.fn().mockResolvedValue({ status: "QUEUED" }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "android-build" }),
+      },
+      worktree: { findUnique: vi.fn().mockResolvedValue(buildWorktree) },
+      androidBuildConfiguration: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "android-config",
+          name: "Debug",
+          projectPath: ".",
+          module: ":app",
+          variant: "debug",
+          apkPath: null,
+        }),
+      },
+      codebaseRepositoryBuildScript: {
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    });
+    const service = new BuildsService(control(createJob), {
+      buildSettings: vi.fn().mockResolvedValue(telemetry),
+    } as unknown as TelemetryService);
+
+    await service.startAndroidBuild({
+      worktreeId: buildWorktree.id,
+      configurationId: "android-config",
+      requestId: "android-request",
+      serverUrlKind: "REMOTE",
+    });
+
+    const payload = parseAndroidBuildPayload(
+      createJob.mock.calls[0]![0].payload,
+    );
+    const hookSettings = {
+      server: expect.objectContaining({
+        selectedUrlKind: "REMOTE",
+        selectedBaseUrl: "https://builds.example.com",
+      }),
+      endpointPaths: BUILD_ENDPOINT_PATHS,
+      telemetry,
+    };
+    expect(payload).toMatchObject(hookSettings);
+    expect(
+      JSON.parse(buildCreate.mock.calls[0]![0].data.snapshotJson),
+    ).toMatchObject({
+      ...hookSettings,
+      destination: ANDROID_BUILD_DESTINATION,
+    });
+  });
 
   test("reconciles hook results and code state at completion without live progress reports", async () => {
     let completeBuild:
@@ -1452,6 +1522,62 @@ describe("BuildsService", () => {
         }),
       }),
     );
+  });
+
+  test("keeps valid Android destinations when an agent reports a malformed entry", async () => {
+    const agent = worktree().codebase.agent;
+    agent.capabilitiesJson = JSON.stringify([
+      ANDROID_DEPLOY_JOB_KIND,
+      ANDROID_RUN_DESTINATIONS_JOB_KIND,
+    ]);
+    const physical = {
+      type: "PHYSICAL_DEVICE",
+      id: "[fe80::1%en0]:5555",
+      name: "Wi-Fi phone",
+      platform: "Android",
+      platformId: "ANDROID",
+      osVersion: null,
+      state: "device",
+    };
+    const emulator = {
+      ...physical,
+      type: "SIMULATOR",
+      id: "android:Pixel_8",
+      name: "Pixel 8",
+      state: "Shutdown",
+    };
+    getPrismaClient.mockResolvedValue({
+      build: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "build-1",
+          agentId: agent.id,
+          agent,
+          status: "SUCCEEDED",
+          destinationType: "HOST",
+          destinationJson: JSON.stringify(ANDROID_BUILD_DESTINATION),
+          artifacts: [{ id: "apk-1", kind: "APK", metadataJson: "{}" }],
+        }),
+      },
+      agent: { findMany: vi.fn().mockResolvedValue([agent]) },
+      agentJob: { deleteMany: vi.fn() },
+    });
+    const service = new BuildsService({
+      ...control(),
+      getJob: vi.fn().mockResolvedValue({
+        status: "SUCCEEDED",
+        resultJson: JSON.stringify({
+          destinations: [
+            { ...physical, id: "invalid serial" },
+            physical,
+            emulator,
+          ],
+        }),
+      }),
+    } as unknown as AgentControlService);
+
+    await expect(
+      service.destinationsForBuild("build-1", "destinations"),
+    ).resolves.toEqual([physical, emulator]);
   });
 
   test("returns generic, idle paired, and unavailable build targets from the agent preflight", async () => {

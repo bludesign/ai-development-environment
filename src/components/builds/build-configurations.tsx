@@ -56,7 +56,6 @@ type Checkout = {
   codebaseId: string;
   worktreeId: string;
   label: string;
-  androidDiscovery: boolean;
 };
 
 export function BuildConfigurations() {
@@ -216,14 +215,11 @@ export function BuildConfigurationDetail({
       const result =
         data.buildConfiguration ?? data.androidBuildConfiguration ?? null;
       setConfiguration(result);
-      const capability =
-        result && "projectPath" in result
-          ? "android.build.run"
-          : "ios.source.parse";
+      const android = result && "projectPath" in result;
       const choices = data.worktreeOverview.agents.flatMap(
         ({ agent, codebases }) =>
           agent.connectionStatus !== "ONLINE" ||
-          !agent.capabilities.includes(capability)
+          (!android && !agent.capabilities.includes("ios.source.parse"))
             ? []
             : codebases.flatMap((group) => {
                 if (group.repository.id !== result?.repository.id) return [];
@@ -240,11 +236,6 @@ export function BuildConfigurationDetail({
                         codebaseId: group.codebase.id,
                         worktreeId: tree.id,
                         label: `${agent.name} · ${tree.branch ?? tree.folder}`,
-                        androidDiscovery:
-                          agent.capabilities.includes(
-                            "android.source.discover",
-                          ) &&
-                          agent.capabilities.includes("android.source.inspect"),
                       },
                     ]
                   : [];
@@ -317,9 +308,7 @@ export function BuildConfigurationDetail({
             <AndroidBuildConfigurationDialog
               codebaseId={checkout.codebaseId}
               configuration={configuration}
-              discoveryWorktreeId={
-                checkout.androidDiscovery ? checkout.worktreeId : undefined
-              }
+              repositoryId={configuration.repository.id}
               onClose={() => setEditing(false)}
               onSaved={() => void load()}
             />

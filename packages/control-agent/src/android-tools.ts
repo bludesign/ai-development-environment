@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import { accessSync, constants, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 function executable(path: string): string | undefined {
   try {
@@ -21,6 +25,26 @@ function directories(path: string): string[] {
   }
 }
 
+async function hasWorkingJava(signal?: AbortSignal): Promise<boolean> {
+  const java = process.env.JAVA_HOME
+    ? executable(join(process.env.JAVA_HOME, "bin", "java"))
+    : (process.env.PATH ?? "")
+        .split(delimiter)
+        .filter(isAbsolute)
+        .map((path) => executable(join(path, "java")))
+        .find(Boolean);
+  if (!java) return false;
+  // macOS installs a Java launcher even on machines with no runtime.
+  return execFileAsync(java, ["-version"], {
+    timeout: 2_000,
+    killSignal: "SIGKILL",
+    signal,
+  }).then(
+    () => true,
+    () => false,
+  );
+}
+
 export function androidTools() {
   const sdk =
     process.env.ANDROID_HOME ||
@@ -39,13 +63,7 @@ export function androidTools() {
       .find(Boolean);
   return {
     sdk,
-    java: process.env.JAVA_HOME
-      ? executable(join(process.env.JAVA_HOME, "bin", "java"))
-      : (process.env.PATH ?? "")
-          .split(delimiter)
-          .filter(isAbsolute)
-          .map((path) => executable(join(path, "java")))
-          .find(Boolean),
+    hasWorkingJava,
     adb: sdkTool("platform-tools", "adb"),
     emulator: sdkTool("emulator", "emulator"),
     avdmanager: commandLineTool("avdmanager"),

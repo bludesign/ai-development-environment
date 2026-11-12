@@ -104,7 +104,7 @@ async function enroll(args: string[]): Promise<void> {
   const enrollmentToken = options["enrollment-token"];
   if (!enrollmentToken) throw new Error("--enrollment-token is required");
   const addresses = endpointOptions(options);
-  const inventory = collectInventory();
+  const inventory = await collectInventory();
   const name = options.name ?? inventory.hostname;
   const client = new AgentGraphQLClient(
     addresses.server,

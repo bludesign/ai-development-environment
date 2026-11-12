@@ -517,6 +517,7 @@ export function RepositoryDetailPage({
         </TabsContent>
         <TabsContent value="android-app">
           <AndroidProjectSection
+            repositoryId={repositoryId}
             codebaseId={
               checkouts.find((checkout) => checkout.available)?.codebaseId ??
               checkouts[0]?.codebaseId ??

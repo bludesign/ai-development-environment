@@ -19,6 +19,15 @@ export const XCODE_MULTIPLATFORM_BUILD_CAPABILITY =
   "xcode.build.multiplatform.v1";
 
 export const ANDROID_BUILD_JOB_KIND = "android.build.run";
+export const ANDROID_BUILD_DESTINATION = {
+  type: "HOST",
+  platformId: "ANDROID",
+  platform: "Android",
+  id: "android",
+  name: "Android",
+  osVersion: null,
+  state: null,
+} as const;
 export const ANDROID_SOURCE_DISCOVER_JOB_KIND = "android.source.discover";
 export const ANDROID_SOURCE_INSPECT_JOB_KIND = "android.source.inspect";
 export const ANDROID_BUILD_DELETE_JOB_KIND = "android.build.delete";
@@ -814,16 +823,24 @@ export function parseAndroidBuildPayload(value: unknown) {
       "Gradle project cache",
     ),
     scripts: Array.isArray(input.scripts) ? input.scripts.map(parseScript) : [],
+    telemetry: parseBuildTelemetrySettings(input.telemetry),
+    server: parseBuildServer(input.server),
+    endpointPaths: parseBuildEndpointPaths(input.endpointPaths),
   };
 }
 
 export function parseAndroidDestination(value: unknown): BuildDestination {
   const destination = parseBuildDestination(value);
+  const validId =
+    /^[A-Za-z0-9][A-Za-z0-9_.:%[\]-]{0,254}$/.test(destination.id) ||
+    (destination.type === "PHYSICAL_DEVICE" &&
+      destination.id.length <= 255 &&
+      /^\[[0-9A-Fa-f:.]+(?:%[A-Za-z0-9_.-]+)?\]:\d+$/.test(destination.id));
   if (
     destination.platformId !== "ANDROID" ||
     destination.generic ||
     !["SIMULATOR", "PHYSICAL_DEVICE"].includes(destination.type) ||
-    !/^[A-Za-z0-9][A-Za-z0-9_.:%[\]-]{0,254}$/.test(destination.id) ||
+    !validId ||
     (destination.type === "SIMULATOR" && !destination.id.startsWith("android:"))
   ) {
     throw new Error("Select a concrete Android emulator or connected device");

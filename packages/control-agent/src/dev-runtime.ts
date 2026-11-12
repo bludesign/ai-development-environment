@@ -34,7 +34,7 @@ export type DevelopmentAgentOptions = {
 
 type DevelopmentAgentDependencies = {
   createClient: (server: string, credential?: string) => DevelopmentAgentApi;
-  inventory: () => AgentInventory;
+  inventory: (signal: AbortSignal) => AgentInventory | Promise<AgentInventory>;
   load: (path: string) => Promise<AgentConfig>;
   save: (config: AgentConfig, path: string) => Promise<void>;
   wait: (milliseconds: number, signal: AbortSignal) => Promise<void>;
@@ -96,7 +96,7 @@ export async function prepareDevelopmentAgent(
   const websocketServer =
     options.websocketServer ?? defaultWebSocketServer(server);
   const configFile = options.configFile ?? developmentConfigPath();
-  const inventory = dependencies.inventory();
+  const inventory = await dependencies.inventory(signal);
   const name = options.name ?? `${inventory.hostname}-dev`;
   const anonymousClient = dependencies.createClient(server);
 

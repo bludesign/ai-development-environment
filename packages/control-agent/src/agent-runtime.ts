@@ -247,7 +247,9 @@ export async function runAgentSession(
     if (heartbeatTimer) clearTimeout(heartbeatTimer);
     heartbeatTimer = undefined;
     try {
-      await client.heartbeat(collectInventory());
+      const inventory = await collectInventory(signal);
+      if (signal.aborted) return;
+      await client.heartbeat(inventory);
       heartbeatFailures = 0;
     } catch (error) {
       heartbeatFailures += 1;

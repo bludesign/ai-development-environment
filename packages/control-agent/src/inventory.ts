@@ -120,10 +120,13 @@ export function operatingSystemVersion(
 
 export const AGENT_CAPABILITIES = capabilitiesForPlatform(process.platform);
 
-function androidCapabilities(): string[] {
+async function androidCapabilities(signal?: AbortSignal): Promise<string[]> {
   if (process.platform !== "darwin") return [];
-  const { adb, emulator, avdmanager, java, apkanalyzer, apksigner } =
+  const { adb, emulator, avdmanager, apkanalyzer, apksigner, hasWorkingJava } =
     androidTools();
+  const java =
+    (apkanalyzer || (adb && emulator && avdmanager)) &&
+    (await hasWorkingJava(signal));
   return [
     ANDROID_BUILD_DELETE_JOB_KIND,
     ANDROID_ARTIFACT_DOWNLOAD_JOB_KIND,
@@ -158,7 +161,9 @@ export type AgentInventory = {
   defaultBuildsDirectory?: string;
 };
 
-export function collectInventory(): AgentInventory {
+export async function collectInventory(
+  signal?: AbortSignal,
+): Promise<AgentInventory> {
   const disk = statfsSync("/", { bigint: true });
   return {
     hostname: hostname(),
@@ -170,6 +175,9 @@ export function collectInventory(): AgentInventory {
     memoryFreeBytes: freemem(),
     diskTotalBytes: Number(disk.blocks * disk.bsize),
     diskFreeBytes: Number(disk.bavail * disk.bsize),
-    capabilities: [...AGENT_CAPABILITIES, ...androidCapabilities()],
+    capabilities: [
+      ...AGENT_CAPABILITIES,
+      ...(await androidCapabilities(signal)),
+    ],
   };
 }

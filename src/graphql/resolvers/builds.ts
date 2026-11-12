@@ -478,7 +478,10 @@ export const createBuildResolvers = (service: BuildsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startAndroidBuild(input);
+      return service.startAndroidBuild({
+        ...input,
+        telemetryRequestOrigin: context.requestOrigin,
+      });
     },
     deleteIosAppProject: (
       _root: unknown,

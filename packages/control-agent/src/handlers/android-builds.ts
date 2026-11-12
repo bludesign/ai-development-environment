@@ -12,9 +12,10 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  ANDROID_BUILD_DESTINATION,
   androidAssembleTask,
   parseAndroidBuildPayload,
   parseAndroidBuildSettings,
@@ -134,6 +135,48 @@ gradle.beforeProject { project ->
 }
 `;
 
+const apkOutputInit = `
+if (gradle.parent != null) return
+
+gradle.beforeProject { project ->
+    if (project.path != System.getenv('AIDE_ANDROID_BUILD_MODULE')) return
+    project.pluginManager.withPlugin('com.android.application') {
+        def components = project.extensions.findByName('androidComponents')
+        if (components == null) return
+        def apkType
+        try {
+            apkType = components.getClass().classLoader.loadClass('com.android.build.api.artifact.SingleArtifact$APK')
+        } catch (ClassNotFoundException ignored) {
+            return
+        }
+        components.onVariants(components.selector().all(), { variant ->
+            if (variant.name.equalsIgnoreCase(System.getenv('AIDE_ANDROID_BUILD_VARIANT'))) {
+                def output = variant.artifacts.get(apkType.getField('INSTANCE').get(null))
+                gradle.projectsEvaluated {
+                    new File(System.getenv('AIDE_ANDROID_APK_OUTPUT')).setText(
+                        groovy.json.JsonOutput.toJson(output.get().asFile.absolutePath), 'UTF-8')
+                }
+            }
+            kotlin.Unit.INSTANCE
+        } as kotlin.jvm.functions.Function1)
+    }
+}
+`;
+
+async function readApkOutputDirectory(path: string): Promise<string | null> {
+  const data = await readFile(path, "utf8").catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
+  );
+  if (data === null) return null;
+  const directory: unknown = JSON.parse(data);
+  if (typeof directory !== "string" || !isAbsolute(directory))
+    throw new Error("Gradle reported an invalid APK output directory");
+  return directory;
+}
+
 export function parseAndroidVariants(output: string) {
   const modules = new Map<string, Set<string>>();
   for (const line of output.split(/\r?\n/)) {
@@ -170,7 +213,9 @@ export const inspectAndroidSource: AgentJobHandler = async (
     root,
     relative(root, join(project, "gradlew")),
   );
-  const { sdk, java } = androidTools();
+  const { sdk, hasWorkingJava } = androidTools();
+  const java = await hasWorkingJava(signal);
+  signal.throwIfAborted();
   if (!java) throw new Error("Configure a compatible JDK on the agent");
   const staging = await mkdtemp(join(tmpdir(), "ade-gradle-inspect-"));
   try {
@@ -227,7 +272,7 @@ async function runTool(
 
 async function variantMetadata(
   directory: string,
-  depth = 0,
+  remainingDepth = 4,
 ): Promise<string[]> {
   const children = await readdir(directory, { withFileTypes: true });
   const files: string[] = [];
@@ -235,8 +280,8 @@ async function variantMetadata(
     const path = join(directory, child.name);
     if (child.isFile() && child.name === "output-metadata.json")
       files.push(path);
-    if (depth < 4 && child.isDirectory())
-      files.push(...(await variantMetadata(path, depth + 1)));
+    if (remainingDepth > 0 && child.isDirectory())
+      files.push(...(await variantMetadata(path, remainingDepth - 1)));
   }
   return files;
 }
@@ -249,15 +294,29 @@ export async function findAndroidApk(
     variant: string;
     apkPath: string | null;
   },
+  apkOutputDirectory?: string | null,
 ): Promise<string> {
   if (settings.apkPath) return checkedPath(root, settings.apkPath);
-  const modulePath = settings.module.slice(1).replaceAll(":", "/");
-  const outputPath = join(project, modulePath, "build", "outputs", "apk");
+  const outputPath =
+    apkOutputDirectory ??
+    join(
+      project,
+      settings.module.slice(1).replaceAll(":", "/"),
+      "build",
+      "outputs",
+      "apk",
+    );
   const output = await checkedPath(root, relative(root, outputPath)).catch(
-    () => null,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
   );
   const matches = new Set<string>();
-  for (const path of output ? await variantMetadata(output) : []) {
+  const metadataPaths = output
+    ? await variantMetadata(output, apkOutputDirectory ? 0 : undefined)
+    : [];
+  for (const path of metadataPaths) {
     const data = JSON.parse(await readFile(path, "utf8")) as {
       variantName?: string;
       elements?: { outputFile?: string; filters?: unknown[] }[];
@@ -293,12 +352,36 @@ async function apkMetadata(apk: string, signal: AbortSignal) {
     throw new Error(
       "Install Android SDK Build Tools and command-line tools on the build agent",
     );
-  try {
-    await runTool(apksigner, ["verify", apk], signal);
-  } catch {
-    signal.throwIfAborted();
+  const verification = await captureCommand({
+    command: apksigner,
+    args: ["verify", apk],
+    signal,
+    timeoutMs: 30_000,
+  });
+  signal.throwIfAborted();
+  const signed = verification.exitCode === 0;
+  const signatureErrors = verification.stderr
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("ERROR: "));
+  // A missing JAR signature is expected for a Gradle release without signing.
+  const missingSignature =
+    verification.exitCode === 1 &&
+    /^DOES NOT VERIFY\r?$/m.test(verification.stderr) &&
+    signatureErrors.length === 1 &&
+    /^ERROR: (?:Missing META-INF\/MANIFEST\.MF|No JAR signatures)$/.test(
+      signatureErrors[0]!,
+    );
+  if (
+    verification.timedOut ||
+    verification.cancelled ||
+    verification.outputTruncated ||
+    (!signed && !missingSignature)
+  ) {
     throw new Error(
-      "APK signature verification failed. Configure Gradle to sign this variant.",
+      "APK signature verification failed. " +
+        (verification.stderr.trim() ||
+          verification.stdout.trim() ||
+          "Check the Android SDK Build Tools on the agent."),
     );
   }
   const [applicationId, versionName, versionCode, minSdk, manifest, files] =
@@ -310,6 +393,12 @@ async function apkMetadata(apk: string, signal: AbortSignal) {
       runTool(apkanalyzer, ["manifest", "print", apk], signal),
       runTool(apkanalyzer, ["files", "list", apk], signal),
     ]);
+  if (
+    !signed &&
+    /^\s*\/?META-INF\/[^/\r\n]+\.(?:SF|RSA|DSA|EC)\s*$/im.test(files)
+  ) {
+    throw new Error("APK has an incomplete JAR signature");
+  }
   if (
     /<manifest\b[^>]*\ssplit\s*=/s.test(manifest) ||
     /android:isSplitRequired\s*=\s*"true"/.test(manifest)
@@ -336,7 +425,7 @@ async function apkMetadata(apk: string, signal: AbortSignal) {
     versionCode,
     minSdk: /^\d+$/.test(minSdk) ? Number(minSdk) : null,
     abis,
-    signed: true,
+    signed,
   };
 }
 
@@ -346,8 +435,14 @@ async function captureAndroidApk(
   settings: ReturnType<typeof parseAndroidBuildSettings>,
   artifactDirectory: string,
   signal: AbortSignal,
+  apkOutputDirectory: string | null,
 ) {
-  const sourceApk = await findAndroidApk(root, project, settings);
+  const sourceApk = await findAndroidApk(
+    root,
+    project,
+    settings,
+    apkOutputDirectory,
+  );
   if (!(await stat(sourceApk)).isFile())
     throw new Error("APK output is not a file");
   const relativePath = "application.apk";
@@ -405,7 +500,9 @@ export const runAndroidBuild: AgentJobHandler = async (
   );
   if (!(await stat(gradlew)).isFile())
     throw new Error("The Gradle project must contain a gradlew wrapper script");
-  const { sdk, java } = androidTools();
+  const { sdk, hasWorkingJava } = androidTools();
+  const java = await hasWorkingJava(signal);
+  signal.throwIfAborted();
   if (!java) throw new Error("Configure a compatible JDK on the build agent");
   const hash = createHash("sha256")
     .update(settings.projectPath)
@@ -486,12 +583,20 @@ export const runAndroidBuild: AgentJobHandler = async (
   let errorCode: string | undefined;
   const artifacts: unknown[] = [];
   const scriptExecutions: Awaited<ReturnType<typeof runHook>>[] = [];
-  const hookInput = { buildId, artifactDirectory };
+  const { server, telemetry, endpointPaths } = input;
+  const hookInput = {
+    buildId,
+    artifactDirectory,
+    server,
+    telemetry,
+    endpointPaths,
+  };
   const hookContext = {
     buildId,
     platform: "ANDROID",
     action: "BUILD",
     branch: input.branch,
+    destination: ANDROID_BUILD_DESTINATION,
     worktree: {
       id: input.worktreeId,
       folder: root,
@@ -499,6 +604,9 @@ export const runAndroidBuild: AgentJobHandler = async (
       headSha: input.headSha,
     },
     configuration: settings,
+    server: server ?? null,
+    telemetry: telemetry ?? null,
+    endpointPaths: endpointPaths ?? null,
   };
   const runHooks = async (
     phase: "PRE_BUILD" | "POST_BUILD",
@@ -550,6 +658,8 @@ export const runAndroidBuild: AgentJobHandler = async (
       stateSignal,
     );
   let sourceStateHash: string | null | undefined;
+  let apkOutputDirectory: string | null = null;
+  let gradleStaging: string | undefined;
   try {
     sourceStateHash = await stateHash(signal);
     await onLog({
@@ -562,18 +672,29 @@ export const runAndroidBuild: AgentJobHandler = async (
     signal.throwIfAborted();
     if (error) throw new Error(error);
     await report("RUNNING");
+    const args = [
+      gradlew,
+      "--console=plain",
+      "--no-daemon",
+      "--project-cache-dir",
+      cache,
+    ];
+    const env = gradleEnvironment(sdk);
+    if (!settings.apkPath) {
+      gradleStaging = await mkdtemp(join(tmpdir(), "ade-gradle-apk-"));
+      const init = join(gradleStaging, "android-apk-output.gradle");
+      await writeFile(init, apkOutputInit, { mode: 0o600 });
+      // The init script reports the output while Gradle configures the variant.
+      args.push("--no-configuration-cache", "--init-script", init);
+      env.AIDE_ANDROID_BUILD_MODULE = settings.module;
+      env.AIDE_ANDROID_BUILD_VARIANT = settings.variant;
+      env.AIDE_ANDROID_APK_OUTPUT = join(gradleStaging, "apk-output.json");
+    }
     result = await runLoggedCommand({
       command: "sh",
-      args: [
-        gradlew,
-        "--console=plain",
-        "--no-daemon",
-        "--project-cache-dir",
-        cache,
-        androidAssembleTask(settings),
-      ],
+      args: [...args, androidAssembleTask(settings)],
       cwd: project,
-      env: gradleEnvironment(sdk),
+      env,
       timeoutMs,
       signal,
       logger,
@@ -587,6 +708,10 @@ export const runAndroidBuild: AgentJobHandler = async (
           : "GRADLE_BUILD_FAILED";
       error = cleanError(
         result.output || "Gradle did not complete successfully",
+      );
+    } else if (env.AIDE_ANDROID_APK_OUTPUT) {
+      apkOutputDirectory = await readApkOutputDirectory(
+        env.AIDE_ANDROID_APK_OUTPUT,
       );
     }
   } catch (failure) {
@@ -608,6 +733,7 @@ export const runAndroidBuild: AgentJobHandler = async (
               settings,
               artifactDirectory,
               signal,
+              apkOutputDirectory,
             ),
           );
         } catch (failure) {
@@ -618,6 +744,8 @@ export const runAndroidBuild: AgentJobHandler = async (
     } finally {
       if (error) logger.emit("BUILD", "SYSTEM", error);
       await logger.close();
+      if (gradleStaging)
+        await rm(gradleStaging, { recursive: true, force: true });
     }
   }
   const logChecksum = await fileChecksum(logPath);

@@ -54,12 +54,17 @@ export function fetchAndroidAppProject(
   ).then((data) => data.androidAppProject);
 }
 
-export function AndroidProjectSection({ codebaseId }: { codebaseId: string }) {
+export function AndroidProjectSection({
+  codebaseId,
+  repositoryId,
+}: {
+  codebaseId: string;
+  repositoryId: string;
+}) {
   const t = useTranslations("androidBuilds");
   const tc = useTranslations("common");
   const [project, setProject] = useState<AndroidAppProject | null>(null);
   const [loading, setLoading] = useState(Boolean(codebaseId));
-  const [discoveryWorktreeId, setDiscoveryWorktreeId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<
@@ -85,49 +90,6 @@ export function AndroidProjectSection({ codebaseId }: { codebaseId: string }) {
         setLoading(false);
       },
     );
-    void controlPlaneRequest<{
-      worktreeOverview: {
-        agents: Array<{
-          agent: { connectionStatus: string; capabilities: string[] };
-          codebases: Array<{
-            codebase: { id: string };
-            worktrees: Array<{
-              id: string;
-              primary: boolean;
-              availability: string;
-            }>;
-          }>;
-        }>;
-      };
-    }>(
-      `query AndroidDiscoveryCheckout {
-      worktreeOverview(savedOnly: true) { agents {
-        agent { connectionStatus capabilities }
-        codebases { codebase { id } worktrees { id primary availability } }
-      } }
-    }`,
-      undefined,
-      { signal: controller.signal },
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        const group = data.worktreeOverview.agents
-          .filter(
-            ({ agent }) =>
-              agent.connectionStatus === "ONLINE" &&
-              agent.capabilities.includes("android.source.discover") &&
-              agent.capabilities.includes("android.source.inspect"),
-          )
-          .flatMap(({ codebases }) => codebases)
-          .find(({ codebase }) => codebase.id === codebaseId);
-        const available = group?.worktrees.filter(
-          ({ availability }) => availability === "AVAILABLE",
-        );
-        setDiscoveryWorktreeId(
-          available?.find(({ primary }) => primary)?.id ?? available?.[0]?.id,
-        );
-      })
-      .catch(() => {});
     return () => controller.abort();
   }, [codebaseId]);
 
@@ -272,7 +234,7 @@ export function AndroidProjectSection({ codebaseId }: { codebaseId: string }) {
         <AndroidBuildConfigurationDialog
           codebaseId={codebaseId}
           configuration={editing}
-          discoveryWorktreeId={discoveryWorktreeId}
+          repositoryId={repositoryId}
           onClose={() => setEditing(undefined)}
           onSaved={(configuration) =>
             setProject((current) =>
@@ -315,15 +277,15 @@ export function AndroidProjectSection({ codebaseId }: { codebaseId: string }) {
 export function AndroidBuildConfigurationDialog({
   codebaseId,
   configuration,
-  discoveryWorktreeId,
   onClose,
   onSaved,
+  repositoryId,
 }: {
   codebaseId: string;
   configuration: AndroidBuildConfiguration | null;
-  discoveryWorktreeId?: string;
   onClose: () => void;
   onSaved: (configuration: AndroidBuildConfiguration) => void;
+  repositoryId: string;
 }) {
   const t = useTranslations("androidBuilds");
   const tc = useTranslations("common");
@@ -346,6 +308,78 @@ export function AndroidBuildConfigurationDialog({
     variants: string[];
   }> | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sourceWorktrees, setSourceWorktrees] = useState<{
+    repositoryId: string;
+    discoveryId?: string;
+    inspectionId?: string;
+  }>();
+  const { discoveryId, inspectionId } =
+    sourceWorktrees?.repositoryId === repositoryId ? sourceWorktrees : {};
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void controlPlaneRequest<{
+      worktreeOverview: {
+        agents: Array<{
+          agent: { connectionStatus: string; capabilities: string[] };
+          codebases: Array<{
+            repository: { id: string };
+            worktrees: Array<{
+              id: string;
+              primary: boolean;
+              availability: string;
+            }>;
+          }>;
+        }>;
+      };
+    }>(
+      `query AndroidDiscoveryCheckout {
+        worktreeOverview(savedOnly: true) { agents {
+          agent { connectionStatus capabilities }
+          codebases { repository { id } worktrees { id primary availability } }
+        } }
+      }`,
+      undefined,
+      { signal: controller.signal },
+    )
+      .then(({ worktreeOverview }) => {
+        if (controller.signal.aborted) return;
+        const checkouts = worktreeOverview.agents
+          .filter(({ agent }) => agent.connectionStatus === "ONLINE")
+          .flatMap(({ agent, codebases }) =>
+            codebases
+              .filter(({ repository }) => repository.id === repositoryId)
+              .flatMap(({ worktrees }) => {
+                const available = worktrees.filter(
+                  ({ availability }) => availability === "AVAILABLE",
+                );
+                const worktree =
+                  available.find(({ primary }) => primary) ?? available[0];
+                return worktree
+                  ? [{ id: worktree.id, capabilities: agent.capabilities }]
+                  : [];
+              }),
+          );
+        const inspection = checkouts.find(({ capabilities }) =>
+          capabilities.includes("android.source.inspect"),
+        );
+        const discovery = inspection?.capabilities.includes(
+          "android.source.discover",
+        )
+          ? inspection
+          : checkouts.find(({ capabilities }) =>
+              capabilities.includes("android.source.discover"),
+            );
+        setSourceWorktrees({
+          repositoryId,
+          discoveryId: discovery?.id,
+          inspectionId: inspection?.id,
+        });
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [repositoryId]);
+
   const fields = [
     "name",
     "projectPath",
@@ -361,7 +395,7 @@ export function AndroidBuildConfigurationDialog({
     : "";
 
   async function discover() {
-    if (!discoveryWorktreeId) return;
+    if (!discoveryId) return;
     setInspection("projects");
     setError(null);
     try {
@@ -369,7 +403,7 @@ export function AndroidBuildConfigurationDialog({
         discoverAndroidBuildSources: string[];
       }>(
         `mutation DiscoverAndroidBuildSources($worktreeId: ID!, $requestId: ID!) { discoverAndroidBuildSources(worktreeId: $worktreeId, requestId: $requestId) }`,
-        { worktreeId: discoveryWorktreeId, requestId: createClientId() },
+        { worktreeId: discoveryId, requestId: createClientId() },
       );
       const sources = data.discoverAndroidBuildSources;
       setProjects(sources);
@@ -385,7 +419,7 @@ export function AndroidBuildConfigurationDialog({
   }
 
   async function inspect() {
-    if (!discoveryWorktreeId || !values.projectPath.trim()) return;
+    if (!inspectionId || !values.projectPath.trim()) return;
     setInspection("modules");
     setError(null);
     try {
@@ -397,7 +431,7 @@ export function AndroidBuildConfigurationDialog({
       }>(
         `mutation InspectAndroidBuildSource($worktreeId: ID!, $projectPath: String!, $requestId: ID!) { inspectAndroidBuildSource(worktreeId: $worktreeId, projectPath: $projectPath, requestId: $requestId) { module variants } }`,
         {
-          worktreeId: discoveryWorktreeId,
+          worktreeId: inspectionId,
           projectPath: values.projectPath,
           requestId: createClientId(),
         },
@@ -477,31 +511,37 @@ export function AndroidBuildConfigurationDialog({
               />
             </div>
           ))}
-          {discoveryWorktreeId && (
+          {(discoveryId || inspectionId) && (
             <div className="space-y-2">
               <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={saving || inspection !== null}
-                  onClick={() => void discover()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {inspection === "projects" ? <Spinner /> : <Search />}{" "}
-                  {t("discoverProjects")}
-                </Button>
-                <Button
-                  disabled={
-                    saving || inspection !== null || !values.projectPath.trim()
-                  }
-                  onClick={() => void inspect()}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  {inspection === "modules" ? <Spinner /> : <Search />}{" "}
-                  {t("inspectModules")}
-                </Button>
+                {discoveryId && (
+                  <Button
+                    disabled={saving || inspection !== null}
+                    onClick={() => void discover()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {inspection === "projects" ? <Spinner /> : <Search />}{" "}
+                    {t("discoverProjects")}
+                  </Button>
+                )}
+                {inspectionId && (
+                  <Button
+                    disabled={
+                      saving ||
+                      inspection !== null ||
+                      !values.projectPath.trim()
+                    }
+                    onClick={() => void inspect()}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    {inspection === "modules" ? <Spinner /> : <Search />}{" "}
+                    {t("inspectModules")}
+                  </Button>
+                )}
               </div>
               {projects &&
                 (projects.length > 0 ? (

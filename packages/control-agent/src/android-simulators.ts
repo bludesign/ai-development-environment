@@ -1,7 +1,28 @@
 import { spawn } from "node:child_process";
-import { readFile, readdir, realpath } from "node:fs/promises";
+import { constants } from "node:fs";
+import {
+  copyFile,
+  cp,
+  link,
+  lstat,
+  mkdtemp,
+  open,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 
 import {
@@ -12,14 +33,24 @@ import {
   type SimulatorApp,
   type SimulatorDeviceType,
   type SimulatorRuntime,
-  simulatorCreatePayload,
+  type simulatorCreatePayload,
 } from "@ai-development-environment/agent-contract/simulators";
 
 import { androidTools } from "./android-tools.js";
 import { captureCommand } from "./capture-command.js";
 
 type CreateInput = ReturnType<typeof simulatorCreatePayload>;
-type Avd = Simulator & { serial: string | null };
+type AvdConfiguration = {
+  root: string;
+  folder: string;
+  registeredPath: string;
+  metadata: Map<string, string>;
+  config: Map<string, string>;
+};
+type Avd = Simulator & {
+  serial: string | null;
+  configuration: AvdConfiguration | null;
+};
 
 const completed = {
   exitCode: 0,
@@ -86,13 +117,14 @@ export async function runningAndroidAvds(
   return new Map(results.filter((result) => result !== null));
 }
 
-function avdHome(): string {
-  return resolve(
-    process.env.ANDROID_AVD_HOME ||
-      (process.env.ANDROID_USER_HOME
-        ? join(process.env.ANDROID_USER_HOME, "avd")
-        : join(homedir(), ".android", "avd")),
-  );
+function avdHomes(): string[] {
+  const { ANDROID_AVD_HOME, ANDROID_EMULATOR_HOME, ANDROID_USER_HOME } =
+    process.env;
+  const homes = [ANDROID_AVD_HOME ?? ""];
+  if (ANDROID_EMULATOR_HOME) homes.push(join(ANDROID_EMULATOR_HOME, "avd"));
+  if (ANDROID_USER_HOME) homes.push(join(ANDROID_USER_HOME, "avd"));
+  homes.push(join(homedir(), ".android", "avd"));
+  return [...new Set(homes.filter(Boolean).map((home) => resolve(home)))];
 }
 
 function ini(value: string): Map<string, string> {
@@ -110,17 +142,63 @@ function ini(value: string): Map<string, string> {
   return new Map(entries);
 }
 
-async function avdConfig(name: string) {
-  const root = await realpath(avdHome());
-  const expected = join(root, `${name}.avd`);
+function unavailablePath(error: NodeJS.ErrnoException) {
+  if (
+    ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "ELOOP"].includes(error.code ?? "")
+  )
+    return null;
+  throw error;
+}
+
+async function readAvdIni(path: string): Promise<Map<string, string> | null> {
+  const file = await open(
+    path,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+  ).catch(unavailablePath);
+  if (!file) return null;
   try {
-    const folder = await realpath(expected);
-    if (folder !== expected) return null;
-    const config = await readFile(join(folder, "config.ini"), "utf8");
-    return { folder, config: ini(config) };
-  } catch {
+    return (await file.stat()).isFile()
+      ? ini(await file.readFile("utf8"))
+      : null;
+  } catch (error) {
+    return unavailablePath(error as NodeJS.ErrnoException);
+  } finally {
+    await file.close();
+  }
+}
+
+async function avdConfig(name: string): Promise<AvdConfiguration | null> {
+  for (const home of avdHomes()) {
+    const root = await realpath(home).catch(unavailablePath);
+    if (!root) continue;
+    const registration = join(root, `${name}.ini`);
+    const entry = await lstat(registration).catch(unavailablePath);
+    if (!entry) continue;
+    if (!entry.isFile()) return null;
+    const metadata = await readAvdIni(registration);
+    if (!metadata) return null;
+    const relativePath = metadata.get("path.rel");
+    const absolutePath = metadata.get("path");
+    const candidates = [
+      relativePath && !isAbsolute(relativePath)
+        ? resolve(dirname(root), relativePath)
+        : null,
+      absolutePath && isAbsolute(absolutePath) ? absolutePath : null,
+    ];
+    for (const registeredPath of candidates) {
+      if (!registeredPath) continue;
+      const folder = await realpath(registeredPath).catch(unavailablePath);
+      if (
+        !folder ||
+        !(await stat(folder).catch(unavailablePath))?.isDirectory()
+      )
+        continue;
+      const config = await readAvdIni(join(folder, "config.ini"));
+      return config ? { root, folder, registeredPath, metadata, config } : null;
+    }
     return null;
   }
+  return null;
 }
 
 function imageFromConfig(config: Map<string, string> | undefined) {
@@ -222,12 +300,7 @@ async function devices(
     Array.from(names)
       .sort()
       .map(async (name) => {
-        const configuration = await avdConfig(name).catch(
-          (error: NodeJS.ErrnoException) => {
-            if (error.code === "ENOENT") return null;
-            throw error;
-          },
-        );
+        const configuration = await avdConfig(name);
         const runtimeId = imageFromConfig(configuration?.config);
         const runtime = runtimeList.find((item) => item.id === runtimeId);
         const serial = active.get(name) ?? null;
@@ -250,6 +323,7 @@ async function devices(
               : "Install the AVD system image for this Mac",
           dataPath: configuration?.folder ?? null,
           serial,
+          configuration,
         };
       }),
   );
@@ -267,7 +341,9 @@ export async function inventoryAndroidSimulators(signal: AbortSignal) {
   return {
     ...completed,
     inventory: {
-      simulators: avds.map(({ serial: _serial, ...avd }) => avd),
+      simulators: avds.map(
+        ({ serial: _serial, configuration: _configuration, ...avd }) => avd,
+      ),
       runtimes: runtimeList,
     },
   };
@@ -295,10 +371,11 @@ async function installedApps(
 }
 
 export async function inspectAndroidSimulator(id: string, signal: AbortSignal) {
-  const { serial, ...simulator } = findDevice(
-    await devices(await runtimes(signal), signal),
-    id,
-  );
+  const {
+    serial,
+    configuration: _configuration,
+    ...simulator
+  } = findDevice(await devices(await runtimes(signal), signal), id);
   return {
     ...completed,
     details: {
@@ -338,6 +415,165 @@ export async function createAndroidSimulator(
     "no\n",
   );
   return { ...completed, simulatorId: `android:${name}` };
+}
+
+function inside(folder: string, path: string) {
+  return (
+    path === folder || path.startsWith(folder === sep ? folder : folder + sep)
+  );
+}
+
+async function writeAvdIni(
+  path: string,
+  values: Map<string, string>,
+  flag = "w",
+) {
+  await writeFile(
+    path,
+    Array.from(values, ([key, value]) => `${key}=${value}\n`).join(""),
+    { flag, mode: 0o600 },
+  );
+}
+
+async function rebaseClonedImages(
+  source: string,
+  destination: string,
+  images: string[],
+  signal: AbortSignal,
+) {
+  const qemuImg = join(dirname(requireTool("emulator")), "qemu-img");
+  const imageInfo = async (file: string) =>
+    JSON.parse(
+      await command(qemuImg, ["info", "--output=json", file], signal),
+    ) as Record<string, unknown>;
+  for (const image of images) {
+    const copy = join(destination, relative(source, image));
+    const info = await imageInfo(copy);
+    const backing = info["backing-filename"];
+    if (typeof backing !== "string" || !backing) continue;
+    const backingPath = await realpath(resolve(dirname(image), backing));
+    const newBacking = inside(source, backingPath)
+      ? relative(dirname(image), backingPath)
+      : backingPath;
+    if (backing === newBacking) continue;
+    const format =
+      info["backing-filename-format"] ?? (await imageInfo(backingPath)).format;
+    if (typeof format !== "string")
+      throw new Error("Could not identify the AVD backing disk image format");
+    await command(
+      qemuImg,
+      ["rebase", "-u", "-f", "qcow2", "-b", newBacking, "-F", format, copy],
+      signal,
+    );
+  }
+}
+
+async function cloneAndroidSimulator(
+  avd: Avd,
+  name: string,
+  signal: AbortSignal,
+) {
+  const source = avd.configuration;
+  if (!source) throw new Error("The source AVD data folder is unavailable");
+  if (inside(source.folder, source.root))
+    throw new Error(
+      "The source AVD data folder contains its registration directory",
+    );
+
+  // Use a unique unregistered data directory so a failed copy cannot hide an
+  // existing AVD or prevent another attempt from registering the requested name.
+  const folder = await mkdtemp(join(source.root, `${name}.avd-`));
+  let registrationFolder: string | undefined;
+  let registered = false;
+  try {
+    const images: string[] = [];
+    await cp(source.folder, folder, {
+      recursive: true,
+      mode: constants.COPYFILE_FICLONE,
+      preserveTimestamps: true,
+      filter: async (path) => {
+        signal.throwIfAborted();
+        if (path !== source.folder && basename(path).endsWith(".lock"))
+          return false;
+        const entry = await lstat(path);
+        if (!entry.isDirectory() && !entry.isFile())
+          throw new Error(
+            `Cannot clone the AVD entry ${relative(source.folder, path)}`,
+          );
+        if (entry.isFile() && path.endsWith(".qcow2")) images.push(path);
+        return true;
+      },
+    });
+    await rebaseClonedImages(source.folder, folder, images, signal);
+
+    const sdCard = source.config.get("sdcard.path");
+    let clonedSdCard: string | undefined;
+    if (sdCard && isAbsolute(sdCard)) {
+      const path = await realpath(sdCard);
+      if (inside(source.folder, path)) {
+        clonedSdCard = join(folder, relative(source.folder, path));
+      } else {
+        if (!(await stat(path)).isFile())
+          throw new Error("The AVD SD card image is unavailable");
+        const storage = await mkdtemp(join(folder, "sdcard-"));
+        clonedSdCard = join(storage, "sdcard.img");
+        await copyFile(
+          path,
+          clonedSdCard,
+          constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE,
+        );
+      }
+    }
+
+    const config = new Map(source.config);
+    config.set("AvdId", name);
+    config.set("avd.ini.displayname", name);
+    const hardwarePath = join(folder, "hardware-qemu.ini");
+    const hardware = await readAvdIni(hardwarePath);
+    if (hardware?.has("avd.name")) hardware.set("avd.name", name);
+    if (hardware?.has("avd.id")) hardware.set("avd.id", name);
+    const configs = [
+      [join(folder, "config.ini"), config],
+      ...(hardware ? [[hardwarePath, hardware] as const] : []),
+    ] as const;
+    for (const [path, values] of configs) {
+      for (const [key, value] of values) {
+        if (clonedSdCard && value === sdCard) values.set(key, clonedSdCard);
+        else if (inside(source.registeredPath, value))
+          values.set(key, folder + value.slice(source.registeredPath.length));
+        else if (inside(source.folder, value))
+          values.set(key, folder + value.slice(source.folder.length));
+      }
+      await writeAvdIni(path, values);
+    }
+
+    if ((await runningAndroidAvds(signal)).has(avd.name))
+      throw new Error("Shut down the emulator before duplicating it");
+    const metadata = new Map(source.metadata);
+    metadata.set("path", folder);
+    metadata.delete("path.rel");
+    registrationFolder = await mkdtemp(join(folder, ".registration-"));
+    const tempRegistration = join(registrationFolder, `${name}.ini`);
+    await writeAvdIni(tempRegistration, metadata, "wx");
+    signal.throwIfAborted();
+    // Hard-linking publishes the complete registration without replacing a name
+    // registered by another process while the data was being copied.
+    await link(tempRegistration, join(source.root, `${name}.ini`)).catch(
+      (error: NodeJS.ErrnoException) => {
+        if (error.code === "EEXIST")
+          throw new Error(`An Android emulator named ${name} already exists`);
+        throw error;
+      },
+    );
+    registered = true;
+    return { ...completed, simulatorId: `android:${name}` };
+  } finally {
+    if (!registered) await rm(folder, { recursive: true, force: true });
+    else if (registrationFolder)
+      await rm(registrationFolder, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
+  }
 }
 
 export async function bootAndroidAvd(
@@ -413,10 +649,8 @@ export async function performAndroidSimulatorAction(
   input: SimulatorActionPayload,
   signal: AbortSignal,
 ) {
-  const avd = findDevice(
-    await devices(await runtimes(signal), signal),
-    input.simulatorId,
-  );
+  const avds = await devices(await runtimes(signal), signal);
+  const avd = findDevice(avds, input.simulatorId);
   const { name, serial } = avd;
   switch (input.action) {
     case "BOOT":
@@ -445,18 +679,18 @@ export async function performAndroidSimulatorAction(
           signal,
         );
       return { ...completed, simulatorId: `android:${input.name}` };
-    case "CLONE":
+    case "CLONE": {
       if (serial)
         throw new Error("Shut down the emulator before duplicating it");
-      return createAndroidSimulator(
-        simulatorCreatePayload({
-          platform: "ANDROID",
-          name: input.name,
-          runtimeId: avd.runtimeId,
-          deviceTypeId: avd.deviceTypeId,
-        }),
-        signal,
-      );
+      const copyName = androidAvdName(input.name);
+      if (
+        avds.some(
+          (entry) => entry.name.toLowerCase() === copyName.toLowerCase(),
+        )
+      )
+        throw new Error(`An Android emulator named ${copyName} already exists`);
+      return cloneAndroidSimulator(avd, copyName, signal);
+    }
     case "DELETE":
       if (serial) throw new Error("Shut down the emulator before deleting it");
       await command(

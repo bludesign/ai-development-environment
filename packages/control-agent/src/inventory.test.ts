@@ -1,5 +1,9 @@
-import { describe, expect, test } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, test, vi } from "vitest";
 
+import { androidTools } from "./android-tools.js";
 import {
   AGENT_CAPABILITIES,
   capabilitiesForPlatform,
@@ -8,8 +12,8 @@ import {
 } from "./inventory.js";
 
 describe("agent inventory", () => {
-  test("reports live hardware, memory, and disk inventory", () => {
-    const inventory = collectInventory();
+  test("reports live hardware, memory, and disk inventory", async () => {
+    const inventory = await collectInventory();
     expect(inventory.cpuModel.length).toBeGreaterThan(0);
     expect(inventory.memoryTotalBytes).toBeGreaterThan(0);
     expect(inventory.memoryFreeBytes).toBeGreaterThanOrEqual(0);
@@ -18,14 +22,14 @@ describe("agent inventory", () => {
     expect(inventory.defaultBuildsDirectory).toBeUndefined();
   });
 
-  test("advertises the ccusage report capability", () => {
+  test("advertises the ccusage report capability", async () => {
     expect(AGENT_CAPABILITIES).toContain("ccusage.report");
-    expect(collectInventory().capabilities).toContain("ccusage.report");
+    expect((await collectInventory()).capabilities).toContain("ccusage.report");
   });
 
-  test("advertises support for immediate codebase reconcile events", () => {
+  test("advertises support for immediate codebase reconcile events", async () => {
     expect(AGENT_CAPABILITIES).toContain("codebase.reconcile.requested");
-    expect(collectInventory().capabilities).toContain(
+    expect((await collectInventory()).capabilities).toContain(
       "codebase.reconcile.requested",
     );
   });
@@ -57,6 +61,28 @@ describe("agent inventory", () => {
       ]),
     );
   });
+
+  test.skipIf(process.platform === "win32")(
+    "rejects an executable Java launcher without a working runtime",
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "ade-android-java-"));
+      const bin = join(directory, "bin");
+      const java = join(bin, "java");
+      try {
+        await mkdir(bin);
+        vi.stubEnv("JAVA_HOME", undefined);
+        vi.stubEnv("PATH", bin);
+        await writeFile(java, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+        expect(await androidTools().hasWorkingJava()).toBe(false);
+
+        await writeFile(java, '#!/bin/sh\ntest "$1" = "-version"\n');
+        expect(await androidTools().hasWorkingJava()).toBe(true);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("advertises scoped execution only where process-group recovery is supported", () => {
     expect(capabilitiesForPlatform("darwin")).toContain(
