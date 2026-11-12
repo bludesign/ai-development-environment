@@ -1,15 +1,7 @@
 "use client";
 
 import type { BuildSigningRequirement } from "@ai-development-environment/agent-contract/builds";
-import {
-  CircleOff,
-  ChevronDown,
-  Hammer,
-  Plus,
-  RefreshCw,
-  Settings2,
-  Trash2,
-} from "lucide-react";
+import { Hammer, Plus, RefreshCw, Settings2, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -19,13 +11,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Dialog,
   DialogContent,
@@ -71,11 +56,9 @@ import {
   settingsForPlatform,
 } from "./types";
 import { BUILD_PLATFORM_CONFIGURATION_FIELDS } from "./graphql-fields";
+import { BuildConfigurationIconPicker } from "./build-icon-picker";
 import { CollectDsymsSelect } from "./collect-dsyms-select";
-import {
-  BUILD_CONFIGURATION_ICON_KEYS,
-  ConfigurationIcon,
-} from "./configuration-icon";
+import { ConfigurationIcon } from "./configuration-icon";
 import {
   DEFAULT_EXPORT_SETTINGS,
   ExportSettingsForm,
@@ -628,7 +611,7 @@ export function BuildConfigurationDialog({
 }) {
   const t = useTranslations("builds");
   const [name, setName] = useState(configuration?.name ?? "");
-  const [iconKey, setIconKey] = useState(configuration?.iconKey ?? "none");
+  const [iconKey, setIconKey] = useState(configuration?.iconKey ?? null);
   const [sources, setSources] = useState<SourceCandidate[]>([]);
   const [sourcePath, setSourcePath] = useState(
     configuration?.source.relativePath ?? "",
@@ -920,7 +903,7 @@ export function BuildConfigurationDialog({
             id: configuration?.id ?? null,
             codebaseId,
             name,
-            iconKey: iconKey === "none" ? null : iconKey,
+            iconKey,
             sourceKind,
             sourcePath,
             scheme,
@@ -1078,46 +1061,11 @@ export function BuildConfigurationDialog({
             </div>
             <div className="space-y-2">
               <Label htmlFor="configuration-icon">{t("icon")}</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    aria-label={`${t("icon")}: ${t(`configurationIcons.${iconKey}`)}`}
-                    className="justify-between"
-                    id="configuration-icon"
-                    type="button"
-                    variant="outline"
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      {iconKey === "none" ? (
-                        <CircleOff className="size-4 shrink-0" />
-                      ) : (
-                        <ConfigurationIcon iconKey={iconKey} />
-                      )}
-                      <span className="truncate">
-                        {t(`configurationIcons.${iconKey}`)}
-                      </span>
-                    </span>
-                    <ChevronDown className="text-muted-foreground" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-56">
-                  <DropdownMenuRadioGroup
-                    onValueChange={setIconKey}
-                    value={iconKey}
-                  >
-                    {["none", ...BUILD_CONFIGURATION_ICON_KEYS].map((value) => (
-                      <DropdownMenuRadioItem key={value} value={value}>
-                        {value === "none" ? (
-                          <CircleOff className="size-4" />
-                        ) : (
-                          <ConfigurationIcon iconKey={value} />
-                        )}
-                        {t(`configurationIcons.${value}`)}
-                      </DropdownMenuRadioItem>
-                    ))}
-                  </DropdownMenuRadioGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <BuildConfigurationIconPicker
+                id="configuration-icon"
+                value={iconKey}
+                onChange={setIconKey}
+              />
             </div>
           </div>
         )}

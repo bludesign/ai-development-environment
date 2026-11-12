@@ -199,6 +199,7 @@ export type BuildArtifact = {
 export type AndroidBuildConfiguration = {
   id: string;
   name: string;
+  iconKey: string | null;
   projectPath: string;
   module: string;
   variant: string;

@@ -12,6 +12,10 @@ import {
 } from "@/lib/refresh-coalescer";
 
 import {
+  ANDROID_BUILD_JOB_KIND,
+  IOS_BUILD_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
+import {
   Archive,
   ArrowDown,
   ArrowRight,
@@ -803,7 +807,7 @@ export function WorktreesPage({
             agents {
               agent { id name hostname capabilities baseRepoDirectory connectionStatus }
               codebases {
-                hasPreparations iosBuildConfigured androidBuildConfigured
+                hasPreparations iosBuildConfigured androidProjectEnabled androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
                 quickActions {
             id name description quickActionIconKey quickActionButtonVariant
@@ -890,6 +894,25 @@ export function WorktreesPage({
         complete: () => undefined,
       },
     );
+    const unsubscribeRepositorySettings = subscriptions.subscribe<{
+      codebaseOverviewChanged: {
+        codebaseId: string | null;
+        repositoryId: string | null;
+      };
+    }>(
+      {
+        query:
+          "subscription WorktreeRepositorySettingsChanged { codebaseOverviewChanged { codebaseId repositoryId } }",
+      },
+      {
+        next: (value) => {
+          const change = value.data?.codebaseOverviewChanged;
+          if (change?.repositoryId && change.codebaseId === null) void load();
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     const unsubscribeWorkflows = subscriptions.subscribe(
       {
         query:
@@ -915,6 +938,7 @@ export function WorktreesPage({
       latestLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
+      unsubscribeRepositorySettings();
       unsubscribeWorkflows();
     };
   }, [load, appId]);
@@ -3822,27 +3846,47 @@ export function PrimaryWorktreeActions(
       (codebase) => codebase.codebase.id === props.group.codebase.id,
     ),
   )?.agent;
-  const appleSupported = agent?.capabilities.includes("ios.build.run") ?? false;
+  const appleSupported =
+    agent?.capabilities.includes(IOS_BUILD_JOB_KIND) ?? false;
   const androidSupported =
-    agent?.capabilities.includes("android.build.run") ?? false;
+    agent?.capabilities.includes(ANDROID_BUILD_JOB_KIND) ?? false;
   const appleEnabled =
     appleSupported && props.group.iosBuildConfigured !== false;
-  const androidEnabled =
-    androidSupported && props.group.androidBuildConfigured === true;
+  const androidConfigured = props.group.androidBuildConfigured === true;
+  const androidEnabled = androidSupported && androidConfigured;
+  const androidSettings =
+    props.group.androidProjectEnabled ||
+    androidConfigured ||
+    (androidSupported && !appleSupported);
+  const online = agent?.connectionStatus === "ONLINE";
+  const worktreeAvailable = worktree.availability === "AVAILABLE";
+  const buildReady = appleEnabled || androidEnabled;
   const buildDisabledForSettings =
-    agent?.connectionStatus === "ONLINE" &&
-    (appleSupported || androidSupported) &&
-    !appleEnabled &&
-    !androidEnabled;
-  const buildUnavailable =
-    worktree.availability !== "AVAILABLE" ||
-    !agent ||
-    agent.connectionStatus !== "ONLINE" ||
-    (!appleEnabled && !androidEnabled);
-  const runUnavailable =
-    worktree.availability !== "AVAILABLE" ||
-    !agent ||
-    agent.connectionStatus !== "ONLINE";
+    online &&
+    worktreeAvailable &&
+    !buildReady &&
+    (androidSettings || appleSupported);
+  const runUnavailable = !worktreeAvailable || !online;
+  let disabledReason: string | null = null;
+  if (!online) {
+    disabledReason = t("agentOffline");
+  } else if (!worktreeAvailable) {
+    disabledReason = t("worktreeUnavailable");
+  } else if (!buildReady) {
+    if (androidSettings) {
+      disabledReason = t(
+        androidConfigured
+          ? "androidBuildToolchainUnavailable"
+          : "androidBuildNotConfigured",
+      );
+    } else if (appleSupported) {
+      disabledReason = t(
+        androidSupported ? "mobileBuildNotConfigured" : "iosBuildNotConfigured",
+      );
+    } else {
+      disabledReason = t("agentUnsupported");
+    }
+  }
   return (
     <div className="flex flex-wrap gap-2">
       {props.includeReviewers !== false && (
@@ -3856,26 +3900,12 @@ export function PrimaryWorktreeActions(
         appleEnabled={appleEnabled}
         buildSettingsHref={
           buildDisabledForSettings
-            ? `/dashboard/codebases/repositories/${props.group.repository.id}`
+            ? `/dashboard/codebases/repositories/${props.group.repository.id}${androidSettings ? "?tab=android-app" : ""}`
             : undefined
         }
         codebaseId={props.group.codebase.id}
-        disabled={buildUnavailable}
-        disabledReason={
-          !agent || agent.connectionStatus !== "ONLINE"
-            ? t("agentOffline")
-            : !appleSupported && !androidSupported
-              ? t("agentUnsupported")
-              : !appleEnabled && !androidEnabled
-                ? t(
-                    androidSupported
-                      ? "mobileBuildNotConfigured"
-                      : "iosBuildNotConfigured",
-                  )
-                : worktree.availability !== "AVAILABLE"
-                  ? t("worktreeUnavailable")
-                  : null
-        }
+        disabled={runUnavailable || !buildReady}
+        disabledReason={disabledReason}
         onStarted={() => void props.onCompleted()}
         worktreeId={worktree.id}
       />

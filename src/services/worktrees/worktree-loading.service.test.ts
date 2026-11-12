@@ -212,6 +212,47 @@ test("saved-only overview reads saved pipeline and Jira data without any externa
   );
 });
 
+test.each([
+  { configurations: null, enabled: false, configured: false },
+  { configurations: [], enabled: true, configured: false },
+  {
+    configurations: [{ id: "android-config-1" }],
+    enabled: true,
+    configured: true,
+  },
+])(
+  "reports Android project and build readiness separately with configurations $configurations",
+  async ({ configurations, enabled, configured }) => {
+    const worktree = row();
+    findMany.mockResolvedValue([
+      {
+        ...worktree,
+        codebase: {
+          ...worktree.codebase,
+          repository: {
+            ...worktree.codebase.repository,
+            projects:
+              configurations === null
+                ? []
+                : [
+                    {
+                      type: "ANDROID_APP",
+                      androidConfigurations: configurations,
+                    },
+                  ],
+          },
+        },
+      },
+    ]);
+
+    const overview = await service().overview(undefined, undefined, true);
+    expect(overview.agents[0]!.codebases[0]).toMatchObject({
+      androidProjectEnabled: enabled,
+      androidBuildConfigured: configured,
+    });
+  },
+);
+
 test("a blocked GitLab pipeline read does not block saved data or Jira enrichment", async () => {
   const gate = Promise.withResolvers<[]>();
   gitlab.pipelinesForCommit.mockReturnValue(gate.promise);

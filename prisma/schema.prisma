@@ -1713,6 +1713,7 @@ model AndroidBuildConfiguration {
   id          String          @id
   projectId   String
   name        String
+  iconKey     String?
   projectPath String
   module      String
   variant     String

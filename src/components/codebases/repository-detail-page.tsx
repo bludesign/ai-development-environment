@@ -7,9 +7,18 @@ import {
 
 import { ArrowLeft, FolderGit2, Save } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 
 import { AGENT_FIELDS, JOB_FIELDS } from "@/components/agents/graphql-fields";
+import type { Agent } from "@/components/agents/types";
+import { ANDROID_BUILD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { IosProjectSection } from "@/components/builds/ios-project-section";
 import { AndroidProjectSection } from "@/components/builds/android-project-section";
 import { RepositoryTransferActions } from "@/components/repository-transfer/transfer-actions";
@@ -53,6 +62,8 @@ import type { CodebaseRepository } from "./types";
 import { ExternalPipelineActionsSettings } from "./external-pipeline-actions";
 import { RepositoryPreparations } from "./repository-preparations";
 
+type BuildAgentState = Pick<Agent, "id" | "capabilities" | "connectionStatus">;
+
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt
   preparations @include(if: $includePreparations) { id kind path contentSha256 byteCount contentBase64 definitionHash }
@@ -67,8 +78,10 @@ const REPOSITORY_FIELDS = `
 `;
 
 export function RepositoryDetailPage({
+  initialTab = "details",
   repositoryId,
 }: {
+  initialTab?: "details" | "android-app";
   repositoryId: string;
 }) {
   const t = useTranslations("codebases");
@@ -86,7 +99,7 @@ export function RepositoryDetailPage({
     Array<{ id: string; name: string }>
   >([]);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState("details");
+  const [tab, setTab] = useState<string>(initialTab);
   const groupsRevision = useRef(0);
   const groupsLoadedRevision = useRef(-1);
   const loadOwner = useRef<RefreshCoalescer | null>(null);
@@ -139,6 +152,21 @@ export function RepositoryDetailPage({
     () => loadOwner.current?.refresh() ?? Promise.resolve(),
     [],
   );
+  const refreshBuildReadiness = useEffectEvent((changed: BuildAgentState) => {
+    const agent = repository?.codebases.find(
+      (codebase) => codebase.agent.id === changed.id,
+    )?.agent;
+    if (
+      loading ||
+      (agent &&
+        (agent.connectionStatus !== changed.connectionStatus ||
+          agent.capabilities.includes(ANDROID_BUILD_JOB_KIND) !==
+            changed.capabilities.includes(ANDROID_BUILD_JOB_KIND)))
+    ) {
+      void load();
+    }
+  });
+
   const fetchDetail = useCallback(
     async (signal: AbortSignal) => {
       const groupsVersion = groupsRevision.current;
@@ -224,6 +252,33 @@ export function RepositoryDetailPage({
     };
   }, [fetchDetail, load, repositoryId]);
 
+  useEffect(() => {
+    if (tab !== "android-app") return;
+    // An expired heartbeat changes connection status without emitting an event.
+    const poll = window.setInterval(() => void load(), 30_000);
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      agentChanged: BuildAgentState;
+    }>(
+      {
+        query: `subscription RepositoryBuildAgentChanged {
+          agentChanged { id capabilities connectionStatus }
+        }`,
+      },
+      {
+        next: (value) => {
+          const changed = value.data?.agentChanged;
+          if (changed) refreshBuildReadiness(changed);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    return () => {
+      window.clearInterval(poll);
+      unsubscribe();
+    };
+  }, [load, repositoryId, tab]);
+
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!repository) return;
@@ -297,6 +352,14 @@ export function RepositoryDetailPage({
     available:
       codebase.agent.connectionStatus === "ONLINE" &&
       codebase.availability === "AVAILABLE",
+    androidBuildStatus:
+      codebase.agent.connectionStatus !== "ONLINE"
+        ? ("offline" as const)
+        : !codebase.agent.capabilities.includes(ANDROID_BUILD_JOB_KIND)
+          ? ("missingTools" as const)
+          : codebase.availability !== "AVAILABLE"
+            ? ("unavailable" as const)
+            : ("ready" as const),
   }));
   const hasUnsavedChanges =
     preparationsDirty ||
@@ -517,6 +580,7 @@ export function RepositoryDetailPage({
         </TabsContent>
         <TabsContent value="android-app">
           <AndroidProjectSection
+            checkouts={checkouts}
             repositoryId={repositoryId}
             codebaseId={
               checkouts.find((checkout) => checkout.available)?.codebaseId ??

@@ -13,7 +13,11 @@ export function buildDestinationState(
       | "unavailable",
   ) => string,
 ): string {
-  switch (destination.state?.trim().toLowerCase()) {
+  const state = destination.state?.trim().toLowerCase();
+  if (destination.platformId === "ANDROID" && state === "device") {
+    return translate("connected");
+  }
+  switch (state) {
     case "connected":
       return translate("connected");
     case "available (paired)":

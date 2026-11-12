@@ -296,6 +296,8 @@ type AndroidBuildConfiguration {
   repository: CodebaseRepository!
   "Display name."
   name: String!
+  "Optional build configuration icon."
+  iconKey: String
   "Worktree-relative directory containing the Gradle wrapper."
   projectPath: String!
   "Gradle application module path."
@@ -314,6 +316,8 @@ input SaveAndroidBuildConfigurationInput {
   codebaseId: ID!
   "Display name of the build configuration."
   name: String!
+  "Icon from the build configuration icon library. Omit to keep the existing icon or set null to clear it."
+  iconKey: String
   "Worktree-relative directory containing the Gradle wrapper."
   projectPath: String!
   "Gradle path of the Android application module."

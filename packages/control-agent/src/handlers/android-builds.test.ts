@@ -18,14 +18,20 @@ import {
   parseAndroidBuildSettings,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
+import { bootAndroidAvd } from "../android-simulators.js";
 import { androidTools } from "../android-tools.js";
 import {
   adbDevices,
+  deployAndroidBuild,
   findAndroidApk,
   parseAndroidVariants,
   runAndroidBuild,
 } from "./android-builds.js";
 
+vi.mock("../android-simulators.js", () => ({
+  bootAndroidAvd: vi.fn(),
+  runningAndroidAvds: vi.fn(),
+}));
 vi.mock("../android-tools.js", () => ({ androidTools: vi.fn() }));
 
 let root: string;
@@ -288,4 +294,137 @@ test("returns discovered Gradle variants and excludes emulators from connected d
     { id: "123", available: false, state: "unauthorized" },
     { id: "456", available: true, name: "Pixel 8" },
   ]);
+});
+
+test("boots an emulator and installs and launches on both authorized targets", async () => {
+  const buildId = "android-deploy";
+  const artifactDirectory = join(root, buildId);
+  const apk = join(artifactDirectory, "application.apk");
+  await mkdir(artifactDirectory);
+  await writeFile(apk, "test apk");
+  const adb = join(root, "adb");
+  await writeFile(
+    adb,
+    `#!/bin/sh
+set -eu
+printf '%s\n' "$*" >> "$0.commands"
+test "$1" = -s
+case "$3:\${4-}:\${5-}" in
+  get-state::)
+    if [ "$2" = DEVICE-UNAUTHORIZED ]; then
+      printf '%s\n' 'device unauthorized' >&2
+      exit 1
+    fi
+    printf '%s\n' device ;;
+  shell:getprop:ro.build.version.sdk) printf '%s\n' 35 ;;
+  shell:getprop:ro.product.cpu.abilist) printf '%s\n' arm64-v8a,armeabi-v7a ;;
+  install:-r:*) printf '%s\n' Success ;;
+  shell:cmd:package) printf '%s\n' example.android/.MainActivity ;;
+  shell:am:start) printf '%s\n' 'Status: ok' ;;
+  *) exit 1 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  vi.mocked(bootAndroidAvd).mockResolvedValueOnce("emulator-5554");
+  vi.mocked(androidTools).mockReturnValue({
+    sdk: root,
+    hasWorkingJava: async () => true,
+    adb,
+    emulator: undefined,
+    avdmanager: undefined,
+    sdkmanager: undefined,
+    apksigner: undefined,
+    apkanalyzer: undefined,
+  });
+  const report = vi.fn(async () => undefined);
+  const signal = new AbortController().signal;
+  const result = await deployAndroidBuild(
+    {
+      codebaseId: "codebase",
+      buildId,
+      artifactDirectory,
+      artifactRelativePath: "application.apk",
+      applicationId: "example.android",
+      checksum: createHash("sha256").update("test apk").digest("hex"),
+      minSdk: 29,
+      abis: ["arm64-v8a"],
+      deployments: [
+        {
+          id: "emulator",
+          destination: {
+            type: "SIMULATOR",
+            id: "android:Pixel_API_35",
+            name: "Pixel API 35",
+            platform: "Android",
+            platformId: "ANDROID",
+            state: "Shutdown",
+            osVersion: null,
+          },
+        },
+        {
+          id: "physical",
+          destination: {
+            type: "PHYSICAL_DEVICE",
+            id: "DEVICE-1",
+            name: "Pixel 8",
+            platform: "Android",
+            platformId: "ANDROID",
+            state: "device",
+            osVersion: null,
+          },
+        },
+        {
+          id: "unauthorized",
+          destination: {
+            type: "PHYSICAL_DEVICE",
+            id: "DEVICE-UNAUTHORIZED",
+            name: "Pixel 9",
+            platform: "Android",
+            platformId: "ANDROID",
+            state: "device",
+            osVersion: null,
+          },
+        },
+      ],
+    },
+    20_000,
+    signal,
+    async () => undefined,
+    {
+      agentId: "agent",
+      reportWorktreeActivity: async () => undefined,
+      reportBuildDeploymentLaunched: report,
+    },
+  );
+  expect(bootAndroidAvd).toHaveBeenCalledExactlyOnceWith(
+    "Pixel_API_35",
+    signal,
+  );
+  expect(result).toMatchObject({
+    exitCode: 1,
+    deployments: [
+      { id: "emulator", status: "SUCCEEDED" },
+      { id: "physical", status: "SUCCEEDED" },
+      { id: "unauthorized", status: "FAILED", error: "device unauthorized" },
+    ],
+  });
+  expect(report.mock.calls).toEqual([
+    ["emulator", expect.any(String)],
+    ["physical", expect.any(String)],
+  ]);
+  const commands = (await readFile(`${adb}.commands`, "utf8"))
+    .trim()
+    .split("\n");
+  expect(commands.filter((command) => command.includes("install -r"))).toEqual([
+    `-s emulator-5554 install -r ${apk}`,
+    `-s DEVICE-1 install -r ${apk}`,
+  ]);
+  expect(commands.filter((command) => command.includes("am start"))).toEqual([
+    "-s emulator-5554 shell am start -W -n 'example.android/.MainActivity'",
+    "-s DEVICE-1 shell am start -W -n 'example.android/.MainActivity'",
+  ]);
+  expect(
+    commands.filter((command) => command.includes("DEVICE-UNAUTHORIZED")),
+  ).toEqual(["-s DEVICE-UNAUTHORIZED get-state"]);
 });

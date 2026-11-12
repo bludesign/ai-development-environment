@@ -1122,6 +1122,122 @@ export function registerWorktreesPageTests(
     }
 
     if (section === "cards") {
+      test("updates Android build availability when the first configuration is saved or the last is deleted", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const { agent, codebases } = response.worktreeOverview.agents[0]!;
+        const group = codebases[0]!;
+        agent.capabilities.push("android.build.run");
+        group.androidProjectEnabled = true;
+        group.androidBuildConfigured = false;
+        group.worktrees[0]!.latestBuild = null;
+
+        let settingsSink: { next: (value: unknown) => void } | undefined;
+        subscriptions.mockReturnValue({
+          subscribe: vi.fn(
+            (
+              operation: { query: string },
+              sink: { next: (value: unknown) => void },
+            ) => {
+              if (operation.query.includes("WorktreeRepositorySettingsChanged"))
+                settingsSink = sink;
+              return vi.fn();
+            },
+          ),
+        } as never);
+        request.mockImplementation(async (query) => {
+          if (query.includes("query AndroidAppProject")) {
+            return {
+              androidAppProject: {
+                id: "project-1",
+                androidConfigurations: [
+                  {
+                    id: "android-config-1",
+                    name: "Android QA",
+                    projectPath: "android",
+                    module: ":app",
+                    variant: "qaDebug",
+                  },
+                ],
+              },
+            } as never;
+          }
+          return structuredClone(response) as never;
+        });
+
+        const buildButton = () => screen.getByRole("button", { name: "Build" });
+        const changeSettings = (configured: boolean) => {
+          group.androidBuildConfigured = configured;
+          settingsSink!.next({
+            data: {
+              codebaseOverviewChanged: {
+                codebaseId: null,
+                repositoryId: group.repository.id,
+              },
+            },
+          });
+        };
+        render(<WorktreesPage />);
+        expect(
+          (await screen.findByRole("button", { name: "Build" })).getAttribute(
+            "aria-disabled",
+          ),
+        ).toBe("true");
+        fireEvent.click(buildButton());
+        expect(
+          (
+            await screen.findByRole("link", { name: /configure builds/i })
+          ).getAttribute("href"),
+        ).toBe(
+          "/dashboard/codebases/repositories/repository-1?tab=android-app",
+        );
+
+        changeSettings(true);
+        await waitFor(() =>
+          expect(buildButton().getAttribute("aria-disabled")).toBeNull(),
+        );
+        fireEvent.click(buildButton());
+        expect(
+          await screen.findByRole("dialog", { name: "Start Android build" }),
+        ).toBeDefined();
+        expect(await screen.findByText("Android QA")).toBeDefined();
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+        changeSettings(false);
+        await waitFor(() =>
+          expect(buildButton().getAttribute("aria-disabled")).toBe("true"),
+        );
+      });
+
+      test("links to Android setup when the worktree agent lacks build tooling", async () => {
+        const response = (await request("query Fixture")) as unknown as {
+          worktreeOverview: WorktreeOverview;
+        };
+        const { agent, codebases } = response.worktreeOverview.agents[0]!;
+        const group = codebases[0]!;
+        agent.capabilities.push("ios.build.run");
+        group.iosBuildConfigured = false;
+        group.androidProjectEnabled = true;
+        group.androidBuildConfigured = true;
+        group.worktrees[0]!.latestBuild = null;
+
+        render(<WorktreesPage />);
+        const button = await screen.findByRole("button", { name: "Build" });
+        expect(button.getAttribute("aria-disabled")).toBe("true");
+        expect(button.getAttribute("title")).toContain(
+          "Android SDK Build Tools",
+        );
+        fireEvent.click(button);
+        expect(
+          (
+            await screen.findByRole("link", { name: /configure builds/i })
+          ).getAttribute("href"),
+        ).toBe(
+          "/dashboard/codebases/repositories/repository-1?tab=android-app",
+        );
+      });
+
       test.each(
         ["cards", "table"].flatMap((layout) =>
           ["agent", "repository"].map((groupBy) => ({ layout, groupBy })),

@@ -112,9 +112,7 @@ export function BuildConfigurations() {
             <Card className="h-full hover:bg-muted/40">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <ConfigurationIcon
-                    iconKey={"iconKey" in item ? item.iconKey : null}
-                  />
+                  <ConfigurationIcon iconKey={item.iconKey} />
                   {item.name}
                 </CardTitle>
               </CardHeader>
@@ -270,7 +268,8 @@ export function BuildConfigurationDetail({
         <>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 className="flex items-center gap-2 text-2xl font-semibold">
-              <ConfigurationIcon iconKey={null} /> {configuration.name}
+              <ConfigurationIcon iconKey={configuration.iconKey} />
+              {configuration.name}
             </h1>
             <Button disabled={!checkout} onClick={() => setEditing(true)}>
               <Pencil /> {androidT("editConfiguration")}

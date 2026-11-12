@@ -2,11 +2,18 @@ import { RepositoryDetailPage } from "@/components/codebases/repository-detail-p
 
 export default async function RepositoryDetailRoute({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string; repositoryId: string }>;
+  searchParams: Promise<{ tab?: string | string[] }>;
 }) {
-  const { repositoryId } = await params;
+  const [{ repositoryId }, { tab }] = await Promise.all([params, searchParams]);
+  const initialTab = tab === "android-app" ? "android-app" : "details";
   return (
-    <RepositoryDetailPage repositoryId={repositoryId} key={repositoryId} />
+    <RepositoryDetailPage
+      initialTab={initialTab}
+      repositoryId={repositoryId}
+      key={`${repositoryId}:${initialTab}`}
+    />
   );
 }

@@ -1,11 +1,17 @@
 "use client";
 
+import {
+  ANDROID_BUILD_JOB_KIND,
+  ANDROID_SOURCE_DISCOVER_JOB_KIND,
+  ANDROID_SOURCE_INSPECT_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
 import { Hammer, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { ConfirmationDialog } from "@/components/confirmation-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,6 +36,8 @@ import { Link } from "@/i18n/navigation";
 import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
+import { BuildConfigurationIconPicker } from "./build-icon-picker";
+import { ConfigurationIcon } from "./configuration-icon";
 import { ANDROID_BUILD_CONFIGURATION_FIELDS } from "./graphql-fields";
 import type { AndroidBuildConfiguration } from "./types";
 
@@ -39,6 +47,12 @@ export type AndroidAppProject = {
   allowedScripts?: Array<{
     script: { id: string; name: string; enabledByDefault: boolean };
   }>;
+};
+
+type AndroidBuildCheckout = {
+  codebaseId: string;
+  label: string;
+  androidBuildStatus: "ready" | "offline" | "unavailable" | "missingTools";
 };
 
 const ANDROID_APP_PROJECT_FIELDS = `id androidConfigurations { ${ANDROID_BUILD_CONFIGURATION_FIELDS} } allowedScripts { script { id name enabledByDefault } }`;
@@ -55,9 +69,11 @@ export function fetchAndroidAppProject(
 }
 
 export function AndroidProjectSection({
+  checkouts,
   codebaseId,
   repositoryId,
 }: {
+  checkouts: AndroidBuildCheckout[];
   codebaseId: string;
   repositoryId: string;
 }) {
@@ -169,9 +185,12 @@ export function AndroidProjectSection({
         ) : (
           <>
             {project.androidConfigurations.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                {t("noConfigurations")}
-              </p>
+              <div className="space-y-1 text-sm">
+                <p>{t("noConfigurations")}</p>
+                <p className="text-muted-foreground">
+                  {t("configurationEnablesBuilds")}
+                </p>
+              </div>
             )}
             <ul className="divide-y">
               {project.androidConfigurations.map((item) => (
@@ -181,10 +200,10 @@ export function AndroidProjectSection({
                 >
                   <div className="min-w-0">
                     <Link
-                      className="font-medium hover:underline"
+                      className="flex items-center gap-2 font-medium hover:underline"
                       href={`/dashboard/builds/configurations/${item.id}`}
                     >
-                      {item.name}
+                      <ConfigurationIcon iconKey={item.iconKey} /> {item.name}
                     </Link>
                     <p className="break-all font-mono text-xs text-muted-foreground">
                       {item.projectPath} · {item.module} · {item.variant}
@@ -228,6 +247,35 @@ export function AndroidProjectSection({
               </Button>
             </div>
           </>
+        )}
+        {checkouts.length > 0 && (
+          <section className="space-y-2 border-t pt-4">
+            <h3 className="text-sm font-medium">{t("buildAgents")}</h3>
+            <ul className="space-y-2">
+              {checkouts.map(({ codebaseId, label, androidBuildStatus }) => (
+                <li
+                  className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                  key={codebaseId}
+                >
+                  <span className="break-all">{label}</span>
+                  <Badge
+                    variant={
+                      androidBuildStatus === "ready" ? "success" : "secondary"
+                    }
+                  >
+                    {t(`agentStatus.${androidBuildStatus}`)}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+            {checkouts.some(
+              ({ androidBuildStatus }) => androidBuildStatus === "missingTools",
+            ) && (
+              <p className="text-sm text-muted-foreground">
+                {t("buildRequirements")}
+              </p>
+            )}
+          </section>
         )}
       </CardContent>
       {editing !== undefined && (
@@ -293,28 +341,63 @@ export function AndroidBuildConfigurationDialog({
   const id = useId();
   const [values, setValues] = useState({
     name: configuration?.name ?? "",
+    iconKey: configuration?.iconKey ?? null,
     projectPath: configuration?.projectPath ?? ".",
     module: configuration?.module ?? ":app",
     variant: configuration?.variant ?? "debug",
     apkPath: configuration?.apkPath ?? "",
   });
+  const projectPathEdited = useRef(false);
   const [saving, setSaving] = useState(false);
-  const [inspection, setInspection] = useState<"projects" | "modules" | null>(
-    null,
-  );
+  const [discovering, setDiscovering] = useState(false);
+  const [inspecting, setInspecting] = useState(false);
   const [projects, setProjects] = useState<string[] | null>(null);
-  const [modules, setModules] = useState<Array<{
-    module: string;
-    variants: string[];
-  }> | null>(null);
+  const [modules, setModules] = useState<{
+    projectPath: string;
+    entries: Array<{ module: string; variants: string[] }>;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   const [sourceWorktrees, setSourceWorktrees] = useState<{
     repositoryId: string;
     discoveryId?: string;
     inspectionId?: string;
   }>();
-  const { discoveryId, inspectionId } =
-    sourceWorktrees?.repositoryId === repositoryId ? sourceWorktrees : {};
+  const sourceCheckout =
+    sourceWorktrees?.repositoryId === repositoryId ? sourceWorktrees : null;
+  const { discoveryId, inspectionId } = sourceCheckout ?? {};
+  const creating = configuration === null;
+
+  const discover = useCallback(
+    async (worktreeId: string, signal?: AbortSignal) => {
+      setDiscovering(true);
+      setProjects(null);
+      setSourceError(null);
+      try {
+        const { discoverAndroidBuildSources: sources } =
+          await controlPlaneRequest<{ discoverAndroidBuildSources: string[] }>(
+            `mutation DiscoverAndroidBuildSources($worktreeId: ID!, $requestId: ID!) { discoverAndroidBuildSources(worktreeId: $worktreeId, requestId: $requestId) }`,
+            { worktreeId, requestId: createClientId() },
+            { signal },
+          );
+        if (signal?.aborted) return;
+        setProjects(sources);
+        if (creating && !projectPathEdited.current && sources.length === 1) {
+          const [projectPath] = sources;
+          setValues((current) =>
+            current.projectPath === "."
+              ? { ...current, projectPath: projectPath! }
+              : current,
+          );
+        }
+      } catch (value) {
+        if (!signal?.aborted) setSourceError(String(value));
+      } finally {
+        if (!signal?.aborted) setDiscovering(false);
+      }
+    },
+    [creating],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -360,68 +443,50 @@ export function AndroidBuildConfigurationDialog({
                   : [];
               }),
           );
-        const inspection = checkouts.find(({ capabilities }) =>
-          capabilities.includes("android.source.inspect"),
+        const inspectableCheckouts = checkouts.filter(({ capabilities }) =>
+          capabilities.includes(ANDROID_SOURCE_INSPECT_JOB_KIND),
         );
+        const inspection =
+          inspectableCheckouts.find(({ capabilities }) =>
+            capabilities.includes(ANDROID_BUILD_JOB_KIND),
+          ) ?? inspectableCheckouts[0];
         const discovery = inspection?.capabilities.includes(
-          "android.source.discover",
+          ANDROID_SOURCE_DISCOVER_JOB_KIND,
         )
           ? inspection
           : checkouts.find(({ capabilities }) =>
-              capabilities.includes("android.source.discover"),
+              capabilities.includes(ANDROID_SOURCE_DISCOVER_JOB_KIND),
             );
         setSourceWorktrees({
           repositoryId,
           discoveryId: discovery?.id,
           inspectionId: inspection?.id,
         });
+        if (discovery) void discover(discovery.id, controller.signal);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setSourceWorktrees({ repositoryId });
+      });
     return () => controller.abort();
-  }, [repositoryId]);
+  }, [discover, repositoryId]);
 
-  const fields = [
-    "name",
-    "projectPath",
-    "module",
-    "variant",
-    "apkPath",
-  ] as const;
-  const inspectedSelection = modules?.some(
-    ({ module, variants }) =>
-      module === values.module && variants.includes(values.variant),
-  )
-    ? JSON.stringify([values.module, values.variant])
-    : "";
+  const inspectedModules =
+    modules?.projectPath === values.projectPath ? modules.entries : null;
+  const inspectedVariants = inspectedModules?.find(
+    ({ module }) => module === values.module,
+  )?.variants;
 
-  async function discover() {
-    if (!discoveryId) return;
-    setInspection("projects");
-    setError(null);
-    try {
-      const data = await controlPlaneRequest<{
-        discoverAndroidBuildSources: string[];
-      }>(
-        `mutation DiscoverAndroidBuildSources($worktreeId: ID!, $requestId: ID!) { discoverAndroidBuildSources(worktreeId: $worktreeId, requestId: $requestId) }`,
-        { worktreeId: discoveryId, requestId: createClientId() },
-      );
-      const sources = data.discoverAndroidBuildSources;
-      setProjects(sources);
-      if (sources.length === 1 && sources[0] !== values.projectPath) {
-        setValues((current) => ({ ...current, projectPath: sources[0]! }));
-        setModules(null);
-      }
-    } catch (value) {
-      setError(String(value));
-    } finally {
-      setInspection(null);
-    }
+  function updateProjectPath(projectPath: string) {
+    projectPathEdited.current = true;
+    setValues((current) => ({ ...current, projectPath }));
+    setModules(null);
   }
 
   async function inspect() {
     if (!inspectionId || !values.projectPath.trim()) return;
-    setInspection("modules");
-    setError(null);
+    setInspecting(true);
+    setModules(null);
+    setSourceError(null);
     try {
       const data = await controlPlaneRequest<{
         inspectAndroidBuildSource: Array<{
@@ -436,11 +501,14 @@ export function AndroidBuildConfigurationDialog({
           requestId: createClientId(),
         },
       );
-      setModules(data.inspectAndroidBuildSource);
+      setModules({
+        projectPath: values.projectPath,
+        entries: data.inspectAndroidBuildSource,
+      });
     } catch (value) {
-      setError(String(value));
+      setSourceError(String(value));
     } finally {
-      setInspection(null);
+      setInspecting(false);
     }
   }
 
@@ -477,12 +545,12 @@ export function AndroidBuildConfigurationDialog({
         if (!open && !saving) onClose();
       }}
     >
-      <DialogContent>
+      <DialogContent className="sm:max-w-2xl">
         <form
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void save();
+            if (!saving && !inspecting) void save();
           }}
         >
           <DialogHeader>
@@ -493,36 +561,55 @@ export function AndroidBuildConfigurationDialog({
               {t("configurationDescription")}
             </DialogDescription>
           </DialogHeader>
-          {fields.map((field) => (
-            <div className="space-y-1.5" key={field}>
-              <Label htmlFor={`${id}-${field}`}>{t(field)}</Label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor={`${id}-name`}>{t("name")}</Label>
               <Input
-                disabled={saving || inspection !== null}
-                id={`${id}-${field}`}
-                onChange={(event) => {
-                  if (field === "projectPath") setModules(null);
+                disabled={saving}
+                id={`${id}-name`}
+                onChange={(event) =>
                   setValues((current) => ({
                     ...current,
-                    [field]: event.target.value,
-                  }));
-                }}
-                required={field !== "apkPath"}
-                value={values[field]}
+                    name: event.target.value,
+                  }))
+                }
+                required
+                value={values.name}
               />
             </div>
-          ))}
-          {(discoveryId || inspectionId) && (
             <div className="space-y-2">
+              <Label htmlFor={`${id}-icon`}>{buildsT("icon")}</Label>
+              <BuildConfigurationIconPicker
+                disabled={saving}
+                id={`${id}-icon`}
+                onChange={(iconKey) =>
+                  setValues((current) => ({ ...current, iconKey }))
+                }
+                value={values.iconKey}
+              />
+            </div>
+          </div>
+          <Card className="py-4">
+            <CardContent className="space-y-3">
+              <AndroidSourceChoice
+                disabled={saving || inspecting}
+                id={`${id}-projectPath`}
+                label={t("projectPath")}
+                manualLabel={t("manualProjectPath")}
+                onChange={updateProjectPath}
+                options={projects ?? undefined}
+                value={values.projectPath}
+              />
               <div className="flex flex-wrap gap-2">
                 {discoveryId && (
                   <Button
-                    disabled={saving || inspection !== null}
-                    onClick={() => void discover()}
+                    disabled={saving || inspecting || discovering}
+                    onClick={() => void discover(discoveryId)}
                     size="sm"
                     type="button"
                     variant="outline"
                   >
-                    {inspection === "projects" ? <Spinner /> : <Search />}{" "}
+                    {discovering ? <Spinner /> : <Search />}{" "}
                     {t("discoverProjects")}
                   </Button>
                 )}
@@ -530,7 +617,8 @@ export function AndroidBuildConfigurationDialog({
                   <Button
                     disabled={
                       saving ||
-                      inspection !== null ||
+                      inspecting ||
+                      discovering ||
                       !values.projectPath.trim()
                     }
                     onClick={() => void inspect()}
@@ -538,77 +626,84 @@ export function AndroidBuildConfigurationDialog({
                     type="button"
                     variant="outline"
                   >
-                    {inspection === "modules" ? <Spinner /> : <Search />}{" "}
-                    {t("inspectModules")}
+                    {inspecting ? <Spinner /> : <Search />}{" "}
+                    {t("inspectVariants")}
                   </Button>
                 )}
               </div>
-              {projects &&
-                (projects.length > 0 ? (
-                  <Select
-                    disabled={saving || inspection !== null}
-                    value={
-                      projects.includes(values.projectPath)
-                        ? values.projectPath
-                        : ""
-                    }
-                    onValueChange={(projectPath) => {
-                      setValues((current) => ({ ...current, projectPath }));
-                      setModules(null);
-                    }}
-                  >
-                    <SelectTrigger aria-label={t("discoveredProject")}>
-                      <SelectValue placeholder={t("discoveredProject")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {projects.map((path) => (
-                        <SelectItem key={path} value={path}>
-                          {path}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {t("noDiscoveredProjects")}
-                  </p>
-                ))}
-              {modules &&
-                (modules.length > 0 ? (
-                  <Select
-                    disabled={saving || inspection !== null}
-                    value={inspectedSelection}
-                    onValueChange={(value) => {
-                      const [module, variant] = JSON.parse(value) as [
-                        string,
-                        string,
-                      ];
-                      setValues((current) => ({ ...current, module, variant }));
-                    }}
-                  >
-                    <SelectTrigger aria-label={t("useModuleVariant")}>
-                      <SelectValue placeholder={t("useModuleVariant")} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modules.flatMap(({ module, variants }) =>
-                        variants.map((variant) => {
-                          const value = JSON.stringify([module, variant]);
-                          return (
-                            <SelectItem key={value} value={value}>
-                              {module} · {variant}
-                            </SelectItem>
-                          );
-                        }),
-                      )}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    {t("noDiscoveredModules")}
-                  </p>
-                ))}
-            </div>
-          )}
+              {projects?.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("noDiscoveredProjects")}
+                </p>
+              )}
+              {sourceCheckout && !inspectionId && (
+                <p className="text-xs text-muted-foreground">
+                  {t("inspectionUnavailable")}
+                </p>
+              )}
+              {inspectedModules?.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("noDiscoveredModules")}
+                </p>
+              )}
+              {sourceError && (
+                <Alert variant="destructive">
+                  <AlertDescription>{sourceError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <AndroidSourceChoice
+                  disabled={saving || inspecting}
+                  id={`${id}-module`}
+                  label={t("module")}
+                  manualLabel={t("manualModule")}
+                  options={inspectedModules?.map(({ module }) => module)}
+                  value={values.module}
+                  onChange={(module, fromOptions) => {
+                    const variants = fromOptions
+                      ? inspectedModules?.find(
+                          (entry) => entry.module === module,
+                        )?.variants
+                      : undefined;
+                    setValues((current) => ({
+                      ...current,
+                      module,
+                      variant:
+                        variants?.length && !variants.includes(current.variant)
+                          ? variants[0]!
+                          : current.variant,
+                    }));
+                  }}
+                />
+                <AndroidSourceChoice
+                  disabled={saving || inspecting}
+                  id={`${id}-variant`}
+                  key={values.module}
+                  label={t("variant")}
+                  manualLabel={t("manualVariant")}
+                  options={inspectedVariants}
+                  value={values.variant}
+                  onChange={(variant) =>
+                    setValues((current) => ({ ...current, variant }))
+                  }
+                />
+              </div>
+            </CardContent>
+          </Card>
+          <div className="space-y-2">
+            <Label htmlFor={`${id}-apkPath`}>{t("apkPath")}</Label>
+            <Input
+              disabled={saving}
+              id={`${id}-apkPath`}
+              onChange={(event) =>
+                setValues((current) => ({
+                  ...current,
+                  apkPath: event.target.value,
+                }))
+              }
+              value={values.apkPath}
+            />
+          </div>
           {error && (
             <Alert variant="destructive">
               <AlertDescription>{error}</AlertDescription>
@@ -626,10 +721,13 @@ export function AndroidBuildConfigurationDialog({
             <Button
               disabled={
                 saving ||
-                inspection !== null ||
-                fields.some(
-                  (field) => field !== "apkPath" && !values[field].trim(),
-                )
+                inspecting ||
+                [
+                  values.name,
+                  values.projectPath,
+                  values.module,
+                  values.variant,
+                ].some((value) => !value.trim())
               }
               type="submit"
             >
@@ -639,5 +737,72 @@ export function AndroidBuildConfigurationDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// Discovered paths are relative, and Gradle modules and variants cannot be '/'.
+const MANUAL_SOURCE_VALUE = "/";
+
+function AndroidSourceChoice({
+  disabled,
+  id,
+  label,
+  manualLabel,
+  onChange,
+  options,
+  value,
+}: {
+  disabled: boolean;
+  id: string;
+  label: string;
+  manualLabel: string;
+  onChange: (value: string, fromOptions: boolean) => void;
+  options?: string[];
+  value: string;
+}) {
+  const t = useTranslations("androidBuilds");
+  const [manual, setManual] = useState(false);
+  const hasOptions = Boolean(options?.length);
+  const showInput = manual || !options?.includes(value);
+
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      {hasOptions && (
+        <Select
+          disabled={disabled}
+          value={showInput ? MANUAL_SOURCE_VALUE : value}
+          onValueChange={(option) => {
+            const isManual = option === MANUAL_SOURCE_VALUE;
+            setManual(isManual);
+            if (!isManual) onChange(option, true);
+          }}
+        >
+          <SelectTrigger className="w-full" id={id}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {options?.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
+              </SelectItem>
+            ))}
+            <SelectItem value={MANUAL_SOURCE_VALUE}>
+              {t("enterManually")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+      {showInput && (
+        <Input
+          aria-label={hasOptions ? manualLabel : undefined}
+          disabled={disabled}
+          id={hasOptions ? `${id}-manual` : id}
+          onChange={(event) => onChange(event.target.value, false)}
+          required
+          value={value}
+        />
+      )}
+    </div>
   );
 }

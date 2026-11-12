@@ -733,6 +733,48 @@ describe("BuildsService", () => {
     },
   );
 
+  test("validates Android configuration icons and preserves an omitted icon on update", async () => {
+    const create = vi.fn().mockResolvedValue({ id: "android-config" });
+    const update = vi.fn().mockResolvedValue({ id: "android-config" });
+    getPrismaClient.mockResolvedValue({
+      androidBuildConfiguration: { create, update },
+    });
+    const service = new BuildsService(control());
+    vi.spyOn(service, "androidProject").mockResolvedValue({
+      id: "project-1",
+      repositoryId: "repository-1",
+    } as never);
+    const input = {
+      codebaseId: "codebase-1",
+      name: "Demo",
+      projectPath: ".",
+      module: ":app",
+      variant: "demoDebug",
+      apkPath: null,
+    };
+
+    await service.saveAndroidConfiguration({
+      ...input,
+      iconKey: " smartphone ",
+    });
+    expect(create.mock.calls[0]?.[0].data.iconKey).toBe("smartphone");
+
+    await service.saveAndroidConfiguration({ ...input, id: "android-config" });
+    expect(update.mock.calls[0]?.[0].data).not.toHaveProperty("iconKey");
+
+    await service.saveAndroidConfiguration({
+      ...input,
+      id: "android-config",
+      iconKey: null,
+    });
+    expect(update.mock.calls[1]?.[0].data.iconKey).toBeNull();
+
+    await expect(
+      service.saveAndroidConfiguration({ ...input, iconKey: "unknown" }),
+    ).rejects.toThrow("Icon is invalid");
+    expect(create).toHaveBeenCalledTimes(1);
+  });
+
   test("captures the server and telemetry settings for Android build hooks", async () => {
     const buildWorktree = worktree();
     buildWorktree.codebase.agent.capabilitiesJson = JSON.stringify([

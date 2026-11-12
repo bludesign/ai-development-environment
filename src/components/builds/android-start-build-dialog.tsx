@@ -31,6 +31,7 @@ import {
   fetchAndroidAppProject,
   type AndroidAppProject,
 } from "./android-project-section";
+import { ConfigurationIcon } from "./configuration-icon";
 import type { AndroidBuildConfiguration } from "./types";
 
 export function AndroidStartBuildDialog({
@@ -160,8 +161,9 @@ export function AndroidStartBuildDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {items.map(({ id, name }) => (
+                {items.map(({ id, name, iconKey }) => (
                   <SelectItem key={id} value={id}>
+                    <ConfigurationIcon iconKey={iconKey} />
                     {name}
                   </SelectItem>
                 ))}
