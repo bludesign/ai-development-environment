@@ -81,6 +81,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { readCursorWindow } from "@/lib/read-cursor-window";
 import { dayKey, formatDateValue } from "@/lib/date-format";
@@ -105,6 +106,8 @@ import { ProviderIcon } from "./provider-icon";
 import { useRunLabels } from "./run-labels";
 import type { AgentRunView } from "./types";
 import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
+
+const LIST_EVENT_REFRESH_INTERVAL_MS = 3_000;
 
 function IconAction({
   label,
@@ -307,6 +310,11 @@ export function RunsPage({
       }
     });
     refreshOwner.current = owner;
+    // A working run reports every batch of events it appends. Rereading the
+    // whole list for each one adds nothing a few seconds later would not show.
+    const live = createLiveRefresh(() => owner.refresh(), {
+      minIntervalMs: LIST_EVENT_REFRESH_INTERVAL_MS,
+    });
     const timer = window.setTimeout(() => void owner.refresh(), 150);
     const unsubscribe = controlPlaneSubscriptions().subscribe(
       {
@@ -321,16 +329,17 @@ export function RunsPage({
         },
       },
       {
-        next: () => void owner.refresh(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    const recover = onControlPlaneRecovery(() => void owner.refresh());
+    const recover = onControlPlaneRecovery(() => live.invalidate());
     return () => {
       window.clearTimeout(timer);
       unsubscribe();
       recover();
+      live.dispose();
       owner.dispose();
       pageRequest.current?.abort();
       pageRequest.current = null;

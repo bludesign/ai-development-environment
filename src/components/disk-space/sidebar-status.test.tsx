@@ -83,13 +83,23 @@ function SidebarProbe() {
   );
 }
 
-function renderFooter() {
-  return render(
+/** The shell owns which providers are connected and hands it to the footer. */
+function footer() {
+  return (
     <SidebarProvider defaultOpen>
       <SidebarProbe />
-      <SidebarStatusFooter />
-    </SidebarProvider>,
+      <SidebarStatusFooter
+        features={{
+          github: integrationState.github.configured,
+          gitlab: integrationState.gitlab.configured,
+        }}
+      />
+    </SidebarProvider>
   );
+}
+
+function renderFooter() {
+  return render(footer());
 }
 
 const sidebarStatus = {
@@ -344,11 +354,12 @@ describe("SidebarStatusFooter", () => {
         expect(link).toBeUndefined();
       }
     }
+    // Provider state comes from the shell, so the footer does not ask again.
     expect(
       request.mock.calls.some(
         ([query]) =>
           query.includes("pullRequests actions mergeRequests pipelines") &&
-          query.includes("sourceControlIntegrationState"),
+          !query.includes("sourceControlIntegrationState"),
       ),
     ).toBe(true);
   });
@@ -385,39 +396,36 @@ describe("SidebarStatusFooter", () => {
     }
   });
 
-  test("refreshes counts and provider visibility when integration settings change", async () => {
-    let notifyConfiguration!: () => void;
-    subscriptions.mockReturnValue({
-      subscribe: vi.fn(
-        (
-          { query }: { query: string },
-          sink: {
-            next: (result: {
-              data: { integrationConfigurationChanged: string };
-            }) => void;
-          },
-        ) => {
-          if (query.includes("IntegrationConfigurationChanged"))
-            notifyConfiguration = () =>
-              sink.next({
-                data: { integrationConfigurationChanged: "github" },
-              });
-          return vi.fn();
-        },
-      ),
-    } as never);
-    renderFooter();
+  test("follows the shell's provider state and refreshes counts on a status event", async () => {
+    let notifyStatus!: () => void;
+    const subscribe = vi.fn(
+      (
+        { query }: { query: string },
+        sink: { next: (result: object) => void },
+      ) => {
+        if (query.includes("SidebarStatusChanged"))
+          notifyStatus = () =>
+            sink.next({ data: { sidebarStatusChanged: true } });
+        return vi.fn();
+      },
+    );
+    subscriptions.mockReturnValue({ subscribe } as never);
+    const view = renderFooter();
     await screen.findByText("$1.25");
     expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
+    // One stream: the server republishes status when an integration changes.
+    expect(subscribe).toHaveBeenCalledTimes(1);
 
     integrationState = {
       github: { configured: true },
       gitlab: { configured: false },
     };
-    await act(async () => notifyConfiguration());
+    providerActivity = { ...providerActivity, pullRequests: 13 };
+    view.rerender(footer());
+    await act(async () => notifyStatus());
     expect(
       within(await screen.findByRole("link", { name: /^Pull Reqs/ })).getByText(
-        "12",
+        "13",
       ),
     ).toBeDefined();
 
@@ -425,7 +433,7 @@ describe("SidebarStatusFooter", () => {
       github: { configured: false },
       gitlab: { configured: true },
     };
-    await act(async () => notifyConfiguration());
+    view.rerender(footer());
     await screen.findByRole("link", { name: /^Merge Reqs/ });
     expect(screen.queryByRole("link", { name: /^Pull Reqs/ })).toBeNull();
     expect(
@@ -433,6 +441,48 @@ describe("SidebarStatusFooter", () => {
         .queryAllByRole("link", { name: /^Actions/ })
         .some((link) => link.getAttribute("href") === "/github/actions"),
     ).toBe(false);
+  });
+
+  test("spends one refresh on a burst of status events and none while hidden", async () => {
+    let notifyStatus!: () => void;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          { query }: { query: string },
+          sink: { next: (result: object) => void },
+        ) => {
+          if (query.includes("SidebarStatusChanged"))
+            notifyStatus = () =>
+              sink.next({ data: { sidebarStatusChanged: true } });
+          return vi.fn();
+        },
+      ),
+    } as never);
+    renderFooter();
+    const calls = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("query SidebarStatus"),
+      );
+    await waitFor(() => expect(calls()).toHaveLength(1));
+
+    // The first event after a quiet spell refreshes at once; the rest of the
+    // burst waits for one trailing refresh.
+    await act(async () => {
+      for (let index = 0; index < 10; index++) notifyStatus();
+    });
+    await waitFor(() => expect(calls()).toHaveLength(2));
+    await act(async () => notifyStatus());
+    expect(calls()).toHaveLength(2);
+
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    try {
+      await act(async () => notifyStatus());
+      expect(calls()).toHaveLength(2);
+    } finally {
+      visibility.mockRestore();
+    }
   });
 
   test("keeps the last totals during a failed status refresh", async () => {

@@ -141,7 +141,7 @@ export function IosProjectSection({
         `query IosProjectSection($codebaseId: ID!) {
           iosAppProject(codebaseId: $codebaseId) { ${PROJECT_FIELDS} }
           buildScripts { ${SCRIPT_FIELDS} }
-          worktreeOverview {
+          worktreeOverview(savedOnly: true) {
             agents { codebases { codebase { id } worktrees { id primary } } }
           }
         }`,

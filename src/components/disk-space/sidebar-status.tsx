@@ -36,7 +36,8 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
-import { subscribeIntegrationConfiguration } from "@/lib/integration-configuration";
+import type { NavigationFeatures } from "@/lib/app-destinations";
+import { createLiveRefresh } from "@/lib/live-refresh";
 
 import {
   DISK_SPACE_FIELDS,
@@ -77,11 +78,6 @@ type SidebarStatusData = {
   };
 };
 
-type SourceControlIntegrationState = {
-  github: { configured: boolean };
-  gitlab: { configured: boolean };
-};
-
 type HistoryItem = {
   id: string;
   agentName: string;
@@ -113,15 +109,22 @@ function ringColor(status: DiskSpaceStatus): string {
   return "#10b981";
 }
 
-export function SidebarStatusFooter() {
+/** Events arrive in bursts while agents work; one refresh per burst is enough. */
+const EVENT_REFRESH_INTERVAL_MS = 5_000;
+const RECONCILE_INTERVAL_MS = 60_000;
+
+export function SidebarStatusFooter({
+  features,
+}: {
+  /** Which providers are connected; the shell already keeps this current. */
+  features: Pick<NavigationFeatures, "github" | "gitlab">;
+}) {
   const t = useTranslations("diskSpace");
   const shell = useTranslations("shell");
   const locale = useLocale();
   const actionCenter = useOptionalActionCenter();
   const { isMobile, setOpenMobile } = useSidebar();
   const [status, setStatus] = useState<SidebarStatusData | null>(null);
-  const [integrations, setIntegrations] =
-    useState<SourceControlIntegrationState | null>(null);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
@@ -142,7 +145,6 @@ export function SidebarStatusFooter() {
       try {
         const data = await controlPlaneRequest<{
           sidebarStatus: SidebarStatusData;
-          sourceControlIntegrationState: SourceControlIntegrationState;
         }>(
           `query SidebarStatus {
           sidebarStatus {
@@ -151,44 +153,47 @@ export function SidebarStatusFooter() {
             activity { plans sessions builds workflows commands pullRequests actions mergeRequests pipelines dirtyWorktrees offMainWorktrees }
             diskSummary { agents { agent { id name } enabled status volumes { id totalBytes freeBytes roles paths status effectiveThresholdBytes monitored } } }
           }
-          sourceControlIntegrationState {
-            github { configured }
-            gitlab { configured }
-          }
         }`,
           undefined,
           { signal },
         );
-        if (!signal.aborted) {
-          setStatus(data.sidebarStatus);
-          setIntegrations(data.sourceControlIntegrationState);
-        }
+        if (!signal.aborted) setStatus(data.sidebarStatus);
       } catch {
         /* Keep the last visible status during temporary failures. */
       }
     });
     statusUpdates.current = updates;
-    const refresh = () => {
-      void updates.refresh();
-      void detailUpdates.current?.refresh();
-    };
+    // Runs, builds, scans and disk reports all publish this event, and the
+    // server republishes it when an integration is connected or removed. The
+    // poll only covers an event the socket dropped.
+    const live = createLiveRefresh(
+      () => {
+        void updates.refresh();
+        void detailUpdates.current?.refresh();
+      },
+      {
+        minIntervalMs: EVENT_REFRESH_INTERVAL_MS,
+        pollMs: RECONCILE_INTERVAL_MS,
+      },
+    );
     const initialLoad = window.setTimeout(() => void updates.refresh(), 0);
     const unsubscribe = controlPlaneSubscriptions().subscribe(
       { query: "subscription SidebarStatusChanged { sidebarStatusChanged }" },
-      { next: refresh, error: () => undefined, complete: () => undefined },
+      {
+        next: () => live.invalidate(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
     );
-    const offConfiguration = subscribeIntegrationConfiguration(null, refresh);
     const offRecovery = onControlPlaneRecovery((event) => {
       // The initial mount already reads status; recovery is for a lost stream.
-      if (!event?.initialConnection) refresh();
+      if (!event?.initialConnection) live.invalidate();
     });
-    const timer = window.setInterval(refresh, 60_000);
     return () => {
       window.clearTimeout(initialLoad);
       unsubscribe();
-      offConfiguration();
       offRecovery();
-      window.clearInterval(timer);
+      live.dispose();
       updates.dispose();
       statusUpdates.current = null;
     };
@@ -293,7 +298,7 @@ export function SidebarStatusFooter() {
       count: status?.activity.commands ?? 0,
     },
     ...(status?.settings?.showIntegrationCountsInSidebar !== false &&
-    integrations?.github.configured
+    features.github
       ? ([
           {
             key: "pullReqs",
@@ -310,7 +315,7 @@ export function SidebarStatusFooter() {
         ] as const)
       : []),
     ...(status?.settings?.showIntegrationCountsInSidebar !== false &&
-    integrations?.gitlab.configured
+    features.gitlab
       ? ([
           {
             key: "mergeReqs",

@@ -194,7 +194,10 @@ describe("RunWorktreeCards", () => {
             worktreeOverview: {
               entry: { ...entry, worktree },
               agents: [
-                { agent: entry.agentGroup.agent, codebases: [entry.group] },
+                {
+                  agent: entry.agentGroup.agent,
+                  codebases: [{ ...entry.group, worktrees: [worktree] }],
+                },
               ],
             },
             builds: { items: [], nextCursor: null },
@@ -246,7 +249,10 @@ describe("RunWorktreeCards", () => {
           worktreeOverview: {
             entry,
             agents: [
-              { agent: entry.agentGroup.agent, codebases: [entry.group] },
+              {
+                agent: entry.agentGroup.agent,
+                codebases: [{ ...entry.group, worktrees: [entry.worktree] }],
+              },
             ],
           },
           builds: {
@@ -267,6 +273,11 @@ describe("RunWorktreeCards", () => {
           },
         } as never;
       }
+      if (
+        operation.includes("query WorktreeIntegrationAvailability") ||
+        operation.includes("query WorktreeEnrichment")
+      )
+        throw new Error("Not under test");
       throw new Error(`Unexpected operation: ${operation}`);
     });
 
@@ -299,7 +310,12 @@ describe("RunWorktreeCards", () => {
       request.mockResolvedValue({
         worktreeOverview: {
           entry: next,
-          agents: [{ agent: next.agentGroup.agent, codebases: [next.group] }],
+          agents: [
+            {
+              agent: next.agentGroup.agent,
+              codebases: [{ ...next.group, worktrees: [next.worktree] }],
+            },
+          ],
         },
         builds: { items: [], nextCursor: null },
       } as never);

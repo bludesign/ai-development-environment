@@ -4019,6 +4019,7 @@
       "running": "Chargement",
       "complete": "Terminé",
       "failed": "Échec",
+      "skipped": "Non connecté",
       "retry": "Réessayer"
     },
     "bulkMerge": {

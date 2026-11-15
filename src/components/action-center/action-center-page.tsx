@@ -19,9 +19,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 
 import { ActionCenterItem } from "./action-center-item";
-import { useActionCenter } from "./action-center-provider";
+import { ActionCenterSurface, useActionCenter } from "./action-center-provider";
 
 export function ActionCenterPage() {
+  // The shell keeps only the totals current; the full list loads while this page shows it.
+  return (
+    <ActionCenterSurface surface="FULL">
+      <ActionCenterPageContent />
+    </ActionCenterSurface>
+  );
+}
+
+function ActionCenterPageContent() {
   const t = useTranslations("actionCenter");
   const [refreshingPullRequests, setRefreshingPullRequests] = useState(false);
   const {

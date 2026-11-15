@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   PipelineMenu,
@@ -91,6 +91,11 @@ function pipelineView(
   };
 }
 
+/** What a run's jobs depend on; they are read again only when this changes. */
+function jobsSignature(run: GitHubActionsWorkflowRunView): string {
+  return [run.id, run.runAttempt, run.status, run.updatedAt].join("\u0000");
+}
+
 export function WorktreePipelinesCard({
   runs,
   error,
@@ -115,37 +120,59 @@ export function WorktreePipelinesCard({
     Record<string, GitHubWorkflowRunAttemptView | null>
   >({});
 
+  // The run each job list was read for, including reads still in flight.
+  const jobsReadFor = useRef(new Map<string, string>());
+  const mounted = useRef(true);
   useEffect(() => {
-    let cancelled = false;
-    void Promise.all(
-      runs.map(async (run) => {
-        try {
-          const data = await controlPlaneRequest<{
-            githubActionsWorkflowJobs: GitHubWorkflowJobView[];
-          }>(
-            `query WorktreePipelineJobs($repositoryId: ID!, $workflowRunId: ID!) {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const present = new Set(runs.map((run) => run.id));
+    for (const id of [...jobsReadFor.current.keys()])
+      if (!present.has(id)) jobsReadFor.current.delete(id);
+    // The page reloads its runs on a timer and passes a new array each time.
+    // Reading every run's jobs again for that would cost a request per run.
+    for (const run of runs) {
+      const signature = jobsSignature(run);
+      if (jobsReadFor.current.get(run.id) === signature) continue;
+      jobsReadFor.current.set(run.id, signature);
+      const current = () => jobsReadFor.current.get(run.id) === signature;
+      void controlPlaneRequest<{
+        githubActionsWorkflowJobs: GitHubWorkflowJobView[];
+      }>(
+        `query WorktreePipelineJobs($repositoryId: ID!, $workflowRunId: ID!) {
               githubActionsWorkflowJobs(
                 source: WORKTREE_PIPELINES
                 codebaseRepositoryId: $repositoryId
                 workflowRunId: $workflowRunId
               ) { id name status url canRetry retryUnavailableReason runAttempt steps { number name status } }
             }`,
-            {
-              repositoryId: run.codebaseRepositoryId,
-              workflowRunId: run.id,
-            },
-          );
-          return [run.id, data.githubActionsWorkflowJobs] as const;
-        } catch {
-          return [run.id, []] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (!cancelled) setJobs(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
+        {
+          repositoryId: run.codebaseRepositoryId,
+          workflowRunId: run.id,
+        },
+      ).then(
+        (data) => {
+          if (!mounted.current || !current()) return;
+          setJobs((existing) => ({
+            ...existing,
+            [run.id]: data.githubActionsWorkflowJobs,
+          }));
+        },
+        () => {
+          // Try again with the next reload.
+          if (current()) jobsReadFor.current.delete(run.id);
+          if (mounted.current)
+            setJobs((existing) =>
+              existing[run.id] ? existing : { ...existing, [run.id]: [] },
+            );
+        },
+      );
+    }
   }, [runs]);
 
   const pipelineRecordKeys = useMemo(

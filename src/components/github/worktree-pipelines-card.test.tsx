@@ -124,6 +124,53 @@ describe("WorktreePipelinesCard", () => {
     expect(screen.getByRole("menuitem", { name: "Retry" })).toBeDefined();
   });
 
+  test("reads jobs again only for a run that changed since they were read", async () => {
+    const jobs = (status: string) => ({
+      githubActionsWorkflowJobs: [
+        {
+          id: "job-1",
+          name: "build-and-test",
+          status,
+          url: "https://github.com/acme/widgets/actions/jobs/1",
+          canRetry: true,
+          retryUnavailableReason: null,
+          steps: [],
+        },
+      ],
+    });
+    vi.mocked(controlPlaneRequest).mockResolvedValue(jobs("PENDING") as never);
+    const card = (runs: GitHubActionsWorkflowRunView[]) => (
+      <WorktreePipelinesCard
+        branch="feature/APP-1"
+        error={null}
+        onCancelled={vi.fn()}
+        onError={vi.fn()}
+        onRetried={vi.fn()}
+        runs={runs}
+        worktreeId="worktree-1"
+      />
+    );
+    const other = { ...run, id: "run-2", name: "Deploy" };
+    const view = render(card([run, other]));
+    await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(2));
+
+    // The page reloads on a timer and hands over fresh but identical runs.
+    for (let reload = 0; reload < 3; reload++)
+      view.rerender(card([{ ...run }, { ...other }]));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(2);
+
+    vi.mocked(controlPlaneRequest).mockResolvedValue(jobs("SUCCESS") as never);
+    view.rerender(
+      card([{ ...run, updatedAt: "2026-07-21T12:05:00.000Z" }, { ...other }]),
+    );
+    await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(controlPlaneRequest).mock.calls.at(-1)![1]).toEqual({
+      repositoryId: "codebase-repository-1",
+      workflowRunId: "run-1",
+    });
+  });
+
   test("cancels an active workflow run from the pipeline menu", async () => {
     const onCancelled = vi.fn();
     vi.mocked(controlPlaneRequest).mockImplementation(async (query) => {

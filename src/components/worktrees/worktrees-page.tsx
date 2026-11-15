@@ -6,6 +6,7 @@ import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
 
 import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -187,6 +188,7 @@ import {
   preserveWorktreeMetadata,
   useWorktreeLoading,
 } from "./use-worktree-loading";
+import { useIntegrationAvailability } from "./use-integration-availability";
 import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
   CODEBASE_FIELDS,
@@ -255,6 +257,9 @@ const COLORS = [
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
 const GROUP_BY_KEY = "worktrees-group-by";
+/** This is where people watch their own operations, so stay close to live. */
+const OVERVIEW_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const OVERVIEW_RECONCILE_INTERVAL_MS = 30_000;
 const FILTERS_KEY = "worktrees-filters";
 const ALL_FILTER_VALUE = "__all__";
 const DIRTY_FILTER_VALUE = "dirty";
@@ -755,6 +760,7 @@ export function WorktreesPage({
     );
   };
   const latestLoad = useRef(0);
+  const integrations = useIntegrationAvailability();
   const {
     timings,
     begin: beginLoad,
@@ -762,7 +768,7 @@ export function WorktreesPage({
     saved: savedLoad,
     forceNext,
     retry: retryEnrichment,
-  } = useWorktreeLoading(appId, setOverview);
+  } = useWorktreeLoading(appId, setOverview, { integrations });
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const load = useCallback(
@@ -873,7 +879,13 @@ export function WorktreesPage({
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
-    const poll = window.setInterval(() => void load(), 30_000);
+    // Every agent scan and every build step reports here. A burst costs one
+    // saved read, a hidden tab reads nothing, and the poll only covers an
+    // event the socket dropped.
+    const live = createLiveRefresh(() => load(), {
+      minIntervalMs: OVERVIEW_EVENT_REFRESH_INTERVAL_MS,
+      pollMs: OVERVIEW_RECONCILE_INTERVAL_MS,
+    });
     const subscriptions = controlPlaneSubscriptions();
     const unsubscribeWorktrees = subscriptions.subscribe(
       {
@@ -881,7 +893,7 @@ export function WorktreesPage({
           "subscription WorktreesChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
       },
       {
-        next: () => void load(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -889,7 +901,7 @@ export function WorktreesPage({
     const unsubscribeBuilds = subscriptions.subscribe(
       { query: "subscription WorktreeBuildsChanged { buildsChanged { id } }" },
       {
-        next: () => void load(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -907,7 +919,8 @@ export function WorktreesPage({
       {
         next: (value) => {
           const change = value.data?.codebaseOverviewChanged;
-          if (change?.repositoryId && change.codebaseId === null) void load();
+          if (change?.repositoryId && change.codebaseId === null)
+            live.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -926,7 +939,7 @@ export function WorktreesPage({
                 { definitionsChanged?: boolean } | undefined
             )?.definitionsChanged
           )
-            void load();
+            live.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -934,7 +947,7 @@ export function WorktreesPage({
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(poll);
+      live.dispose();
       latestLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();

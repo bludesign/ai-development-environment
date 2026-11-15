@@ -37,6 +37,18 @@ vi.mock("@/lib/control-plane-client", () => ({
   onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
 
+// These cases assert what an event changes on the page, not when. The spacing
+// between event-driven reads is covered in src/lib/live-refresh.test.ts.
+vi.mock("@/lib/live-refresh", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/live-refresh")>();
+  return {
+    ...original,
+    createLiveRefresh: (
+      ...[refresh, options]: Parameters<typeof original.createLiveRefresh>
+    ) => original.createLiveRefresh(refresh, { ...options, minIntervalMs: 0 }),
+  };
+});
+
 const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const navigation = vi.hoisted(() => ({ push: vi.fn() }));
@@ -812,6 +824,56 @@ export function registerWorktreesPageTests(
           ).toContain("h-10");
         },
       );
+
+      test("reads nothing for events in a hidden tab, catches up on return, and leaves unchanged metadata alone", async () => {
+        let invalidateOverview!: () => void;
+        subscriptions.mockReturnValue({
+          subscribe: vi.fn(
+            (
+              operation: { query: string },
+              sink: { next: (value: unknown) => void },
+            ) => {
+              if (operation.query.includes("subscription WorktreesChanged"))
+                invalidateOverview = () => sink.next({ data: {} });
+              return vi.fn();
+            },
+          ),
+        } as never);
+        const reads = (operation: string) =>
+          request.mock.calls.filter(([query]) =>
+            String(query).includes(operation),
+          ).length;
+        const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+        render(<WorktreesPage />);
+        await screen.findByText("feature/AIDE-24");
+        await waitFor(() => expect(reads("query WorktreeEnrichment")).toBe(4));
+        const overviewReads = reads("query WorktreeOverview");
+
+        const visibility = vi
+          .spyOn(document, "visibilityState", "get")
+          .mockReturnValue("hidden");
+        try {
+          act(() => {
+            invalidateOverview();
+            invalidateOverview();
+          });
+          await act(settle);
+          expect(reads("query WorktreeOverview")).toBe(overviewReads);
+
+          visibility.mockReturnValue("visible");
+          act(() => {
+            document.dispatchEvent(new Event("visibilitychange"));
+          });
+          await waitFor(() =>
+            expect(reads("query WorktreeOverview")).toBe(overviewReads + 1),
+          );
+        } finally {
+          visibility.mockRestore();
+        }
+        // Nothing about the worktrees changed, so the integrations are not asked again.
+        await act(settle);
+        expect(reads("query WorktreeEnrichment")).toBe(4);
+      });
 
       test.each([
         { appId: undefined, layout: "cards", clearError: "dismiss" },

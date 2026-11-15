@@ -4019,6 +4019,7 @@
       "running": "Wird geladen",
       "complete": "Abgeschlossen",
       "failed": "Fehlgeschlagen",
+      "skipped": "Nicht verbunden",
       "retry": "Erneut versuchen"
     },
     "bulkMerge": {

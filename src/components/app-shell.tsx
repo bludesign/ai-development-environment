@@ -558,7 +558,7 @@ function NavigationSidebar({
       </SidebarContent>
       <SidebarFooter className="gap-0 p-0">
         <UserAccountControl user={currentUser} />
-        <SidebarStatusFooter />
+        <SidebarStatusFooter features={features} />
       </SidebarFooter>
     </Sidebar>
   );

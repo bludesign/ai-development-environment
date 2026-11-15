@@ -26,7 +26,9 @@ import {
 } from "@ai-development-environment/agent-contract/builds";
 import { COVERAGE_IMPORT_JOB_KIND } from "@ai-development-environment/agent-contract/coverage";
 import {
+  ACTION_CENTER_CHANGED_TOPIC,
   BUILDS_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
   buildLogChunkTopic,
   buildTopic,
@@ -3010,6 +3012,31 @@ describe("live build script progress", () => {
       expect(f.state.executions[0]).toMatchObject(result);
     },
   );
+
+  test("wakes the sidebar and Action Center only when progress changes the build's status", async () => {
+    const f = fixture();
+    const topics = () => f.publish.mock.calls.map(([topic]) => topic);
+    const shell = [SIDEBAR_STATUS_CHANGED_TOPIC, ACTION_CENTER_CHANGED_TOPIC];
+
+    // PREPARING to RUNNING changes what both of them count.
+    await f.service.reportProgress("agent-1", {
+      buildId: "build-1",
+      status: "RUNNING",
+      scriptExecutions: [],
+    });
+    expect(topics()).toEqual(expect.arrayContaining(shell));
+
+    // Later reports arrive throughout a build and change neither.
+    f.publish.mockClear();
+    await f.service.reportProgress("agent-1", {
+      buildId: "build-1",
+      status: "RUNNING",
+      scriptExecutions: [
+        { phase: "POST_BUILD", position: 0, status: "RUNNING" },
+      ],
+    });
+    expect(topics()).toEqual([buildTopic("build-1"), BUILDS_CHANGED_TOPIC]);
+  });
 
   test("updates a post-build script while compilation results remain running", async () => {
     const f = fixture();

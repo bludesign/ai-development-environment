@@ -2,6 +2,7 @@
 
 import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
 
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -29,6 +30,11 @@ import {
   worktreeDetailHref,
 } from "@/components/worktrees/worktree-navigation";
 import type { WorktreeOverview } from "@/components/worktrees/types";
+import { useIntegrationAvailability } from "@/components/worktrees/use-integration-availability";
+import {
+  preserveWorktreeMetadata,
+  useWorktreeLoading,
+} from "@/components/worktrees/use-worktree-loading";
 import {
   BaseFreshnessBadge,
   OriginStatusBadges,
@@ -44,6 +50,8 @@ import {
 } from "@/lib/control-plane-client";
 
 const INITIAL_BUILD_PAGE_SIZE = 50;
+const EVENT_REFRESH_INTERVAL_MS = 1_000;
+const RECONCILE_INTERVAL_MS = 30_000;
 
 export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
   const t = useTranslations("runs");
@@ -57,6 +65,14 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
   const [error, setError] = useState<string | null>(null);
   const loadedBuildCount = useRef(INITIAL_BUILD_PAGE_SIZE);
   const buildPagination = useRef<AbortController | null>(null);
+  const displayedCodebaseId = useRef<string | null>(null);
+  // The saved overview answers at once. Pull requests, pipelines and tickets
+  // follow from their integrations, and only when what they describe changed.
+  const integrations = useIntegrationAvailability();
+  const { saved: savedOverview } = useWorktreeLoading(undefined, setOverview, {
+    worktreeId,
+    integrations,
+  });
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const load = useCallback(
@@ -90,7 +106,15 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
           signal,
         );
         if (signal.aborted) return;
-        setOverview(data.worktreeOverview);
+        const group = findWorktreeOverviewEntry(
+          data.worktreeOverview,
+          worktreeId,
+        )?.group;
+        displayedCodebaseId.current = group?.codebase.id ?? null;
+        setOverview((current) =>
+          preserveWorktreeMetadata(current, data.worktreeOverview),
+        );
+        savedOverview(data.worktreeOverview);
         setBuilds(history.items);
         setNextCursor(history.nextCursor);
         setError(null);
@@ -101,7 +125,7 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
         if (!signal.aborted) setLoading(false);
       }
     },
-    [worktreeId],
+    [savedOverview, worktreeId],
   );
 
   const loadMore = useCallback(async () => {
@@ -163,24 +187,36 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
-    const poll = window.setInterval(() => void load(), 30_000);
+    // A burst of events costs one saved read; a hidden tab reads nothing and
+    // catches up when it is shown again.
+    const live = createLiveRefresh(() => load(), {
+      minIntervalMs: EVENT_REFRESH_INTERVAL_MS,
+      pollMs: RECONCILE_INTERVAL_MS,
+    });
     const subscriptions = controlPlaneSubscriptions();
     const unsubscribeWorktrees = subscriptions.subscribe<{
-      worktreeOverviewChanged: { worktreeId: string | null } | null;
+      worktreeOverviewChanged: {
+        worktreeId: string | null;
+        codebaseId: string | null;
+      } | null;
     }>(
       {
         query:
-          "subscription RunWorktreeChanged { worktreeOverviewChanged { worktreeId } }",
+          "subscription RunWorktreeChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
       },
       {
         next: (value) => {
           const changed = value.data?.worktreeOverviewChanged;
+          // An agent scan reports a codebase with no worktree; only this
+          // worktree's codebase, or a change that names neither, concerns us.
           if (
             !changed ||
-            !changed.worktreeId ||
-            changed.worktreeId === worktreeId
+            (!changed.worktreeId && !changed.codebaseId) ||
+            changed.worktreeId === worktreeId ||
+            (!changed.worktreeId &&
+              changed.codebaseId === displayedCodebaseId.current)
           ) {
-            void load();
+            live.invalidate();
           }
         },
         error: () => undefined,
@@ -194,14 +230,14 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
         variables: { worktreeId },
       },
       {
-        next: () => void load(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(poll);
+      live.dispose();
       unsubscribeWorktrees();
       unsubscribeBuilds();
     };

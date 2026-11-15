@@ -2407,6 +2407,93 @@ describe("WorktreesService", () => {
     });
   });
 
+  test("announces a scan only when it changed what is stored", async () => {
+    // Agents report every codebase on every scan; views reread on the event.
+    const codebase: Record<string, unknown> = {
+      id: "codebase-1",
+      agentId: "agent-1",
+    };
+    const stored: Record<string, unknown> = {
+      id: "worktree-1",
+      gitDirectory: "/repo/.git",
+      folder: "/repo",
+      missingAt: null,
+    };
+    let known = [stored];
+    let tombstoned = 0;
+    const transaction = {
+      codebase: {
+        update: vi.fn(({ data }) => Object.assign(codebase, data)),
+      },
+      worktree: {
+        upsert: vi.fn(async () => ({ ...stored })),
+        updateMany: vi.fn(async ({ where, data }) => {
+          if (where.id) {
+            Object.assign(stored, data);
+            return { count: 1 };
+          }
+          return { count: tombstoned };
+        }),
+      },
+      worktreePullRequest: { deleteMany: vi.fn() },
+    };
+    getPrismaClient.mockResolvedValue({
+      codebase: { findUnique: vi.fn(async () => ({ ...codebase })) },
+      worktree: {
+        deleteMany: vi.fn(),
+        findMany: vi.fn(async () => known),
+      },
+      $transaction: vi.fn((callback) => callback(transaction)),
+    });
+    const publish = vi.spyOn(agentEventBus, "publish");
+    const announced = () =>
+      publish.mock.calls.filter(([topic]) => topic === WORKTREE_CHANGED_TOPIC)
+        .length;
+    const scan = (
+      worktree: Record<string, unknown> = {},
+      overrides: Record<string, unknown> = {},
+    ) =>
+      service().report("agent-1", [
+        {
+          ...report(),
+          ...overrides,
+          worktrees: [{ ...report().worktrees[0]!, ...worktree }],
+        } as ReturnType<typeof report>,
+      ]);
+
+    await scan();
+    expect(announced()).toBe(1);
+
+    // The same state seen again, only later, is not news.
+    await scan({ checkedAt: new Date(40).toISOString() });
+    await scan({ checkedAt: new Date(50).toISOString() });
+    expect(announced()).toBe(1);
+
+    await scan({ headSha: "def", checkedAt: new Date(60).toISOString() });
+    expect(announced()).toBe(2);
+    await scan(
+      { headSha: "def", checkedAt: new Date(70).toISOString() },
+      { remoteBranches: ["main"] },
+    );
+    expect(announced()).toBe(3);
+
+    // A worktree that disappeared, and one never seen before, both count.
+    tombstoned = 1;
+    await scan(
+      { headSha: "def", checkedAt: new Date(80).toISOString() },
+      { remoteBranches: ["main"] },
+    );
+    expect(announced()).toBe(4);
+    tombstoned = 0;
+    known = [];
+    await scan(
+      { headSha: "def", checkedAt: new Date(90).toISOString() },
+      { remoteBranches: ["main"] },
+    );
+    expect(announced()).toBe(5);
+    publish.mockRestore();
+  });
+
   test.each([null, new Date(10).toISOString(), new Date(20).toISOString()])(
     "ignores an inventory snapshot older than the accepted scan: %s",
     async (observedAt) => {

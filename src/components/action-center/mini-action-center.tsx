@@ -11,15 +11,15 @@ import { Link } from "@/i18n/navigation";
 
 import { ActionCenterItem } from "./action-center-item";
 import {
-  ActionCenterProvider,
+  ActionCenterSurface,
   useOptionalActionCenter,
 } from "./action-center-provider";
 
 export function MiniActionCenter() {
   return (
-    <ActionCenterProvider surface="SIDEBAR">
+    <ActionCenterSurface surface="SIDEBAR">
       <MiniActionCenterContent />
-    </ActionCenterProvider>
+    </ActionCenterSurface>
   );
 }
 

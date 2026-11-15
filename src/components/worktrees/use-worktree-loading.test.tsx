@@ -9,9 +9,11 @@ import type {
 } from "./types";
 import type { GitLabMergeRequestSummaryField } from "@/services/gitlab/types";
 import {
+  ENRICHMENT_MAX_AGE_MS,
   mergeWorktreeEnrichment,
   preserveWorktreeMetadata,
   useWorktreeLoading,
+  type IntegrationAvailability,
 } from "./use-worktree-loading";
 import { WORKTREE_LIST_FIELDS } from "./worktree-graphql";
 
@@ -251,11 +253,16 @@ test("preserves last good metadata on saved refreshes but drops it after a commi
   ).toBe("Saved title");
 });
 
-function useLoader(appId?: string) {
+function useLoader(
+  appId?: string,
+  options?: Parameters<typeof useWorktreeLoading>[2],
+) {
   const [value, setValue] = useState<WorktreeOverview | null>(() => overview());
-  const loading = useWorktreeLoading(appId, setValue);
+  const loading = useWorktreeLoading(appId, setValue, options);
   return { value, setValue, loading };
 }
+const kinds = () => request.mock.calls.map(([, variables]) => variables?.kind);
+const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
 test("shows a newly discovered merge request with a warning and retains it on saved refreshes", async () => {
   request.mockImplementation(
@@ -348,7 +355,7 @@ test("retries only the failed group, forces the read, and retains successful met
   expect(request).toHaveBeenCalledOnce();
   expect(request).toHaveBeenCalledWith(
     expect.any(String),
-    { appId: null, kind: "GITLAB_PIPELINES", force: true },
+    { appId: null, worktreeId: null, kind: "GITLAB_PIPELINES", force: true },
     { signal: expect.any(AbortSignal) },
   );
 });
@@ -375,4 +382,107 @@ test("aborts old requests on page scope changes and ignores their late results",
   unmount();
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(request).toHaveBeenCalledTimes(4);
+});
+
+test("reads optional metadata once across repeated saved reads, and again only for what changed", async () => {
+  const { result: hook } = renderHook(() => useLoader());
+  act(() => hook.current.loading.saved(overview()));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+
+  // Agents report every few seconds; an unchanged saved read asks for nothing.
+  for (let index = 0; index < 5; index++) {
+    act(() => hook.current.loading.saved(overview()));
+    await act(settle);
+  }
+  expect(request).toHaveBeenCalledTimes(4);
+
+  request.mockClear();
+  act(() =>
+    hook.current.loading.saved(overview(worktree({ headSha: "head-2" }))),
+  );
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
+  expect(kinds().sort()).toEqual([
+    "GITHUB",
+    "GITLAB_MERGE_REQUESTS",
+    "GITLAB_PIPELINES",
+  ]);
+
+  request.mockClear();
+  act(() =>
+    hook.current.loading.saved(
+      overview(worktree({ headSha: "head-2", ticketKey: "APP-2" })),
+    ),
+  );
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(kinds()).toEqual(["JIRA"]);
+});
+
+test("reads optional metadata again once it is old, and at once after a failure", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    request.mockImplementationOnce(async () => {
+      throw new Error("GitHub timed out");
+    });
+    const { result: hook } = renderHook(() => useLoader());
+    act(() => hook.current.loading.saved(overview()));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+    await waitFor(() =>
+      expect(hook.current.loading.timings.GITHUB.status).toBe("failed"),
+    );
+
+    request.mockClear();
+    act(() => hook.current.loading.saved(overview()));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(kinds()).toEqual(["GITHUB"]);
+
+    request.mockClear();
+    vi.setSystemTime(Date.now() + ENRICHMENT_MAX_AGE_MS - 1_000);
+    act(() => hook.current.loading.saved(overview()));
+    await act(settle);
+    expect(request).not.toHaveBeenCalled();
+
+    vi.setSystemTime(Date.now() + 1_000);
+    act(() => hook.current.loading.saved(overview()));
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("waits for integration availability and never asks an unconnected integration", async () => {
+  const { result: hook, rerender } = renderHook(
+    ({ integrations }: { integrations: IntegrationAvailability | "pending" }) =>
+      useLoader(undefined, { integrations }),
+    { initialProps: { integrations: "pending" } },
+  );
+  act(() => hook.current.loading.saved(overview()));
+  await act(settle);
+  expect(request).not.toHaveBeenCalled();
+
+  rerender({ integrations: { github: true, gitlab: false, jira: false } });
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  expect(kinds()).toEqual(["GITHUB"]);
+  expect(hook.current.loading.timings.GITLAB_PIPELINES.status).toBe("skipped");
+  expect(hook.current.loading.timings.JIRA.status).toBe("skipped");
+
+  request.mockClear();
+  rerender({ integrations: { github: true, gitlab: true, jira: false } });
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  expect(kinds().sort()).toEqual(["GITLAB_MERGE_REQUESTS", "GITLAB_PIPELINES"]);
+});
+
+test("scopes optional metadata to the repository of one worktree", async () => {
+  const { result: hook } = renderHook(() =>
+    useLoader(undefined, { worktreeId: "w-1" }),
+  );
+  act(() => hook.current.loading.saved(overview()));
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(4));
+  expect(
+    request.mock.calls.every(
+      ([query, variables]) =>
+        String(query).includes("worktreeId: $worktreeId") &&
+        variables?.worktreeId === "w-1" &&
+        variables.appId === null,
+    ),
+  ).toBe(true);
 });

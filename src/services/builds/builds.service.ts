@@ -833,13 +833,23 @@ export class BuildsService {
     );
   }
 
-  private publish(buildId: string): void {
+  /**
+   * A build moved along without changing state: its own page and the build
+   * lists change. Progress arrives throughout a build, so it stays off the
+   * topics every open tab rereads for.
+   */
+  private publishProgress(buildId: string): void {
     agentEventBus.publish(buildTopic(buildId), {
       buildChanged: { id: buildId },
     });
     agentEventBus.publish(BUILDS_CHANGED_TOPIC, {
       buildsChanged: { id: buildId },
     });
+  }
+
+  /** A build changed state, which the sidebar totals and Action Center count. */
+  private publish(buildId: string): void {
+    this.publishProgress(buildId);
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
     });
@@ -4265,7 +4275,7 @@ export class BuildsService {
       throw new Error("Build script execution progress is invalid");
     }
     const prisma = await getPrismaClient();
-    const { build, changed } = await prisma.$transaction(
+    const { build, changed, statusChanged } = await prisma.$transaction(
       async (transaction) => {
         const build = await transaction.build.findUnique({
           where: { id: input.buildId },
@@ -4273,7 +4283,7 @@ export class BuildsService {
         if (!build || build.agentId !== agentId)
           throw new Error("Build not found for agent");
         if (!ACTIVE_BUILD_STATUSES.includes(build.status)) {
-          return { build, changed: false };
+          return { build, changed: false, statusChanged: false };
         }
         for (const execution of executions) {
           const existing = await transaction.buildScriptExecution.findUnique({
@@ -4319,10 +4329,15 @@ export class BuildsService {
             error: input.error ?? undefined,
           },
         });
-        return { build: updated, changed: true };
+        return {
+          build: updated,
+          changed: true,
+          statusChanged: updated.status !== build.status,
+        };
       },
     );
-    if (changed) this.publish(input.buildId);
+    if (statusChanged) this.publish(input.buildId);
+    else if (changed) this.publishProgress(input.buildId);
     return build;
   }
 

@@ -15,6 +15,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -27,6 +28,26 @@ export type ActiveAgentOption = {
   connectionStatus: string;
   capabilities?: string[];
 };
+
+const AGENT_OPTION_FIELDS = "id name hostname connectionStatus capabilities";
+const RECONCILE_INTERVAL_MS = 60_000;
+
+function sortAgents(options: ActiveAgentOption[]): ActiveAgentOption[] {
+  return [...options].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) || a.hostname.localeCompare(b.hostname),
+  );
+}
+
+function sameOption(a: ActiveAgentOption, b: ActiveAgentOption): boolean {
+  return (
+    a.name === b.name &&
+    a.hostname === b.hostname &&
+    a.connectionStatus === b.connectionStatus &&
+    (a.capabilities ?? []).join("\u0000") ===
+      (b.capabilities ?? []).join("\u0000")
+  );
+}
 
 type Preferences = {
   activeAgentId: string | null;
@@ -189,57 +210,83 @@ function ScopedActiveAgentProvider({
   }, []);
 
   useEffect(() => {
+    const known = new Set<string>();
+    // A heartbeat that lands during a read is newer than that read's snapshot.
+    let duringRead: Map<string, ActiveAgentOption> | null = null;
     const updates = createRefreshCoalescer(async (signal) => {
       setLoading(true);
+      const arrived = new Map<string, ActiveAgentOption>();
+      duringRead = arrived;
       try {
         const data = await controlPlaneRequest<{ agents: ActiveAgentOption[] }>(
-          `query ActiveAgentOptions { agents { id name hostname connectionStatus capabilities } }`,
+          `query ActiveAgentOptions { agents { ${AGENT_OPTION_FIELDS} } }`,
           undefined,
           { signal },
         );
         if (signal.aborted) return;
-        const options = [...data.agents].sort(
-          (a, b) =>
-            a.name.localeCompare(b.name) ||
-            a.hostname.localeCompare(b.hostname),
+        const options = sortAgents(
+          data.agents.map((agent) => arrived.get(agent.id) ?? agent),
         );
+        known.clear();
+        for (const { id } of options) known.add(id);
         setAgents(options);
         setError(null);
         const selected = store.getSnapshot().preferences.activeAgentId;
-        if (selected && !options.some(({ id }) => id === selected))
-          selectAgent(null);
+        if (selected && !known.has(selected)) selectAgent(null);
       } catch (value) {
         if (!signal.aborted)
           setError(value instanceof Error ? value.message : String(value));
       } finally {
+        if (duringRead === arrived) duringRead = null;
         if (!signal.aborted) setLoading(false);
       }
     });
     owner.current = updates;
-    const recover = () => {
-      if (document.visibilityState !== "hidden") void updates.refresh();
-    };
-    const unsubscribe = controlPlaneSubscriptions().subscribe(
+    // An expired heartbeat or a deleted agent emits no event, so reconcile on a
+    // slow cadence while someone is looking.
+    const live = createLiveRefresh(() => updates.refresh(), {
+      pollMs: RECONCILE_INTERVAL_MS,
+    });
+    const unsubscribe = controlPlaneSubscriptions().subscribe<{
+      agentChanged: ActiveAgentOption;
+    }>(
       {
-        query: "subscription ActiveAgentOptionsChanged { agentChanged { id } }",
+        query: `subscription ActiveAgentOptionsChanged { agentChanged { ${AGENT_OPTION_FIELDS} } }`,
       },
       {
-        next: () => void updates.refresh(),
+        next: (result) => {
+          const changed = result.data?.agentChanged;
+          if (!changed) return;
+          duringRead?.set(changed.id, changed);
+          if (!known.has(changed.id)) {
+            // Not listed yet: a read in flight will include it; otherwise ask.
+            if (!duringRead) live.invalidate();
+            return;
+          }
+          // Every agent heartbeats every few seconds. Apply the payload rather
+          // than reading the whole catalog again on each one.
+          setAgents((current) => {
+            const existing = current.find(({ id }) => id === changed.id);
+            if (!existing || sameOption(existing, changed)) return current;
+            return sortAgents(
+              current.map((agent) =>
+                agent.id === changed.id ? { ...agent, ...changed } : agent,
+              ),
+            );
+          });
+        },
         error: () => undefined,
         complete: () => undefined,
       },
     );
-    const offRecovery = onControlPlaneRecovery(recover);
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    const offRecovery = onControlPlaneRecovery(() => live.invalidate());
     void updates.refresh();
     return () => {
       owner.current = null;
+      live.dispose();
       updates.dispose();
       unsubscribe();
       offRecovery();
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
     };
   }, [selectAgent, store]);
 

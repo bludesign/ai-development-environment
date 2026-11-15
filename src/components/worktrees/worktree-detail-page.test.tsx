@@ -25,6 +25,18 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: vi.fn(),
   onControlPlaneConnected: vi.fn(() => vi.fn()),
 }));
+// These cases assert what an event changes on the page, not when. The spacing
+// between event-driven reads is covered in src/lib/live-refresh.test.ts.
+vi.mock("@/lib/live-refresh", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/live-refresh")>();
+  return {
+    ...original,
+    createLiveRefresh: (
+      ...[refresh, options]: Parameters<typeof original.createLiveRefresh>
+    ) => original.createLiveRefresh(refresh, { ...options, minIntervalMs: 0 }),
+  };
+});
+
 vi.mock("./worktree-jobs", () => ({
   waitForWorktreeJob: vi.fn(async () => ({ status: "SUCCEEDED" })),
   waitForWorktreeMove: vi.fn(async () => ({
@@ -325,7 +337,12 @@ describe("WorktreeDetailPage", () => {
         expect(assign).not.toBeNull();
         expect(assign!.hasAttribute("disabled")).toBe(false);
       } else expect(assign).toBeNull();
-      expect(request.mock.calls[0]![0]).toContain("canAssignReviewers");
+      const overviewQuery = request.mock.calls.find(([query]) =>
+        query.includes("WorktreeDetailOverview"),
+      )![0];
+      expect(overviewQuery).toContain("canAssignReviewers");
+      // The page shows saved data first; integrations are asked separately.
+      expect(overviewQuery).toContain("savedOnly: true");
     },
   );
 
@@ -1058,18 +1075,20 @@ describe("WorktreeDetailPage", () => {
     expect(requestCount("GitHubWorktreeWorkflowRuns")).toBe(1);
   });
 
-  test("refreshes GitHub pipelines on the thirty-second poll", async () => {
-    const nativeSetInterval = globalThis.setInterval.bind(globalThis);
+  test("reconciles GitHub pipelines on the thirty-second poll, and not while hidden", async () => {
+    const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
     let poll: (() => void) | undefined;
-    const interval = vi
-      .spyOn(globalThis, "setInterval")
-      .mockImplementation((handler, timeout, ...args) => {
-        if (timeout === 30_000 && typeof handler === "function") {
-          poll = () => handler(...args);
-          return nativeSetInterval(() => undefined, timeout);
-        }
-        return nativeSetInterval(handler, timeout, ...args);
-      });
+    const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      handler: (...values: unknown[]) => void,
+      delay?: number,
+      ...args: unknown[]
+    ) => {
+      if (delay === 30_000) {
+        poll = () => handler(...args);
+        return nativeSetTimeout(() => undefined, 0);
+      }
+      return nativeSetTimeout(handler, delay, ...args);
+    }) as typeof setTimeout);
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {
         return { worktreeOverview: overview() } as never;
@@ -1094,7 +1113,74 @@ describe("WorktreeDetailPage", () => {
 
     act(() => poll!());
     await waitFor(() => expect(pipelineRequestCount()).toBe(2));
-    interval.mockRestore();
+
+    // A hidden tab skips the poll and catches up once when it is shown again.
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    try {
+      act(() => poll!());
+      await act(() => new Promise((resolve) => nativeSetTimeout(resolve, 20)));
+      expect(pipelineRequestCount()).toBe(2);
+      visibility.mockReturnValue("visible");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(pipelineRequestCount()).toBe(3));
+    } finally {
+      visibility.mockRestore();
+      timeout.mockRestore();
+    }
+  });
+
+  test("ignores an agent scan of another codebase", async () => {
+    let worktreeSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeDetailChanged"))
+            worktreeSink = sink;
+          return vi.fn();
+        },
+      ),
+    } as never);
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        return { worktreeOverview: overview() } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+    await screen.findByRole("heading", { name: "feature/AIDE-43" });
+    await waitFor(() => expect(worktreeSink).toBeDefined());
+    const overviewReads = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("WorktreeDetailOverview"),
+      ).length;
+    const initial = overviewReads();
+    const scan = (codebaseId: string | null) =>
+      act(() =>
+        worktreeSink!.next({
+          data: { worktreeOverviewChanged: { worktreeId: null, codebaseId } },
+        }),
+      );
+
+    // Agents report every codebase every few seconds.
+    scan("codebase-elsewhere");
+    await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(overviewReads()).toBe(initial);
+
+    scan("codebase-1");
+    await waitFor(() => expect(overviewReads()).toBe(initial + 1));
+    // A change that names neither still concerns every worktree.
+    scan(null);
+    await waitFor(() => expect(overviewReads()).toBe(initial + 2));
   });
 
   test("shows an inspection error while keeping management controls available", async () => {

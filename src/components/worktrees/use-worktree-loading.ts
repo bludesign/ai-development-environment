@@ -30,7 +30,7 @@ export const ENRICHMENT_KINDS = [
 export type EnrichmentKind = (typeof ENRICHMENT_KINDS)[number];
 export type LoadingStage = "SAVED" | EnrichmentKind;
 export type LoadTiming = {
-  status: "pending" | "running" | "complete" | "warning" | "failed";
+  status: "pending" | "running" | "complete" | "warning" | "failed" | "skipped";
   startedAt: number | null;
   finishedAt: number | null;
   durationMs: number | null;
@@ -51,6 +51,24 @@ const initialTimings = (): LoadTimings => ({
   GITLAB_PIPELINES: initialTiming(),
   JIRA: initialTiming(),
 });
+
+/** Which optional integrations are connected; an unconnected one is never asked. */
+export type IntegrationAvailability = {
+  github: boolean;
+  gitlab: boolean;
+  jira: boolean;
+};
+const INTEGRATION_FOR: Record<EnrichmentKind, keyof IntegrationAvailability> = {
+  GITHUB: "github",
+  GITLAB_MERGE_REQUESTS: "gitlab",
+  GITLAB_PIPELINES: "gitlab",
+  JIRA: "jira",
+};
+/**
+ * Saved reads repeat every few seconds while agents report. Optional metadata
+ * is read again only when what it describes changed, or after this long.
+ */
+export const ENRICHMENT_MAX_AGE_MS = 60_000;
 
 type Identity = Pick<
   Worktree,
@@ -84,6 +102,27 @@ function indexed(overview: WorktreeOverview | null) {
       ),
     ) ?? [],
   );
+}
+/** What one kind of metadata describes; a change means it must be read again. */
+function enrichmentSubject(
+  overview: WorktreeOverview | null,
+  kind: EnrichmentKind,
+): string {
+  return [...indexed(overview).values()]
+    .map((worktree) =>
+      kind === "JIRA"
+        ? [worktree.id, worktree.ticketKey ?? ""]
+        : [
+            worktree.id,
+            worktree.codebaseId,
+            worktree.branch ?? "",
+            worktree.headSha ?? "",
+            worktree.canonicalOrigin,
+          ],
+    )
+    .map((parts) => parts.join("\u0000"))
+    .sort()
+    .join("\u0001");
 }
 function sameIdentity(a: Identity | undefined, b: Identity) {
   return (
@@ -241,34 +280,56 @@ const fields: Record<EnrichmentKind, string> = {
   JIRA: "ticketTitle ticketStatus",
 };
 
+type KindEntry = {
+  owner: RefreshCoalescer;
+  force: boolean;
+  /** What the last read described, or null when it must be read again. */
+  subject: string | null;
+  startedAt: number;
+};
+
 export function useWorktreeLoading(
   appId: string | undefined,
   setOverview: Dispatch<SetStateAction<WorktreeOverview | null>>,
+  {
+    worktreeId,
+    integrations,
+  }: {
+    /** Scope to the repository that contains this worktree. */
+    worktreeId?: string;
+    /** "pending" holds optional metadata until the answer is known. */
+    integrations?: IntegrationAvailability | "pending";
+  } = {},
 ) {
+  const scopeKey = `${appId ?? ""}\u0000${worktreeId ?? ""}`;
   const [state, setState] = useState<{
-    scope: string | undefined;
+    scope: string;
     timings: LoadTimings;
-  }>(() => ({ scope: appId, timings: initialTimings() }));
+  }>(() => ({ scope: scopeKey, timings: initialTimings() }));
   const scope = useRef<{
+    key: string;
     appId?: string;
+    worktreeId?: string;
     active: boolean;
     force: boolean;
     snapshot: WorktreeOverview | null;
     timer: ReturnType<typeof setTimeout> | null;
-    owners: Map<EnrichmentKind, { owner: RefreshCoalescer; force: boolean }>;
+    owners: Map<EnrichmentKind, KindEntry>;
+    skipped: Set<EnrichmentKind>;
   } | null>(null);
+  const availability = useRef(integrations);
 
   useEffect(() => {
     const lifetime = {
+      key: scopeKey,
       appId,
+      worktreeId,
       active: true,
       force: false,
       snapshot: null as WorktreeOverview | null,
       timer: null as ReturnType<typeof setTimeout> | null,
-      owners: new Map<
-        EnrichmentKind,
-        { owner: RefreshCoalescer; force: boolean }
-      >(),
+      owners: new Map<EnrichmentKind, KindEntry>(),
+      skipped: new Set<EnrichmentKind>(),
     };
     scope.current = lifetime;
     return () => {
@@ -277,7 +338,7 @@ export function useWorktreeLoading(
       lifetime.owners.forEach(({ owner }) => owner.dispose());
       if (scope.current === lifetime) scope.current = null;
     };
-  }, [appId]);
+  }, [appId, scopeKey, worktreeId]);
 
   const mark = useCallback(
     (stage: LoadingStage, patch: Partial<LoadTiming>) => {
@@ -285,11 +346,9 @@ export function useWorktreeLoading(
       if (!lifetime?.active) return;
       setState((previous) => {
         const timings =
-          previous.scope === lifetime.appId
-            ? previous.timings
-            : initialTimings();
+          previous.scope === lifetime.key ? previous.timings : initialTimings();
         return {
-          scope: lifetime.appId,
+          scope: lifetime.key,
           timings: { ...timings, [stage]: { ...timings[stage], ...patch } },
         };
       });
@@ -305,6 +364,8 @@ export function useWorktreeLoading(
       if (!entry) {
         entry = {
           force: false,
+          subject: null,
+          startedAt: 0,
           owner: createRefreshCoalescer(async (signal) => {
             const forced = lifetime.owners.get(kind)!.force;
             lifetime.owners.get(kind)!.force = false;
@@ -321,13 +382,18 @@ export function useWorktreeLoading(
               const { worktreeEnrichment } = await controlPlaneRequest<{
                 worktreeEnrichment: Enrichment;
               }>(
-                `query WorktreeEnrichment($appId: ID, $kind: WorktreeEnrichmentKind!, $force: Boolean!) {
-              worktreeEnrichment(appId: $appId, kind: $kind, force: $force) {
+                `query WorktreeEnrichment($appId: ID, $worktreeId: ID, $kind: WorktreeEnrichmentKind!, $force: Boolean!) {
+              worktreeEnrichment(appId: $appId, worktreeId: $worktreeId, kind: $kind, force: $force) {
                 durationMs warnings { worktreeId message preserveFields }
                 updates { canonicalOrigin worktree { id codebaseId branch headSha ticketKey ${fields[kind]} } }
               }
             }`,
-                { appId: lifetime.appId ?? null, kind, force: forced },
+                {
+                  appId: lifetime.appId ?? null,
+                  worktreeId: lifetime.worktreeId ?? null,
+                  kind,
+                  force: forced,
+                },
                 { signal },
               );
               if (!lifetime.active || signal.aborted) return;
@@ -354,6 +420,8 @@ export function useWorktreeLoading(
               });
             } catch (value) {
               if (!lifetime.active || signal.aborted) return;
+              // Try again with the next saved read rather than waiting it out.
+              lifetime.owners.get(kind)!.subject = null;
               mark(kind, {
                 status: "failed",
                 finishedAt: Date.now(),
@@ -367,10 +435,47 @@ export function useWorktreeLoading(
         lifetime.owners.set(kind, entry);
       }
       entry.force ||= force;
+      entry.subject = enrichmentSubject(lifetime.snapshot, kind);
+      entry.startedAt = Date.now();
+      lifetime.skipped.delete(kind);
       void entry.owner.refresh();
     },
     [mark, setOverview],
   );
+
+  /** Decide, for the latest saved read, which optional metadata is worth reading. */
+  const enrich = useCallback(() => {
+    const lifetime = scope.current;
+    if (!lifetime?.active || !lifetime.snapshot) return;
+    const connected = availability.current;
+    if (connected === "pending") return;
+    const force = lifetime.force;
+    lifetime.force = false;
+    for (const kind of ENRICHMENT_KINDS) {
+      if (connected && !connected[INTEGRATION_FOR[kind]]) {
+        if (!lifetime.skipped.has(kind)) {
+          lifetime.skipped.add(kind);
+          mark(kind, { ...initialTiming(), status: "skipped" });
+        }
+        continue;
+      }
+      const entry = lifetime.owners.get(kind);
+      if (
+        force ||
+        !entry ||
+        lifetime.skipped.has(kind) ||
+        entry.subject !== enrichmentSubject(lifetime.snapshot, kind) ||
+        Date.now() - entry.startedAt >= ENRICHMENT_MAX_AGE_MS
+      )
+        refreshKind(kind, force);
+    }
+  }, [mark, refreshKind]);
+
+  useEffect(() => {
+    availability.current = integrations;
+    // A saved read that arrived first has been waiting for this answer.
+    enrich();
+  }, [enrich, integrations]);
 
   const saved = useCallback(
     (snapshot: WorktreeOverview) => {
@@ -385,17 +490,14 @@ export function useWorktreeLoading(
       if (lifetime.timer !== null) clearTimeout(lifetime.timer);
       lifetime.timer = setTimeout(() => {
         lifetime.timer = null;
-        if (!lifetime.active) return;
-        const force = lifetime.force;
-        lifetime.force = false;
-        for (const kind of ENRICHMENT_KINDS) refreshKind(kind, force);
+        enrich();
       }, 0);
     },
-    [mark, refreshKind],
+    [enrich, mark],
   );
 
   return {
-    timings: state.scope === appId ? state.timings : initialTimings(),
+    timings: state.scope === scopeKey ? state.timings : initialTimings(),
     begin: useCallback(
       () =>
         mark("SAVED", {
