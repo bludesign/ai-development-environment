@@ -3,7 +3,6 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
   clearMergeOperation,
-  dismissMergeOperationProgress,
   recordPostMergeSwitch,
   useMergeOperationProgress,
   githubMergeOperationKey,
@@ -92,7 +91,8 @@ test("keeps a confirmed result when retrying its follow-ups fails", async () => 
   expect(reopened.result.current.error).toBe("Connection lost");
 });
 
-test("dismissing a completed progress card preserves the result and trigger status across polling", async () => {
+test("a successful switch from a mutation expires even when its result is read again", async () => {
+  vi.useFakeTimers();
   const merged = { state: "MERGED" };
   await runMergeOperation(first, "merge", async () => merged);
   const status = { branch: "main", state: "COMPLETED", lastError: null };
@@ -100,9 +100,9 @@ test("dismissing a completed progress card preserves the result and trigger stat
     operation: useMergeOperation(first),
     progress: useMergeOperationProgress(),
   }));
-  act(() => recordPostMergeSwitch(first, status));
+  act(() => recordPostMergeSwitch(first, status, undefined, true));
   expect(view.result.current.progress).toHaveLength(1);
-  act(() => dismissMergeOperationProgress(first));
+  act(() => vi.advanceTimersByTime(5_000));
   act(() => recordPostMergeSwitch(first, { ...status }));
   expect(view.result.current.progress).toHaveLength(0);
   expect(view.result.current.operation.result).toBe(merged);
@@ -111,6 +111,17 @@ test("dismissing a completed progress card preserves the result and trigger stat
     await runMergeOperation(first, "retry", async () => merged);
   });
   expect(view.result.current.progress).toHaveLength(0);
+});
+
+test("recovering a saved successful switch restores its result without replaying the notice", () => {
+  const status = { branch: "main", state: "COMPLETED", lastError: null };
+  const view = renderHook(() => ({
+    operation: useMergeOperation(first),
+    progress: useMergeOperationProgress(),
+  }));
+  act(() => recordPostMergeSwitch(first, status));
+  expect(view.result.current.progress).toHaveLength(0);
+  expect(view.result.current.operation.postMergeSwitch).toEqual(status);
 });
 
 test("expires only the completed switch banner across navigation and refresh", async () => {

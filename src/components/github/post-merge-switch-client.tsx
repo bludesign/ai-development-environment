@@ -83,7 +83,7 @@ export function trackPostMergeSwitch(
       label,
       initial.state === "ACTION_REQUIRED" ? "ACTION_REQUIRED" : "POST_MERGE",
     );
-    recordPostMergeSwitch(key, initial, label);
+    recordPostMergeSwitch(key, initial, label, true);
   }
   const current = watchers.get(key);
   if (current) return current;

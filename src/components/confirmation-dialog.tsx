@@ -21,6 +21,7 @@ type ConfirmationDialogProps = {
   open?: boolean;
   title: string;
   trigger?: ReactNode;
+  variant?: "default" | "destructive";
 };
 
 export function ConfirmationDialog({
@@ -32,6 +33,7 @@ export function ConfirmationDialog({
   open,
   title,
   trigger,
+  variant = "destructive",
 }: ConfirmationDialogProps) {
   return (
     <AlertDialog onOpenChange={onOpenChange} open={open}>
@@ -43,10 +45,7 @@ export function ConfirmationDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>{cancelLabel}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => void onConfirm()}
-            variant="destructive"
-          >
+          <AlertDialogAction onClick={() => void onConfirm()} variant={variant}>
             {actionLabel}
           </AlertDialogAction>
         </AlertDialogFooter>

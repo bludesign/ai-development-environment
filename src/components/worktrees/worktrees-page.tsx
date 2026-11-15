@@ -1135,118 +1135,117 @@ export function WorktreesPage({
     changesFilter !== ALL_FILTER_VALUE ||
     branchFilter !== ALL_FILTER_VALUE;
 
+  const renderHeader = (mergeTrigger: React.ReactNode) => (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={busy || fetchOperation.active}
+          onClick={() => void refresh()}
+          variant="outline"
+        >
+          <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
+          {t("refresh")}
+        </Button>
+        <Button
+          disabled={busy || fetchOperation.active || !overview?.agents.length}
+          onClick={() => void fetchNow()}
+          variant="outline"
+        >
+          {fetchOperation.active ? (
+            <Spinner aria-hidden="true" />
+          ) : (
+            <Download />
+          )}{" "}
+          {fetchOperation.active && fetchOperation.batch
+            ? t(`fetchProgress.${fetchOperation.batch.phase}`)
+            : t("fetchNow")}
+        </Button>
+        <WorktreeBulkSync
+          agentId={globalAgent.activeAgentId}
+          appId={appId}
+          disabled={busy || fetchOperation.active || !overview?.agents.length}
+          key={`${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+          onReload={refreshPage}
+          overview={overview}
+          scopeRepositoryIds={scopeRepositoryIds}
+        />
+        {mergeTrigger}
+        <WorktreeBulkBranch
+          agentId={globalAgent.activeAgentId}
+          agents={filteredAgents}
+          allAgents={overview?.agents ?? []}
+          appId={appId}
+          disabled={busy || fetchOperation.active || !overview}
+          key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+          onReload={refreshPage}
+        />
+        <Button onClick={() => setHiddenOpen(true)} variant="outline">
+          <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
+        </Button>
+        <Select
+          onValueChange={(value) => {
+            if (value === "agent" || value === "repository") {
+              setGroupByAndRemember(value);
+            }
+          }}
+          value={groupBy}
+        >
+          <SelectTrigger aria-label={t("groupBy")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="agent">{t("groupByAgent")}</SelectItem>
+            <SelectItem value="repository">{t("groupByRepository")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <ToggleGroup
+          aria-label={`${t("cards")} / ${t("table")}`}
+          onValueChange={(value) => {
+            if (value === "cards" || value === "table") {
+              setLayoutAndRemember(value);
+            }
+          }}
+          spacing={0}
+          type="single"
+          value={layout}
+          variant="outline"
+        >
+          <ToggleGroupItem
+            aria-label={t("cards")}
+            className="px-2"
+            value="cards"
+          >
+            <Grid2X2 />
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            aria-label={t("table")}
+            className="px-2"
+            value="table"
+          >
+            <List />
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+    </div>
+  );
+
   return (
     <section className="flex w-full flex-col gap-6">
       <WorktreeMergeFollowUps
         groups={overview?.agents.flatMap((agent) => agent.codebases) ?? []}
       />
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {t("title")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("description")}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={busy || fetchOperation.active}
-            onClick={() => void refresh()}
-            variant="outline"
-          >
-            <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
-            {t("refresh")}
-          </Button>
-          <Button
-            disabled={busy || fetchOperation.active || !overview?.agents.length}
-            onClick={() => void fetchNow()}
-            variant="outline"
-          >
-            {fetchOperation.active ? (
-              <Spinner aria-hidden="true" />
-            ) : (
-              <Download />
-            )}{" "}
-            {fetchOperation.active && fetchOperation.batch
-              ? t(`fetchProgress.${fetchOperation.batch.phase}`)
-              : t("fetchNow")}
-          </Button>
-          <WorktreeBulkSync
-            agentId={globalAgent.activeAgentId}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview?.agents.length}
-            key={`${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-            overview={overview}
-            scopeRepositoryIds={scopeRepositoryIds}
-          />
-          <WorktreeBulkMerge
-            agentId={globalAgent.activeAgentId}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview}
-            key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-          />
-          <WorktreeBulkBranch
-            agentId={globalAgent.activeAgentId}
-            agents={filteredAgents}
-            allAgents={overview?.agents ?? []}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview}
-            key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-          />
-          <Button onClick={() => setHiddenOpen(true)} variant="outline">
-            <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
-          </Button>
-          <Select
-            onValueChange={(value) => {
-              if (value === "agent" || value === "repository") {
-                setGroupByAndRemember(value);
-              }
-            }}
-            value={groupBy}
-          >
-            <SelectTrigger aria-label={t("groupBy")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="agent">{t("groupByAgent")}</SelectItem>
-              <SelectItem value="repository">
-                {t("groupByRepository")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <ToggleGroup
-            aria-label={`${t("cards")} / ${t("table")}`}
-            onValueChange={(value) => {
-              if (value === "cards" || value === "table") {
-                setLayoutAndRemember(value);
-              }
-            }}
-            spacing={0}
-            type="single"
-            value={layout}
-            variant="outline"
-          >
-            <ToggleGroupItem
-              aria-label={t("cards")}
-              className="px-2"
-              value="cards"
-            >
-              <Grid2X2 />
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              aria-label={t("table")}
-              className="px-2"
-              value="table"
-            >
-              <List />
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-      </div>
+      <WorktreeBulkMerge
+        agentId={globalAgent.activeAgentId}
+        appId={appId}
+        disabled={busy || fetchOperation.active || !overview}
+        key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+        onReload={refreshPage}
+        renderHeader={renderHeader}
+      />
 
       <WorktreeLoadingStatus
         timings={timings}

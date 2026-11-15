@@ -230,7 +230,16 @@ test.describe("app screenshots", () => {
         ).toBeChecked();
         await expect(
           page.getByRole("checkbox", { name: "Select QA iPhone 18 Pro" }),
-        ).toBeDisabled();
+        ).toBeChecked();
+        await expect(
+          page.getByRole("button", { name: "Shut down selected" }),
+        ).toBeEnabled();
+        await page.getByRole("button", { name: "Shut down selected" }).click();
+        const confirmation = page.getByRole("alertdialog");
+        await expect(
+          confirmation.getByText("Shut down the selected running simulator?"),
+        ).toBeVisible();
+        await confirmation.getByRole("button", { name: "Cancel" }).click();
         await expect(
           page.getByRole("button", { name: "Delete selected" }),
         ).toBeEnabled();

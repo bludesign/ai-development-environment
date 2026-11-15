@@ -275,11 +275,26 @@ export function recordPostMergeSwitch(
   key: string,
   status: PostMergeSwitchStatus,
   label?: string,
+  fromMutation = false,
 ) {
   const previous = getMergeOperationSnapshot(key);
+  let progressDismissed = false;
+  if (status.state === "COMPLETED") {
+    if (
+      previous.postMergeSwitch?.state === "COMPLETED" &&
+      previous.postMergeSwitch.branch === status.branch
+    ) {
+      progressDismissed = Boolean(previous.progressDismissed);
+    } else {
+      // A saved result can be recovered any time a worktree or sheet loads.
+      progressDismissed =
+        !fromMutation && !postMergeSwitchPending(previous.postMergeSwitch);
+    }
+  }
   publish(key, {
     ...previous,
     postMergeSwitch: status,
+    progressDismissed,
     pending:
       Boolean(previous.mutationPending) || postMergeSwitchPending(status),
     error:
@@ -326,7 +341,7 @@ export function clearMergeOperationProgress(key: string) {
   });
 }
 
-export function dismissMergeOperationProgress(key: string) {
+function dismissMergeOperationProgress(key: string) {
   const state = operations.get(key);
   if (state?.postMergeSwitch?.state === "COMPLETED")
     publish(key, { ...state, progressDismissed: true });

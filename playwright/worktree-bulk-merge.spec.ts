@@ -119,6 +119,7 @@ const candidates = [
 for (const appId of [null, ids.apps.customerPortal]) {
   test(`Bulk Merge reviews settings and restores results on ${appId ? "app" : "global"} Worktrees`, async ({
     page,
+    isMobile,
   }, info) => {
     await page.setExtraHTTPHeaders({
       Authorization: `Bearer ${screenshotSessionToken}`,
@@ -126,6 +127,24 @@ for (const appId of [null, ids.apps.customerPortal]) {
     await setScreenshotTime(page);
     let submitted = false;
     let complete = false;
+    const longText = appId && isMobile ? "account-search".repeat(24) : "";
+    const searchCandidate = candidates[0]!;
+    const reviewedCandidates =
+      longText && searchCandidate.githubOptions
+        ? [
+            {
+              ...searchCandidate,
+              folder: `/workspaces/${longText}`,
+              requestTitle: longText,
+              githubOptions: {
+                ...searchCandidate.githubOptions,
+                commitEmails: [`${longText}@acme.example`],
+                defaultCommitEmail: `${longText}@acme.example`,
+              },
+            },
+            ...candidates.slice(1),
+          ]
+        : candidates;
     const batch = () => ({
       id: "bulk-merge-batch",
       appId,
@@ -137,6 +156,7 @@ for (const appId of [null, ids.apps.customerPortal]) {
       items: [
         {
           ...accountSearch,
+          requestTitle: longText || accountSearch.requestTitle,
           id: "merge-item-search",
           status: complete ? "MERGED" : "SUBMITTING",
           error: null,
@@ -159,7 +179,9 @@ for (const appId of [null, ids.apps.customerPortal]) {
       if (query?.includes("query WorktreeMergeCandidates")) {
         expect(variables.appId ?? null).toBe(appId);
         return respond({
-          worktreeMergeCandidates: submitted ? [candidates[2]] : candidates,
+          worktreeMergeCandidates: submitted
+            ? [candidates[2]]
+            : reviewedCandidates,
         });
       }
       if (query?.includes("query WorktreeMergeBatches")) {
@@ -232,6 +254,19 @@ for (const appId of [null, ids.apps.customerPortal]) {
     await edit.click();
     const headline = dialog.getByRole("textbox", { name: "Commit message" });
     await expect(headline).toHaveValue("Add account search (#42)");
+    if (longText) {
+      const email = dialog.getByRole("combobox", { name: "Commit email" });
+      await expect(email).toContainText(longText);
+      await expect
+        .poll(() =>
+          dialog.evaluate((sheet) =>
+            [...sheet.querySelectorAll("section, li, [role=combobox]")].every(
+              (element) => element.scrollWidth <= element.clientWidth + 1,
+            ),
+          ),
+        )
+        .toBe(true);
+    }
     await headline.fill("Ship account search");
     await edit.click();
     await expect(
@@ -251,11 +286,29 @@ for (const appId of [null, ids.apps.customerPortal]) {
       dialog.getByRole("heading", { name: "Bulk Merge running" }),
     ).toBeVisible();
     await dialog
-      .getByRole("button", { name: "Close", exact: true })
-      .first()
+      .getByRole("button", { name: "Continue in background" })
+      .click();
+    await expect(dialog).toBeHidden();
+    const status = page.getByRole("region", { name: "Bulk Merge running" });
+    await expect(status.getByText("0 of 2 requests processed")).toBeVisible();
+    if (!appId) {
+      await page.mouse.move(2, 2);
+      await page.screenshot({
+        path: `screenshots/${info.project.name}/worktree-bulk-merge-background.png`,
+        animations: "disabled",
+      });
+    }
+    await page.reload();
+    await expect(status.getByText("0 of 2 requests processed")).toBeVisible();
+    await status.getByRole("button", { name: "View progress" }).click();
+    await expect(
+      dialog.getByRole("heading", { name: "Bulk Merge running" }),
+    ).toBeVisible();
+    await dialog
+      .getByRole("button", { name: "Continue in background" })
       .click();
     complete = true;
-    await page.reload();
+    await expect(status).toBeHidden({ timeout: 10_000 });
     await page.getByRole("button", { name: "Bulk Merge", exact: true }).click();
     await expect(
       dialog.getByRole("heading", { name: "Bulk Merge completed" }),

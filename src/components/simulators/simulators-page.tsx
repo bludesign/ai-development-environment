@@ -5,6 +5,7 @@ import {
   ListFilter,
   MoreHorizontal,
   Plus,
+  Power,
   RefreshCw,
   Search,
   TabletSmartphone,
@@ -86,17 +87,29 @@ type SimulatorRow = {
   deviceTypeName: string | undefined;
 };
 
-type DeleteFailure = { row: SimulatorRow; message: string };
-type DeleteBatchResult = { agentIds: string[]; failures: DeleteFailure[] };
+type BulkAction = "DELETE" | "SHUTDOWN";
+type BatchFailure = { row: SimulatorRow; message: string };
+type BatchResult = {
+  action: BulkAction;
+  agentIds: string[];
+  failures: BatchFailure[];
+};
 
 function simulatorRowKey({ agent, simulator }: SimulatorRow) {
   return `${agent.id}:${simulator.id}`;
 }
 
-async function deleteSimulatorGroups(groups: SimulatorRow[][]) {
+function canShutDownSimulator(simulator: Simulator) {
+  return simulator.isAvailable && simulator.state.toLowerCase() === "booted";
+}
+
+async function runSimulatorGroups(
+  action: BulkAction,
+  groups: SimulatorRow[][],
+) {
   // Confirmed writes keep their original targets when the visible agent changes.
   const { signal } = new AbortController();
-  const failures: DeleteFailure[] = [];
+  const failures: BatchFailure[] = [];
   const concurrentAgents = 4;
   for (let offset = 0; offset < groups.length; offset += concurrentAgents) {
     await Promise.all(
@@ -107,7 +120,7 @@ async function deleteSimulatorGroups(groups: SimulatorRow[][]) {
               {
                 agentId: row.agent.id,
                 simulatorId: row.simulator.id,
-                action: "DELETE",
+                action,
               },
               signal,
             );
@@ -136,19 +149,21 @@ export function SimulatorsPage({
   );
   const agentId =
     activeAgentId ?? (selection === ALL_PAGE_AGENTS ? null : selection);
-  const [deleting, setDeleting] = useState(false);
-  const [completedDeletion, setCompletedDeletion] =
-    useState<DeleteBatchResult | null>(null);
+  const [runningBatch, setRunningBatch] = useState<BulkAction | null>(null);
+  const [completedBatch, setCompletedBatch] = useState<BatchResult | null>(
+    null,
+  );
 
-  async function deleteBatch(groups: SimulatorRow[][]) {
-    setDeleting(true);
+  async function runBatch(action: BulkAction, groups: SimulatorRow[][]) {
+    setRunningBatch(action);
     try {
-      setCompletedDeletion({
+      setCompletedBatch({
+        action,
         agentIds: groups.map((rows) => rows[0]!.agent.id),
-        failures: await deleteSimulatorGroups(groups),
+        failures: await runSimulatorGroups(action, groups),
       });
     } finally {
-      setDeleting(false);
+      setRunningBatch(null);
     }
   }
 
@@ -165,11 +180,11 @@ export function SimulatorsPage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select
-            disabled={deleting}
+            disabled={Boolean(runningBatch)}
             value={platform}
             onValueChange={(value) => {
               setPlatform(value === "ANDROID" ? "ANDROID" : "APPLE");
-              setCompletedDeletion(null);
+              setCompletedBatch(null);
             }}
           >
             <SelectTrigger aria-label={t("simulatorFamily")}>
@@ -188,42 +203,55 @@ export function SimulatorsPage({
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      {deleting && (
+      {runningBatch && (
         <p
           className="flex items-center gap-2 text-sm text-muted-foreground"
           role="status"
         >
-          <Spinner /> {t("deletingSelected")}
+          <Spinner />{" "}
+          {t(
+            runningBatch === "DELETE"
+              ? "deletingSelected"
+              : "shuttingDownSelected",
+          )}
         </p>
       )}
-      {!deleting && Boolean(completedDeletion?.failures.length) && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            <p>{t("deleteFailures")}</p>
-            <ul className="list-disc pl-4">
-              {completedDeletion?.failures.map(({ row, message }) => (
-                <li key={simulatorRowKey(row)}>
-                  {t("deleteFailure", {
-                    name: row.simulator.name,
-                    agent: row.agent.name,
-                    message,
-                  })}
-                </li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
+      {!runningBatch &&
+        completedBatch &&
+        completedBatch.failures.length > 0 && (
+          <Alert variant="destructive">
+            <AlertDescription>
+              <p>
+                {t(
+                  completedBatch.action === "DELETE"
+                    ? "deleteFailures"
+                    : "shutdownFailures",
+                )}
+              </p>
+              <ul className="list-disc pl-4">
+                {completedBatch.failures.map(({ row, message }) => (
+                  <li key={simulatorRowKey(row)}>
+                    {t("batchFailure", {
+                      name: row.simulator.name,
+                      agent: row.agent.name,
+                      message,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
       {ready && (!loading || agents.length > 0) ? (
         <SimulatorList
-          completedDeletion={completedDeletion}
-          deleting={deleting}
+          completedBatch={completedBatch}
+          runningBatch={runningBatch}
           key={`${platform}:${agentId ?? ALL_PAGE_AGENTS}`}
           simulatorFamily={platform}
           agents={
             agentId ? agents.filter((agent) => agent.id === agentId) : agents
           }
-          onDelete={deleteBatch}
+          onBatch={runBatch}
         />
       ) : (
         <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -236,15 +264,15 @@ export function SimulatorsPage({
 
 function SimulatorList({
   agents,
-  completedDeletion,
-  deleting,
-  onDelete,
+  completedBatch,
+  runningBatch,
+  onBatch,
   simulatorFamily,
 }: {
   agents: ActiveAgentOption[];
-  completedDeletion: DeleteBatchResult | null;
-  deleting: boolean;
-  onDelete: (groups: SimulatorRow[][]) => Promise<void>;
+  completedBatch: BatchResult | null;
+  runningBatch: BulkAction | null;
+  onBatch: (action: BulkAction, groups: SimulatorRow[][]) => Promise<void>;
   simulatorFamily: SimulatorPlatform;
 }) {
   const t = useTranslations("simulators");
@@ -274,26 +302,28 @@ function SimulatorList({
   const [deletion, setDeletion] = useState<SimulatorRow | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [selection, setSelection] = useState<{
-    result: DeleteBatchResult | null;
+    result: BatchResult | null;
     keys: Set<string>;
   } | null>(null);
-  const [bulkDeletion, setBulkDeletion] = useState<Set<string> | null>(null);
+  const [batchConfirmation, setBatchConfirmation] = useState<{
+    action: BulkAction;
+    targets: Set<string>;
+  } | null>(null);
   const inventoryRequests = useRef(new Map<string, AbortController>());
   const operationRequest = useRef<AbortController | null>(null);
-  const [reconciledDeletion, setReconciledDeletion] =
-    useState(completedDeletion);
+  const [reconciledBatch, setReconciledBatch] = useState(completedBatch);
   const selected =
-    selection?.result === completedDeletion
+    selection?.result === completedBatch
       ? selection.keys
       : new Set(
-          completedDeletion?.failures.map(({ row }) => simulatorRowKey(row)),
+          completedBatch?.failures.map(({ row }) => simulatorRowKey(row)),
         );
   const setSelected = (keys: Set<string>) =>
-    setSelection({ result: completedDeletion, keys });
-  const operationsBusy = busy || deleting;
+    setSelection({ result: completedBatch, keys });
+  const operationsBusy = busy || Boolean(runningBatch);
   const refreshing = refreshingAgents.size > 0;
   const pendingReconciliation =
-    completedDeletion !== reconciledDeletion ? completedDeletion : null;
+    completedBatch !== reconciledBatch ? completedBatch : null;
   const inventoryPending = (agentId: string) =>
     refreshingAgents.has(agentId) ||
     Boolean(pendingReconciliation?.agentIds.includes(agentId));
@@ -356,13 +386,13 @@ function SimulatorList({
   }, [refresh]);
 
   useEffect(() => {
-    if (!completedDeletion || reconciledDeletion === completedDeletion) return;
+    if (!pendingReconciliation) return;
     const timer = window.setTimeout(() => {
-      setReconciledDeletion(completedDeletion);
-      void refresh(completedDeletion.agentIds);
+      setReconciledBatch(pendingReconciliation);
+      void refresh(pendingReconciliation.agentIds);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [completedDeletion, reconciledDeletion, refresh]);
+  }, [pendingReconciliation, refresh]);
 
   useEffect(() => () => operationRequest.current?.abort(), []);
 
@@ -466,17 +496,21 @@ function SimulatorList({
       rows: filtered.filter((row) => row.agent.id === agent.id),
     }))
     .filter((group) => group.rows.length > 0);
-  const canDelete = ({ agent, simulator }: SimulatorRow) =>
+  const canActOnRow = ({ agent }: SimulatorRow) =>
     !agentErrors[agent.id] &&
-    simulatorAgentSupports(agent, "action", simulatorFamily) &&
-    canDeleteSimulator(simulator);
+    simulatorAgentSupports(agent, "action", simulatorFamily);
+  const canSelect = (row: SimulatorRow) =>
+    canActOnRow(row) &&
+    (canDeleteSimulator(row.simulator) || canShutDownSimulator(row.simulator));
+  const canPerform = (row: SimulatorRow, action: BulkAction) =>
+    canActOnRow(row) &&
+    (action === "DELETE"
+      ? canDeleteSimulator(row.simulator)
+      : canShutDownSimulator(row.simulator));
   const selectedRows = filtered.filter(
-    (row) => canDelete(row) && selected.has(simulatorRowKey(row)),
+    (row) => canSelect(row) && selected.has(simulatorRowKey(row)),
   );
   const selectedVisible = new Set(selectedRows.map(simulatorRowKey));
-  const selectedInventoryPending = selectedRows.some(({ agent }) =>
-    inventoryPending(agent.id),
-  );
 
   function changeFilter(setFilter: (value: string) => void, value: string) {
     setFilter(value);
@@ -488,35 +522,40 @@ function SimulatorList({
     if (editMode) setSelected(new Set());
   }
 
-  function canConfirmDelete(row: SimulatorRow) {
+  function canConfirmAction(row: SimulatorRow, action: BulkAction) {
     return (
-      canDelete(row) &&
+      canPerform(row, action) &&
       !inventoryPending(row.agent.id) &&
       !inventoryRequests.current.has(row.agent.id)
     );
   }
 
-  async function deleteSelected(targets: Set<string>) {
+  async function confirmBatch(action: BulkAction, targets: Set<string>) {
     const targetGroups = groups
       .map(({ rows }) =>
         rows.filter(
-          (row) => targets.has(simulatorRowKey(row)) && canConfirmDelete(row),
+          (row) =>
+            targets.has(simulatorRowKey(row)) && canConfirmAction(row, action),
         ),
       )
       .filter((rows) => rows.length > 0);
     if (operationsBusy || targetGroups.flat().length !== targets.size) {
-      setError(t("selectionChanged"));
+      setError(
+        t(
+          action === "DELETE" ? "selectionChanged" : "shutdownSelectionChanged",
+        ),
+      );
       return;
     }
     setError(null);
-    await onDelete(targetGroups);
+    await onBatch(action, targetGroups);
   }
 
   async function deleteOne(target: SimulatorRow) {
     const row = rows.find(
       (row) => simulatorRowKey(row) === simulatorRowKey(target),
     );
-    if (operationsBusy || !row || !canConfirmDelete(row)) {
+    if (operationsBusy || !row || !canConfirmAction(row, "DELETE")) {
       setError(t("selectionChanged"));
       return;
     }
@@ -607,18 +646,34 @@ function SimulatorList({
           <span className="text-xs text-muted-foreground" role="status">
             {t("selectedCount", { count: selectedVisible.size })}
           </span>
-          <Button
-            disabled={
-              operationsBusy ||
-              selectedInventoryPending ||
-              !selectedVisible.size
-            }
-            onClick={() => setBulkDeletion(selectedVisible)}
-            size="sm"
-            variant="destructive"
-          >
-            {deleting ? <Spinner /> : <Trash2 />} {t("deleteSelected")}
-          </Button>
+          {(["SHUTDOWN", "DELETE"] as const).map((action) => {
+            const targets = selectedRows.filter((row) =>
+              canPerform(row, action),
+            );
+            const deleting = action === "DELETE";
+            const Icon = deleting ? Trash2 : Power;
+            return (
+              <Button
+                disabled={
+                  operationsBusy ||
+                  !targets.length ||
+                  targets.some(({ agent }) => inventoryPending(agent.id))
+                }
+                key={action}
+                onClick={() =>
+                  setBatchConfirmation({
+                    action,
+                    targets: new Set(targets.map(simulatorRowKey)),
+                  })
+                }
+                size="sm"
+                variant={deleting ? "destructive" : "outline"}
+              >
+                {runningBatch === action ? <Spinner /> : <Icon />}{" "}
+                {t(deleting ? "deleteSelected" : "shutdownSelected")}
+              </Button>
+            );
+          })}
         </div>
       )}
 
@@ -689,7 +744,7 @@ function SimulatorList({
                           disabled={
                             operationsBusy || inventoryPending(agent.id)
                           }
-                          ids={rows.filter(canDelete).map(simulatorRowKey)}
+                          ids={rows.filter(canSelect).map(simulatorRowKey)}
                           label={t("selectAllAgent", { agent: agent.name })}
                           onChange={setSelected}
                           selected={selectedVisible}
@@ -712,11 +767,8 @@ function SimulatorList({
                     const { agent, simulator, deviceTypeName } = row;
                     const agentBusy =
                       operationsBusy || inventoryPending(agent.id);
-                    const canAct =
-                      !agentBusy &&
-                      !agentErrors[agent.id] &&
-                      simulatorAgentSupports(agent, "action", simulatorFamily);
-                    const booted = simulator.state.toLowerCase() === "booted";
+                    const canAct = !agentBusy && canActOnRow(row);
+                    const booted = canShutDownSimulator(simulator);
                     const shutDown =
                       simulator.state.toLowerCase() === "shutdown";
                     const deletable = canDeleteSimulator(simulator);
@@ -734,7 +786,7 @@ function SimulatorList({
                                 name: simulator.name,
                               })}
                               checked={isSelected}
-                              disabled={agentBusy || !canDelete(row)}
+                              disabled={agentBusy || !canSelect(row)}
                               onCheckedChange={(checked) => {
                                 const next = new Set(selectedVisible);
                                 if (checked === true) next.add(key);
@@ -742,7 +794,7 @@ function SimulatorList({
                                 setSelected(next);
                               }}
                               title={
-                                !deletable
+                                !deletable && !booted
                                   ? t("deleteNeedsShutdown")
                                   : undefined
                               }
@@ -894,19 +946,37 @@ function SimulatorList({
           title={t("deleteTitle")}
         />
       )}
-      {bulkDeletion && (
+      {batchConfirmation && (
         <ConfirmationDialog
-          actionLabel={t("deleteSelected")}
+          actionLabel={t(
+            batchConfirmation.action === "DELETE"
+              ? "deleteSelected"
+              : "shutdownSelected",
+          )}
           cancelLabel={tc("cancel")}
-          description={t("deleteSelectedDescription", {
-            count: bulkDeletion.size,
-          })}
-          onConfirm={() => deleteSelected(bulkDeletion)}
+          description={t(
+            batchConfirmation.action === "DELETE"
+              ? "deleteSelectedDescription"
+              : "shutdownSelectedDescription",
+            {
+              count: batchConfirmation.targets.size,
+            },
+          )}
+          onConfirm={() =>
+            confirmBatch(batchConfirmation.action, batchConfirmation.targets)
+          }
           onOpenChange={(open) => {
-            if (!open) setBulkDeletion(null);
+            if (!open) setBatchConfirmation(null);
           }}
           open
-          title={t("deleteSelectedTitle")}
+          title={t(
+            batchConfirmation.action === "DELETE"
+              ? "deleteSelectedTitle"
+              : "shutdownSelectedTitle",
+          )}
+          variant={
+            batchConfirmation.action === "DELETE" ? "destructive" : "default"
+          }
         />
       )}
     </>
