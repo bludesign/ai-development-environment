@@ -35,6 +35,9 @@ function file(bytes: Buffer | string, name: string) {
 describe("crash upload helpers", () => {
   test("labels crash files by extension", () => {
     expect(crashContentType("App.ips")).toBe("application/json");
+    expect(crashContentType("App.diskwrites_resource-2026-11-15.ips")).toBe(
+      "text/plain",
+    );
     expect(crashContentType("payload.JSON")).toBe("application/json");
     expect(crashContentType("App.crash")).toBe("text/plain");
     expect(crashContentType("report")).toBe("application/octet-stream");

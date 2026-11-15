@@ -133,9 +133,9 @@ export const crashesOpenApiDocument = {
     "/api/public/crashes": {
       post: {
         tags: ["Crashes"],
-        summary: "Upload a crash report",
+        summary: "Upload a crash report or disk-write diagnostic",
         description:
-          "Accepts one `.ips` report, `.crash` text report, or MetricKit `MXDiagnosticPayload` / `MXCrashDiagnostic` JSON as the raw request body, capped at 5 MiB after optional gzip decoding. Unauthenticated so shipped apps can report; `X-API-Key` is optional and records which key sent the report. A MetricKit payload with several diagnostics creates one crash per diagnostic. Re-sending the same bytes returns the existing crashes.",
+          "Accepts a JSON crash .ips, a device-exported disk-write .ips, a .crash text report, or MetricKit MXDiagnosticPayload / MXCrashDiagnostic JSON as the raw request body, capped at 5 MiB after optional gzip decoding. X-API-Key is optional and records which key sent the report. A MetricKit payload with several crash diagnostics creates one report per diagnostic. Re-sending the same bytes returns the existing reports.",
         security: [{}, { ApiKey: [] }],
         parameters: [
           {
@@ -156,7 +156,10 @@ export const crashesOpenApiDocument = {
               },
             },
             "text/plain": {
-              schema: { type: "string", description: ".crash report" },
+              schema: {
+                type: "string",
+                description: ".crash report or disk-write .ips",
+              },
             },
             "application/octet-stream": {
               schema: { type: "string", format: "binary" },
@@ -192,7 +195,7 @@ export const crashesOpenApiDocument = {
           },
           "422": {
             description:
-              "The report is not a crash (for example an .ips hang report) or has no stacks",
+              "The report is malformed or describes an unsupported event such as a hang",
             content: { "application/json": { schema: errorResponse } },
           },
           "429": {

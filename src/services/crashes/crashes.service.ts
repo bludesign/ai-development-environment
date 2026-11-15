@@ -52,7 +52,9 @@ import {
   symbolicationCandidates,
 } from "./symbolication";
 import {
+  DISK_WRITES_FORMAT,
   EMPTY_SYMBOLICATION,
+  type CrashReportKind,
   type CrashReportSource,
   type CrashReportStatus,
   type CrashSymbolication,
@@ -117,6 +119,7 @@ type CrashRow = Prisma.CrashReportGetPayload<{
 }>;
 
 export type CrashReportFilter = {
+  kind?: CrashReportKind | null;
   search?: string | null;
   status?: CrashReportStatus | null;
   bundleId?: string | null;
@@ -244,7 +247,8 @@ export function parseDsymMetadata(input: {
 function reportExtension(format: string, filename: string | null): string {
   const extension = filename ? extname(filename).toLowerCase() : "";
   if ([".ips", ".crash", ".json", ".txt"].includes(extension)) return extension;
-  return format === "CRASH" ? ".crash" : format === "IPS" ? ".ips" : ".json";
+  if (format === "CRASH") return ".crash";
+  return format === "IPS" || format === DISK_WRITES_FORMAT ? ".ips" : ".json";
 }
 
 function crashSearchText(crash: NormalizedCrash, title: string): string {
@@ -504,7 +508,11 @@ export class CrashesService {
       for (const [index, crash] of parsed.entries()) {
         if (known.has(index)) continue;
         const id = index === 0 && !existing.length ? firstId : randomUUID();
-        const { signature, title } = crashSignature(crash);
+        const { signature, title } = crashSignature(
+          crash,
+          EMPTY_SYMBOLICATION,
+          id,
+        );
         const candidates = symbolicationCandidates(crash);
         await prisma.crashReport.create({
           data: {
@@ -736,7 +744,11 @@ export class CrashesService {
     settled: { status: CrashReportStatus; message: string | null },
   ): Promise<void> {
     const prisma = await getPrismaClient();
-    const { signature, title } = crashSignature(normalized, symbolication);
+    const { signature, title } = crashSignature(
+      normalized,
+      symbolication,
+      crashId,
+    );
     await prisma.crashReport.update({
       where: { id: crashId },
       data: {
@@ -874,6 +886,8 @@ export class CrashesService {
     const search = filter.search?.trim().toLowerCase();
     if (search) where.searchText = { contains: search };
     if (filter.status) where.status = filter.status;
+    if (filter.kind === "DISK_WRITES") where.format = DISK_WRITES_FORMAT;
+    if (filter.kind === "CRASH") where.format = { not: DISK_WRITES_FORMAT };
     if (filter.bundleId) where.bundleId = filter.bundleId;
     if (filter.appVersion) where.appVersion = filter.appVersion;
     if (filter.signature) where.signature = filter.signature;
@@ -1006,7 +1020,7 @@ export class CrashesService {
       const normalized = normalizedCrash(crash);
       if (!normalized) return null;
       return {
-        filename: `${stem}-symbolicated.crash`,
+        filename: `${stem}-symbolicated${normalized.diskWrites ? ".txt" : ".crash"}`,
         contentType: "text/plain; charset=utf-8",
         body: renderCrashText(normalized, crashSymbolication(crash)),
       };
@@ -1014,7 +1028,10 @@ export class CrashesService {
     const path = crashDataPath(crash.storagePath);
     return {
       filename: crash.filename || basename(path),
-      contentType: crash.format === "CRASH" ? "text/plain" : "application/json",
+      contentType:
+        crash.format === "CRASH" || crash.format === DISK_WRITES_FORMAT
+          ? "text/plain"
+          : "application/json",
       path,
     };
   }

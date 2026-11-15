@@ -6,8 +6,10 @@ export const CRASH_FRAME_FIELDS = `
 export const CRASH_SUMMARY_FIELDS = `
   id format source status statusMessage filename appName bundleId appVersion
   buildVersion osVersion deviceModel exceptionType signal signatureTitle
-  crashedAt createdAt topAppFrame { ${CRASH_FRAME_FIELDS} }
+  crashedAt occurredAt createdAt kind topAppFrame { ${CRASH_FRAME_FIELDS} }
 `;
+
+const DISK_WRITES_SUMMARY_FIELDS = `writesBytes durationSeconds action distributor isBeta`;
 
 export const DSYM_UPLOAD_FIELDS = `
   id filename status error source uploadedBy buildId linkedBuildId url
@@ -24,7 +26,7 @@ export const DSYM_SUMMARY_FIELDS = `
 
 export const CRASHES_QUERY = `query CrashesPage($filter: CrashReportFilter, $first: Int, $after: String) {
   crashReports(filter: $filter, first: $first, after: $after) {
-    nodes { ${CRASH_SUMMARY_FIELDS} }
+    nodes { ${CRASH_SUMMARY_FIELDS} diskWrites { ${DISK_WRITES_SUMMARY_FIELDS} } }
     nextCursor totalCount matchingCount
   }
   crashFacets { apps { bundleId appName count } appVersions }
@@ -46,6 +48,13 @@ export const CRASH_DETAIL_QUERY = `query CrashDetail($id: ID!) {
     terminationReason applicationSpecificInformation crashedThread updatedAt
     symbolicatedAt signature uploadedBy apiKeyName clientIp attempts
     threads { index name queue crashed frames { ${CRASH_FRAME_FIELDS} } }
+    diskWrites {
+      ${DISK_WRITES_SUMMARY_FIELDS}
+      limitBytes limitDurationSeconds averageBytesPerSecond startedAt endedAt
+      sampledDurationSeconds samplesCaptured samplesLost
+      heaviestStack { sampleCount frames { ${CRASH_FRAME_FIELDS} } }
+      callTree { id parentId sampleCount frames { ${CRASH_FRAME_FIELDS} } }
+    }
     lastExceptionBacktrace { ${CRASH_FRAME_FIELDS} }
     binaryImages {
       id uuid name arch loadAddress path isApp frameCount
@@ -57,7 +66,7 @@ export const CRASH_DETAIL_QUERY = `query CrashDetail($id: ID!) {
     }
     attachedDsyms { ${DSYM_SUMMARY_FIELDS} }
     similarCrashCount
-    similarCrashes(first: 20) { ${CRASH_SUMMARY_FIELDS} }
+    similarCrashes(first: 20) { ${CRASH_SUMMARY_FIELDS} diskWrites { ${DISK_WRITES_SUMMARY_FIELDS} } }
     symbolicatedText originalDownloadUrl symbolicatedDownloadUrl
   }
 }`;
@@ -68,7 +77,7 @@ export const DSYM_DETAIL_QUERY = `query DsymDetail($id: ID!, $after: String) {
     dwarfSha256 downloadUrl
     siblingDsyms { ${DSYM_SUMMARY_FIELDS} }
     crashes(first: 50, after: $after) {
-      nodes { ${CRASH_SUMMARY_FIELDS} }
+      nodes { ${CRASH_SUMMARY_FIELDS} diskWrites { ${DISK_WRITES_SUMMARY_FIELDS} } }
       nextCursor totalCount
     }
   }

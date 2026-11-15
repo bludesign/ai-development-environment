@@ -45,6 +45,11 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { CrashStatusBadge } from "./crash-status-badge";
 import { CrashTable, crashVersion } from "./crashes-page";
+import {
+  DiskWriteOverview,
+  HeaviestStack,
+  SampledCallTree,
+} from "./disk-write-report";
 import { DsymTable } from "./dsyms-page";
 import { DsymUploadDialog } from "./dsym-upload-dialog";
 import { FramesTable } from "./frames-table";
@@ -176,6 +181,7 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
 
   const crashed =
     crash.threads.find((thread) => thread.crashed) ?? crash.threads[0];
+  const disk = crash.diskWrites;
   const otherThreads = crash.threads.filter((thread) => thread !== crashed);
   const settled = !["PENDING", "WAITING_FOR_AGENT", "SYMBOLICATING"].includes(
     crash.status,
@@ -272,33 +278,42 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
           <CardTitle>{t("summary")}</CardTitle>
         </CardHeader>
         <CardContent>
+          {disk ? (
+            <div className="mb-5 border-b pb-5">
+              <DiskWriteOverview disk={disk} />
+            </div>
+          ) : null}
           <DetailList className="sm:grid-cols-2 lg:grid-cols-4">
-            <DetailItem label={t("exception")}>
-              {[crash.exceptionType, crash.signal && `(${crash.signal})`]
-                .filter(Boolean)
-                .join(" ") || "—"}
-            </DetailItem>
-            <DetailItem label={t("exceptionCodes")} mono>
-              {crash.exceptionCodes ?? "—"}
-            </DetailItem>
-            <DetailItem label={t("terminationReason")}>
-              {crash.terminationReason ?? "—"}
-            </DetailItem>
-            <DetailItem label={t("crashedThreadLabel")}>
-              {crash.crashedThread ?? "—"}
-            </DetailItem>
-            {crash.exceptionSubtype ? (
-              <DetailItem label={t("exceptionSubtype")}>
-                {crash.exceptionSubtype}
-              </DetailItem>
-            ) : null}
-            {crash.exceptionReason ? (
-              <DetailItem
-                className="lg:col-span-3"
-                label={t("exceptionReason")}
-              >
-                {crash.exceptionReason}
-              </DetailItem>
+            {!disk ? (
+              <>
+                <DetailItem label={t("exception")}>
+                  {[crash.exceptionType, crash.signal && `(${crash.signal})`]
+                    .filter(Boolean)
+                    .join(" ") || "—"}
+                </DetailItem>
+                <DetailItem label={t("exceptionCodes")} mono>
+                  {crash.exceptionCodes ?? "—"}
+                </DetailItem>
+                <DetailItem label={t("terminationReason")}>
+                  {crash.terminationReason ?? "—"}
+                </DetailItem>
+                <DetailItem label={t("crashedThreadLabel")}>
+                  {crash.crashedThread ?? "—"}
+                </DetailItem>
+                {crash.exceptionSubtype ? (
+                  <DetailItem label={t("exceptionSubtype")}>
+                    {crash.exceptionSubtype}
+                  </DetailItem>
+                ) : null}
+                {crash.exceptionReason ? (
+                  <DetailItem
+                    className="lg:col-span-3"
+                    label={t("exceptionReason")}
+                  >
+                    {crash.exceptionReason}
+                  </DetailItem>
+                ) : null}
+              </>
             ) : null}
             <DetailItem label={t("app")}>
               {crash.appName ?? "—"}
@@ -320,9 +335,19 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
             <DetailItem label={t("osVersion")}>
               {crash.osVersion ?? "—"}
             </DetailItem>
-            <DetailItem label={t("crashedAt")}>
-              <DateTime value={crash.crashedAt} />
-            </DetailItem>
+            {disk ? (
+              disk.distributor || disk.isBeta ? (
+                <DetailItem label={t("diskWrites.distribution")}>
+                  {disk.distributor === "com.apple.TestFlight"
+                    ? "TestFlight"
+                    : (disk.distributor ?? t("diskWrites.beta"))}
+                </DetailItem>
+              ) : null
+            ) : (
+              <DetailItem label={t("crashedAt")}>
+                <DateTime value={crash.crashedAt} />
+              </DetailItem>
+            )}
             <DetailItem label={t("received")}>
               <DateTime value={crash.createdAt} />
             </DetailItem>
@@ -369,9 +394,24 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
         </CardContent>
       </Card>
 
-      <Tabs className="min-w-0" defaultValue="threads">
+      <Tabs
+        className="min-w-0"
+        key={crash.id}
+        defaultValue={disk ? "heaviest" : "threads"}
+      >
         <TabsList className="flex min-w-0 w-full justify-start gap-1 overflow-x-auto overflow-y-hidden p-1 group-data-horizontal/tabs:h-auto [&>[data-slot=tabs-trigger]]:h-7 [&>[data-slot=tabs-trigger]]:flex-none [&>[data-slot=tabs-trigger]]:px-2.5 [&>[data-slot=tabs-trigger]]:after:hidden">
-          <TabsTrigger value="threads">{t("threads")}</TabsTrigger>
+          {disk ? (
+            <>
+              <TabsTrigger value="heaviest">
+                {t("diskWrites.heaviestStack")}
+              </TabsTrigger>
+              <TabsTrigger value="callTree">
+                {t("diskWrites.callTree")}
+              </TabsTrigger>
+            </>
+          ) : (
+            <TabsTrigger value="threads">{t("threads")}</TabsTrigger>
+          )}
           {crash.lastExceptionBacktrace?.length ? (
             <TabsTrigger value="exception">
               {t("exceptionBacktrace")}
@@ -386,6 +426,18 @@ export function CrashDetailPage({ crashId }: { crashId: string }) {
           </TabsTrigger>
           <TabsTrigger value="raw">{t("raw")}</TabsTrigger>
         </TabsList>
+        {disk ? (
+          <>
+            <TabsContent value="heaviest">
+              <Card className="overflow-hidden py-0">
+                <HeaviestStack entries={disk.heaviestStack} />
+              </Card>
+            </TabsContent>
+            <TabsContent value="callTree">
+              <SampledCallTree nodes={disk.callTree} />
+            </TabsContent>
+          </>
+        ) : null}
         <TabsContent className="space-y-3" value="threads">
           {crashed ? <ThreadCard defaultOpen thread={crashed} /> : null}
           {otherThreads.map((thread) => (

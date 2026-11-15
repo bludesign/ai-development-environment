@@ -1,0 +1,45 @@
+{"incident_id":"781A4F38-7C96-453B-A8B2-33A9E92A9B34","app_name":"AcmeApp","timestamp":"2026-09-23 07:10:51.00 -0500","app_version":"2.4.0","slice_uuid":"776386D0-4386-3F24-9B21-5F7C02EB2873","build_version":"512","bundleID":"com.acme.mobile","duration_ms":"742407","bug_type":"145","os_version":"iPhone OS 26.0 (23A341)","distributor_id":"com.apple.TestFlight","is_beta":1}
+Date/Time:        2026-09-23 06:58:26.301 -0500
+End time:         2026-09-23 07:10:48.709 -0500
+Architecture:     arm64e.x1
+Data Source:      Microstackshots
+Command:          AcmeApp
+Path:             /private/var/containers/Bundle/Application/EXAMPLE/AcmeApp.app/AcmeApp
+Identifier:       com.acme.mobile
+Version:          2.4.0 (512)
+Architecture:     arm64
+PID:              407
+Event:            disk writes
+Action taken:     none
+Writes:           1073.76 MB of file backed memory dirtied over 742 seconds (1446.33 KB per second average), exceeding limit of 12.43 KB per second over 86400 seconds
+Writes limit:     1073.74 MB
+Limit duration:   86400s
+Writes caused:    1073.76 MB
+Writes duration:  742s
+Duration:         742.41s
+Duration Sampled: 542.96s (event starts 198.19s before samples, event ends 1.25s after samples)
+Steps:            90 (202 samples lost, 10.49 MB/step)
+Hardware model:   iPhone17,1
+
+Heaviest stack for the target process:
+  45  ??? (libswift_Concurrency.dylib + 29288) [0x18335a268]
+  44  ??? (AcmeApp + 3440) [0x104da8d70]
+  40  ??? (AcmeApp + 3436) [0x104da8d6c]
+  38  ??? (Foundation + 2074840) [0x1824508d8]
+
+Powerstats for:   AcmeApp [407]
+Num samples:      90 (100%)
+  45  ??? (libswift_Concurrency.dylib + 29288) [0x18335a268]
+    44  ??? (AcmeApp + 3440) [0x104da8d70]
+      40  ??? (AcmeApp + 3436) [0x104da8d6c]
+        38  ??? (Foundation + 2074840) [0x1824508d8]
+          3   <Effective Thread QoS User Initiated, p-core>
+      4   ??? (AcmeApp + 3444) [0x104da8d74]
+        4   ??? (libsqlite3.dylib + 189872) [0x19f8115b0]
+  45  ??? (Foundation + 2074840) [0x1824508d8]
+
+  Binary Images:
+           0x104da8000 -                ???  com.acme.mobile 2.4.0 (512) <776386D0-4386-3F24-9B21-5F7C02EB2873> /private/var/containers/Bundle/Application/EXAMPLE/AcmeApp.app/AcmeApp
+           0x182256000 -        0x183352dc7  Foundation <3AF559DC-499C-3928-BCEE-25E187F489AB> /System/Library/Frameworks/Foundation.framework/Foundation
+           0x183353000 -        0x1833d5e17  libswift_Concurrency.dylib <7775B626-1767-3B55-9EFB-F988577BCDFA> /usr/lib/swift/libswift_Concurrency.dylib
+           0x19f7e3000 -        0x19f999abf  libsqlite3.dylib <6B1E5C1A-29CC-3A50-8495-1E01B9F69DEE> /usr/lib/libsqlite3.dylib

@@ -17,7 +17,7 @@ import {
 
 type JsonObject = Record<string, unknown>;
 
-/** `bug_type` of an app crash. Other types (hangs, jetsam) carry no stack. */
+/** `bug_type` of a JSON app crash report. */
 const CRASH_BUG_TYPE = "309";
 
 function object(value: unknown): JsonObject | null {
@@ -26,14 +26,10 @@ function object(value: unknown): JsonObject | null {
     : null;
 }
 
-/**
- * Splits an `.ips` file into its header line and body. The format is two JSON
- * documents back to back, so `JSON.parse` of the whole file fails; the header
- * always sits alone on the first line.
- */
-export function splitIps(
+/** Reads the first-line JSON header shared by crash and resource `.ips` reports. */
+export function readIpsHeader(
   contents: string,
-): { header: JsonObject; body: JsonObject } | null {
+): { header: JsonObject; bodyText: string } | null {
   const trimmed = contents.replace(/^\uFEFF/, "").trimStart();
   const newline = trimmed.indexOf("\n");
   if (newline < 0 || !trimmed.startsWith("{")) return null;
@@ -44,9 +40,19 @@ export function splitIps(
     return null;
   }
   if (!header || !("bug_type" in header)) return null;
+  return { header, bodyText: trimmed.slice(newline + 1) };
+}
+
+/** A crash `.ips` has a second JSON document after its header. */
+export function splitIps(
+  contents: string,
+): { header: JsonObject; body: JsonObject } | null {
+  const parts = readIpsHeader(contents);
+  if (!parts) return null;
+  const { header, bodyText } = parts;
   let body: JsonObject | null;
   try {
-    body = object(JSON.parse(trimmed.slice(newline + 1)));
+    body = object(JSON.parse(bodyText));
   } catch {
     throw new CrashParseError("The .ips report body is not valid JSON");
   }

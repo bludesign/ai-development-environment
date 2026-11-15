@@ -44,6 +44,7 @@ import { isRowActivation, rowLinkClass } from "@/lib/row-activation";
 
 import { CrashStatusBadge } from "./crash-status-badge";
 import { CrashesShell } from "./crashes-shell";
+import { DiskWriteSummaryLine } from "./disk-write-report";
 import { frameLocation } from "./frames-table";
 import { CRASHES_QUERY, DELETE_CRASHES_MUTATION } from "./graphql";
 import {
@@ -109,9 +110,9 @@ export function CrashTable({
           <TableHead>{t("status")}</TableHead>
           <TableHead>{t("app")}</TableHead>
           <TableHead>{t("version")}</TableHead>
-          <TableHead>{t("crash")}</TableHead>
+          <TableHead>{t("diskWrites.report")}</TableHead>
           <TableHead>{t("device")}</TableHead>
-          <TableHead>{t("crashedAt")}</TableHead>
+          <TableHead>{t("diskWrites.occurredAt")}</TableHead>
           <TableHead>{t("received")}</TableHead>
         </TableRow>
       </TableHeader>
@@ -165,12 +166,23 @@ export function CrashTable({
                 {crashVersion(crash)}
               </TableCell>
               <TableCell className="max-w-md">
-                <p
-                  className="truncate font-medium"
-                  title={crash.signatureTitle}
-                >
-                  {crash.signatureTitle}
-                </p>
+                {crash.diskWrites ? (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <Badge variant="outline">
+                      {t("formats.DISK_WRITES_IPS")}
+                    </Badge>
+                    <span className="font-medium">
+                      <DiskWriteSummaryLine disk={crash.diskWrites} />
+                    </span>
+                  </div>
+                ) : (
+                  <p
+                    className="truncate font-medium"
+                    title={crash.signatureTitle}
+                  >
+                    {crash.signatureTitle}
+                  </p>
+                )}
                 {location ? (
                   <p className="truncate font-mono text-xs text-muted-foreground">
                     {location}
@@ -184,7 +196,7 @@ export function CrashTable({
                 </p>
               </TableCell>
               <TableCell className="whitespace-nowrap">
-                <DateTime value={crash.crashedAt} />
+                <DateTime value={crash.occurredAt ?? crash.crashedAt} />
               </TableCell>
               <TableCell className="whitespace-nowrap">
                 <DateTime value={crash.createdAt} />
@@ -212,6 +224,7 @@ export function CrashesPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>(ALL);
+  const [kind, setKind] = useState<string>(ALL);
   const [bundleId, setBundleId] = useState<string>(ALL);
   const [appVersion, setAppVersion] = useState<string>(ALL);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -226,11 +239,12 @@ export function CrashesPage() {
     () => ({
       search: search || null,
       status: status === ALL ? null : status,
+      kind: kind === ALL ? null : kind,
       bundleId: bundleId === ALL ? null : bundleId,
       appVersion: appVersion === ALL ? null : appVersion,
       signature,
     }),
-    [appVersion, bundleId, search, signature, status],
+    [appVersion, bundleId, kind, search, signature, status],
   );
 
   const fetchData = useCallback(
@@ -295,12 +309,13 @@ export function CrashesPage() {
     Boolean(search) ||
     Boolean(signature) ||
     status !== ALL ||
+    kind !== ALL ||
     bundleId !== ALL ||
     appVersion !== ALL;
 
   return (
     <CrashesShell onChanged={() => void load()}>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
         <div className="relative md:max-w-sm md:flex-1">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -311,6 +326,21 @@ export function CrashesPage() {
             value={searchInput}
           />
         </div>
+        <Select onValueChange={setKind} value={kind}>
+          <SelectTrigger
+            aria-label={t("diskWrites.reportType")}
+            className="md:w-40"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>{t("diskWrites.allReports")}</SelectItem>
+            <SelectItem value="CRASH">{t("crashesTab")}</SelectItem>
+            <SelectItem value="DISK_WRITES">
+              {t("formats.DISK_WRITES_IPS")}
+            </SelectItem>
+          </SelectContent>
+        </Select>
         <Select onValueChange={setStatus} value={status}>
           <SelectTrigger aria-label={t("status")} className="md:w-52">
             <SelectValue />

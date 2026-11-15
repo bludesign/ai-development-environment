@@ -2,10 +2,18 @@
 enum CrashReportFormat {
   "An iOS 15+ JSON report (`.ips`), as devices and Xcode write it."
   IPS
+  "A device-exported disk-write diagnostic with a JSON header and Microstackshots text body."
+  DISK_WRITES_IPS
   "A text report (`.crash`), as Xcode exports it and crash-reporter libraries write it."
   CRASH
   "A MetricKit crash diagnostic an app received and sent as JSON."
   METRICKIT
+}
+
+"The type of event an uploaded report describes."
+enum CrashReportKind {
+  CRASH
+  DISK_WRITES
 }
 
 "How a crash report reached the server."
@@ -123,11 +131,57 @@ type CrashBinaryImage {
 }
 
 "An uploaded iOS crash report."
+type CrashSampledFrame {
+  "Number of samples containing this frame at its position in the stack."
+  sampleCount: Int!
+  "The frame and any functions the compiler inlined at this address."
+  frames: [CrashFrame!]!
+}
+
+type CrashSampledNode {
+  "Stable node index within the report."
+  id: Int!
+  "Index of the parent node, or null for a root."
+  parentId: Int
+  sampleCount: Int!
+  frames: [CrashFrame!]!
+}
+
+"Write volume, budget and sampled activity from a device-exported disk-write diagnostic."
+type DiskWriteDetails {
+  "Bytes of file-backed memory dirtied, as reported by the device."
+  writesBytes: Float!
+  limitBytes: Float
+  limitDurationSeconds: Float
+  durationSeconds: Float
+  averageBytesPerSecond: Float
+  "ISO 8601 time the event began."
+  startedAt: String
+  "ISO 8601 time the event ended."
+  endedAt: String
+  "Action reported by the OS, such as none."
+  action: String
+  sampledDurationSeconds: Float
+  samplesCaptured: Int
+  samplesLost: Int
+  distributor: String
+  isBeta: Boolean
+  "The device's heaviest sampled stack, ordered from caller to callee."
+  heaviestStack: [CrashSampledFrame!]!
+  "The sampled call tree in report order, with parents preceding their children."
+  callTree: [CrashSampledNode!]!
+}
+
 type CrashReport {
   "Stable identifier for this crash report."
   id: ID!
   "Format the report arrived in."
   format: CrashReportFormat!
+  kind: CrashReportKind!
+  "ISO 8601 crash time or the end of the resource event, when available."
+  occurredAt: String
+  "Details for disk-write diagnostics."
+  diskWrites: DiskWriteDetails
   "How the report reached the server."
   source: CrashReportSource!
   "Where the report is in symbolication."
@@ -192,7 +246,7 @@ type CrashReport {
   attempts: Int!
   "Identifier of the agent that last symbolicated the report. May be null when none has."
   agentId: ID
-  "The first app frame of the crashed thread. May be null when that thread has no app frames."
+  "The first app frame of the crashed thread or deepest app frame of the heaviest sampled stack."
   topAppFrame: CrashFrame
   "Every thread's backtrace, symbolicated as far as possible."
   threads: [CrashThread!]!
@@ -211,7 +265,7 @@ type CrashReport {
   ): [CrashReport!]!
   "Number of other reports with the same signature."
   similarCrashCount: Int!
-  "The report in Apple's text format with every added symbol."
+  "A text rendering of the crash or resource diagnostic with every added symbol."
   symbolicatedText: String!
   "Path that downloads the file as uploaded."
   originalDownloadUrl: String!
@@ -233,6 +287,8 @@ type CrashReportConnection {
 
 "Filters for listing crash reports."
 input CrashReportFilter {
+  "Only reports of this event kind."
+  kind: CrashReportKind
   "Text matched against app, version, exception, device, and signature."
   search: String
   "Only reports in this status."

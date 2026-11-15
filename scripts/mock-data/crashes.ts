@@ -88,6 +88,7 @@ function symbolicate(
   dsymId: string,
   uuid: string,
   at: Date,
+  appSymbols = APP_SYMBOLS,
 ): CrashSymbolication {
   return mergeSymbolication(
     EMPTY_SYMBOLICATION,
@@ -97,7 +98,7 @@ function symbolicate(
           dsymId,
           uuid,
           error: null,
-          results: Object.entries(APP_SYMBOLS).map(([offset, frames]) => ({
+          results: Object.entries(appSymbols).map(([offset, frames]) => ({
             offset,
             frames: frames.map(([symbol, file, line]) => ({
               symbol,
@@ -133,7 +134,7 @@ type SeedCrash = {
 async function createCrash(prisma: PrismaClient, seed: SeedCrash) {
   const [crash] = detectAndParse(Buffer.from(seed.contents));
   const symbolication = seed.symbolication(seed.createdAt);
-  const { signature, title } = crashSignature(crash!, symbolication);
+  const { signature, title } = crashSignature(crash!, symbolication, seed.id);
   const status =
     seed.status ?? settledStatus(crash!, symbolication, new Set(seed.matched));
   const extension = path.extname(seed.filename);
@@ -170,7 +171,9 @@ async function createCrash(prisma: PrismaClient, seed: SeedCrash) {
       signal: crash!.signal,
       terminationReason: crash!.terminationReason,
       crashedThread: crash!.crashedThread,
-      crashedAt: new Date(seed.createdAt.getTime() - 90_000),
+      crashedAt: crash!.diskWrites
+        ? null
+        : new Date(seed.createdAt.getTime() - 90_000),
       signature,
       signatureTitle: title,
       status: status.status,
@@ -394,6 +397,36 @@ export async function seedCrashes(prisma: PrismaClient): Promise<void> {
       APP_UUID,
       new Date(receivedAt.getTime() + 20_000),
     );
+  const diskReceivedAt = minutesAgo(15);
+  const diskEnd = diskReceivedAt.getTime() - 90_000;
+  const appleDate = (time: number) =>
+    new Date(time).toISOString().replace("T", " ").replace("Z", " +0000");
+  await createCrash(prisma, {
+    id: ids.crashes.diskWrites,
+    filename: "AcmeApp.diskwrites_resource.ips",
+    contents: acme(
+      readFileSync(
+        path.join(FIXTURES, "AcmeApp.diskwrites_resource.ips"),
+        "utf8",
+      ),
+      APP_UUID,
+    )
+      .replace("2026-09-23 06:58:26.301 -0500", appleDate(diskEnd - 742_407))
+      .replace("2026-09-23 07:10:48.709 -0500", appleDate(diskEnd))
+      .replace("2026-09-23 07:10:51.00 -0500", appleDate(diskEnd + 2_291)),
+    source: "UPLOAD",
+    uploadedBy: "alex@acme.example.com",
+    apiKeyName: null,
+    createdAt: diskReceivedAt,
+    symbolication: (at) =>
+      symbolicate(ids.dsyms.app, APP_UUID, at, {
+        "0xd70": [["SearchIndex.refresh()", "SearchIndex.swift", 52]],
+        "0xd6c": [["IndexStore.persistBatch()", "IndexStore.swift", 118]],
+        "0xd74": [["IndexStore.updateMetadata()", "IndexStore.swift", 143]],
+      }),
+    matched: [APP_UUID],
+    dsymId: ids.dsyms.app,
+  });
   await createCrash(prisma, {
     id: ids.crashes.checkout,
     filename: "AcmeApp-2026-01-28-091012.ips",

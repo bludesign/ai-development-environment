@@ -10,10 +10,13 @@ import {
   type CrashReportStatus,
   type CrashSymbolication,
   type DisplayFrame,
+  type DisplaySampledFrame,
+  type DisplaySampledNode,
   type DisplayThread,
   type NormalizedCrash,
   type NormalizedFrame,
   type NormalizedImage,
+  type SampledFrame,
 } from "./types";
 
 /**
@@ -27,10 +30,47 @@ function improvable(frame: NormalizedFrame, images: NormalizedImage[]) {
 }
 
 function allFrames(crash: NormalizedCrash): NormalizedFrame[] {
+  if (crash.diskWrites) {
+    return [
+      ...crash.diskWrites.heaviestStack,
+      ...crash.diskWrites.callTree,
+    ].map(({ frame }) => frame);
+  }
   return [
     ...crash.threads.flatMap((thread) => thread.frames),
     ...(crash.lastExceptionBacktrace ?? []),
   ];
+}
+
+function sampledFrame(
+  entry: SampledFrame,
+  crash: NormalizedCrash,
+  symbols: CrashSymbolication,
+): DisplaySampledFrame {
+  return {
+    sampleCount: entry.sampleCount,
+    frames: displayFrames([entry.frame], crash.images, symbols),
+  };
+}
+
+export function heaviestStack(
+  crash: NormalizedCrash,
+  symbols: CrashSymbolication,
+): DisplaySampledFrame[] {
+  return (crash.diskWrites?.heaviestStack ?? []).map((entry) =>
+    sampledFrame(entry, crash, symbols),
+  );
+}
+
+export function sampledCallTree(
+  crash: NormalizedCrash,
+  symbols: CrashSymbolication,
+): DisplaySampledNode[] {
+  return (crash.diskWrites?.callTree ?? []).map((entry) => ({
+    ...sampledFrame(entry, crash, symbols),
+    id: entry.id,
+    parentId: entry.parentId,
+  }));
 }
 
 /** App images a dSYM could improve, with how many frames each would name. */
@@ -221,6 +261,31 @@ function frameLabel(frame: DisplayFrame): string {
   return `${frame.imageName ?? "???"}+${frame.imageOffset ?? frame.address ?? "?"}`;
 }
 
+function representativeFrames(
+  crash: NormalizedCrash,
+  symbols: CrashSymbolication,
+): DisplayFrame[] {
+  const thread =
+    crash.threads.find((entry) => entry.crashed) ?? crash.threads[0];
+  // The Microstackshots text lists callers first. Match crash report ordering here.
+  const frames = crash.diskWrites
+    ? crash.diskWrites.heaviestStack.map(({ frame }) => frame).reverse()
+    : (thread?.frames ?? []);
+  return displayFrames(frames, crash.images, symbols).filter(
+    (frame) => !frame.inlined,
+  );
+}
+
+export function topAppFrame(
+  crash: NormalizedCrash,
+  symbols: CrashSymbolication,
+): DisplayFrame | null {
+  return (
+    representativeFrames(crash, symbols).find((frame) => frame.isAppFrame) ??
+    null
+  );
+}
+
 /**
  * Groups crashes that failed the same way: the exception plus the first three
  * app frames of the crashed thread. Offsets change with every build, so the
@@ -229,15 +294,40 @@ function frameLabel(frame: DisplayFrame): string {
 export function crashSignature(
   crash: NormalizedCrash,
   symbolication: CrashSymbolication = EMPTY_SYMBOLICATION,
+  reportId?: string,
 ): { signature: string; title: string } {
-  const crashed =
-    crash.threads.find((thread) => thread.crashed) ?? crash.threads[0];
-  const frames = crashed
-    ? displayFrames(crashed.frames, crash.images, symbolication).filter(
-        (frame) => !frame.inlined,
-      )
-    : [];
+  const frames = representativeFrames(crash, symbolication);
   const appFrames = frames.filter((frame) => frame.isAppFrame);
+  if (crash.diskWrites) {
+    const usable = appFrames
+      .filter((frame) => frame.symbol || (frame.imageUuid && frame.imageOffset))
+      .slice(0, 3);
+    const parts = [
+      crash.format,
+      crash.bundleId ?? crash.appName ?? crash.processName ?? "",
+    ];
+    if (usable.length && parts[1]) {
+      parts.push(
+        ...usable.map(
+          (frame) => frame.symbol ?? `${frame.imageUuid}+${frame.imageOffset}`,
+        ),
+      );
+    } else {
+      parts.push(
+        reportId ?? crash.incidentId ?? crash.diskWrites.reportedAt ?? "",
+      );
+    }
+    return {
+      signature: createHash("sha256")
+        .update(parts.join("\n"))
+        .digest("hex")
+        .slice(0, 24),
+      title: ["Disk Writes", usable[0] ? frameLabel(usable[0]) : null]
+        .filter(Boolean)
+        .join(" · ")
+        .slice(0, 500),
+    };
+  }
   const chosen = (appFrames.length ? appFrames : frames).slice(0, 3);
   const exception = crash.exceptionType ?? crash.signal ?? "Crash";
   const parts = [
@@ -308,9 +398,45 @@ export function renderCrashText(
   );
   field("Code Type", crash.arch);
   lines.push("");
-  field("Date/Time", crash.crashedAt);
+  const disk = crash.diskWrites;
+  field("Date/Time", disk?.startedAt ?? crash.crashedAt);
+  field("End time", disk?.endedAt);
   field("OS Version", crash.osVersion);
   lines.push("");
+  if (disk) {
+    const metric = (value: number | null, unit: string) =>
+      value === null ? null : `${value}${unit}`;
+    field("Event", "disk writes");
+    field("Action taken", disk.action);
+    field("Writes caused", metric(disk.writesBytes, " bytes"));
+    field("Writes limit", metric(disk.limitBytes, " bytes"));
+    field("Limit duration", metric(disk.limitDurationSeconds, "s"));
+    field("Duration", metric(disk.durationSeconds, "s"));
+    field("Average rate", metric(disk.averageBytesPerSecond, " bytes/s"));
+    field("Duration sampled", metric(disk.sampledDurationSeconds, "s"));
+    field("Samples captured", metric(disk.samplesCaptured, ""));
+    field("Samples lost", metric(disk.samplesLost, ""));
+    if (disk.heaviestStack.length) {
+      lines.push("", "Heaviest stack for the target process:");
+      for (const entry of heaviestStack(crash, symbolication)) {
+        for (const frame of entry.frames)
+          lines.push(`  ${entry.sampleCount}  ${frameLine(frame)}`);
+      }
+    }
+    if (disk.callTree.length) {
+      lines.push("", "Sampled call tree:");
+      const depths: number[] = [];
+      for (const entry of sampledCallTree(crash, symbolication)) {
+        const depth =
+          entry.parentId === null ? 0 : (depths[entry.parentId] ?? 0) + 1;
+        depths[entry.id] = depth;
+        const indent = "  ".repeat(Math.min(depth + 1, 80));
+        for (const frame of entry.frames)
+          lines.push(`${indent}${entry.sampleCount}  ${frameLine(frame)}`);
+      }
+    }
+    lines.push("");
+  }
   if (crash.exceptionType) {
     lines.push(
       `Exception Type:  ${crash.exceptionType}${crash.signal ? ` (${crash.signal})` : ""}`,

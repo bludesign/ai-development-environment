@@ -1,7 +1,18 @@
 import type { SymbolicatedFrame } from "@ai-development-environment/agent-contract/crashes";
 
-export const CRASH_REPORT_FORMATS = ["IPS", "CRASH", "METRICKIT"] as const;
+export const DISK_WRITES_FORMAT = "DISK_WRITES_IPS";
+export const CRASH_REPORT_FORMATS = [
+  "IPS",
+  "CRASH",
+  "METRICKIT",
+  DISK_WRITES_FORMAT,
+] as const;
 export type CrashReportFormat = (typeof CRASH_REPORT_FORMATS)[number];
+export type CrashReportKind = "CRASH" | "DISK_WRITES";
+
+export function crashReportKind(format: string): CrashReportKind {
+  return format === DISK_WRITES_FORMAT ? "DISK_WRITES" : "CRASH";
+}
 
 export const CRASH_REPORT_SOURCES = ["UPLOAD", "API"] as const;
 export type CrashReportSource = (typeof CRASH_REPORT_SOURCES)[number];
@@ -76,7 +87,39 @@ export type NormalizedThread = {
   frames: NormalizedFrame[];
 };
 
-/** Everything the three input formats have in common. */
+export type SampledFrame = {
+  sampleCount: number;
+  frame: NormalizedFrame;
+};
+
+export type SampledNode = SampledFrame & {
+  id: number;
+  parentId: number | null;
+};
+
+export type DiskWriteMetrics = {
+  writesBytes: number;
+  limitBytes: number | null;
+  limitDurationSeconds: number | null;
+  durationSeconds: number | null;
+  averageBytesPerSecond: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  reportedAt: string | null;
+  action: string | null;
+  sampledDurationSeconds: number | null;
+  samplesCaptured: number | null;
+  samplesLost: number | null;
+  distributor: string | null;
+  isBeta: boolean | null;
+};
+
+export type NormalizedDiskWrites = DiskWriteMetrics & {
+  heaviestStack: SampledFrame[];
+  callTree: SampledNode[];
+};
+
+/** App metadata, binary images and stacks extracted from a report. */
 export type NormalizedCrash = {
   format: CrashReportFormat;
   incidentId: string | null;
@@ -102,6 +145,7 @@ export type NormalizedCrash = {
   threads: NormalizedThread[];
   lastExceptionBacktrace: NormalizedFrame[] | null;
   images: NormalizedImage[];
+  diskWrites?: NormalizedDiskWrites;
 };
 
 /**
@@ -156,6 +200,13 @@ export type DisplayThread = {
   crashed: boolean;
   frames: DisplayFrame[];
 };
+
+export type DisplaySampledFrame = {
+  sampleCount: number;
+  frames: DisplayFrame[];
+};
+export type DisplaySampledNode = DisplaySampledFrame &
+  Pick<SampledNode, "id" | "parentId">;
 
 export class CrashParseError extends Error {
   constructor(
