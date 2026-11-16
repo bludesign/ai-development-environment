@@ -231,10 +231,20 @@ function runHref(run: { id: string; kind: string }): string {
   return `/ai/${run.kind === "PLAN" ? "plans" : "sessions"}/${encodeURIComponent(run.id)}`;
 }
 
-function publishRun(runId: string): void {
+/**
+ * A run produced output: its own page and the lists that show it change.
+ * A working run reports this every few seconds, so it stays off the topics
+ * every open tab rereads for.
+ */
+function publishRunActivity(runId: string): void {
   const payload = { runChanged: { id: runId } };
   agentEventBus.publish(runChangedTopic(runId), payload);
   agentEventBus.publish(RUNS_CHANGED_TOPIC, payload);
+}
+
+/** A run changed state, which the sidebar totals and Action Center count. */
+function publishRun(runId: string): void {
+  publishRunActivity(runId);
   agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
     sidebarStatusChanged: true,
   });
@@ -2640,7 +2650,7 @@ export class RunsService {
     for (const value of saved) {
       agentEventBus.publish(runEventTopic(runId), { runEventAdded: value });
     }
-    publishRun(runId);
+    publishRunActivity(runId);
     return saved;
   }
 
@@ -2839,7 +2849,7 @@ export class RunsService {
         },
       });
     });
-    publishRun(runId);
+    publishRunActivity(runId);
     return this.get(runId);
   }
 

@@ -45,6 +45,8 @@ async function errorMessage(response: Response): Promise<string> {
 
 export function crashContentType(name: string): string {
   const lower = name.toLowerCase();
+  if (lower.includes(".diskwrites_resource") && lower.endsWith(".ips"))
+    return "text/plain";
   if (lower.endsWith(".ips") || lower.endsWith(".json")) {
     return "application/json";
   }

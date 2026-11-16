@@ -329,6 +329,20 @@ type EnrichmentReporter = (
   preserveFields?: GitLabMergeRequestSummaryField[],
 ) => void;
 
+/** Whether writing these values would change the stored row. */
+function storedValuesDiffer(
+  stored: Record<string, unknown>,
+  values: Record<string, unknown>,
+): boolean {
+  return Object.entries(values).some(([key, value]) => {
+    // Prisma leaves a column alone when its value is undefined.
+    if (value === undefined) return false;
+    const current = stored[key];
+    return value instanceof Date
+      ? !(current instanceof Date) || current.getTime() !== value.getTime()
+      : current !== value;
+  });
+}
 function repositoryScope(appId?: string | null, worktreeId?: string | null) {
   return {
     ...(appId ? { apps: { some: { appId } } } : {}),
@@ -2118,6 +2132,10 @@ export class WorktreesService {
               item.missingAt === null &&
               !reportedGitDirectories.has(item.gitDirectory),
           ));
+      // Agents report every codebase on every scan, changed or not. Views
+      // reread on this event, so it is published only for a scan that found
+      // something different from what is stored.
+      let changed = false;
       await prisma.$transaction(async (transaction) => {
         if (observedAt) {
           const accepted = await transaction.codebase.updateMany({
@@ -2132,28 +2150,31 @@ export class WorktreesService {
           });
           if (!accepted.count) return;
         }
+        const codebaseData = {
+          defaultBranch: report.defaultBranch,
+          localBranchesJson: JSON.stringify(report.localBranches),
+          remoteBranchesJson: JSON.stringify(report.remoteBranches),
+          ...(report.fetchedAt
+            ? { lastFetchedAt: new Date(report.fetchedAt) }
+            : {}),
+          ...(report.fetchAttemptedAt
+            ? {
+                lastFetchAttemptAt: new Date(report.fetchAttemptedAt),
+                lastFetchError: report.fetchError,
+              }
+            : report.fetchError
+              ? { lastFetchError: report.fetchError }
+              : {}),
+        };
+        if (storedValuesDiffer(codebase, codebaseData)) changed = true;
         await transaction.codebase.update({
           where: { id: codebase.id },
-          data: {
-            defaultBranch: report.defaultBranch,
-            localBranchesJson: JSON.stringify(report.localBranches),
-            remoteBranchesJson: JSON.stringify(report.remoteBranches),
-            ...(report.fetchedAt
-              ? { lastFetchedAt: new Date(report.fetchedAt) }
-              : {}),
-            ...(report.fetchAttemptedAt
-              ? {
-                  lastFetchAttemptAt: new Date(report.fetchAttemptedAt),
-                  lastFetchError: report.fetchError,
-                }
-              : report.fetchError
-                ? { lastFetchError: report.fetchError }
-                : {}),
-          },
+          data: codebaseData,
         });
         const identities: string[] = [];
         for (const item of inventory) {
           identities.push(item.gitDirectory);
+          const data = this.inventoryData(item);
           const worktree = await transaction.worktree.upsert({
             where: {
               codebaseId_gitDirectory: {
@@ -2165,7 +2186,7 @@ export class WorktreesService {
               id: randomUUID(),
               codebaseId: codebase.id,
               gitDirectory: item.gitDirectory,
-              ...this.inventoryData(item),
+              ...data,
             },
             update: {},
           });
@@ -2179,7 +2200,7 @@ export class WorktreesService {
               ],
             },
             data: {
-              ...this.inventoryData(item),
+              ...data,
               missingAt: null,
               ...(branchChanged
                 ? {
@@ -2195,10 +2216,19 @@ export class WorktreesService {
               where: { worktreeId: worktree.id },
             });
           }
+          const known = previousByGitDirectory.get(item.gitDirectory);
+          // The time of the scan itself is not a change worth announcing.
+          const { lastCheckedAt: _scannedAt, ...state } = data;
+          if (
+            !known ||
+            (updated.count > 0 &&
+              (known.missingAt !== null || storedValuesDiffer(worktree, state)))
+          )
+            changed = true;
           updatedIds.push(worktree.id);
         }
         if (report.complete) {
-          await transaction.worktree.updateMany({
+          const missing = await transaction.worktree.updateMany({
             where: {
               codebaseId: codebase.id,
               missingAt: null,
@@ -2217,9 +2247,10 @@ export class WorktreesService {
             },
             data: { missingAt: new Date() },
           });
+          if (missing.count > 0) changed = true;
         }
       });
-      this.publish(null, codebase.id);
+      if (changed) this.publish(null, codebase.id);
     }
     await this.cleanupExpired();
     if (deploymentTargetsChanged) {

@@ -183,6 +183,13 @@ const page = {
   activeCount: 1,
 };
 
+/** The shell reads both surfaces in one request; paging reads one. */
+const both = <T,>(view: T) => ({
+  full: view,
+  sidebar: view,
+  actionCenter: view,
+});
+
 beforeEach(() => {
   vi.clearAllMocks();
   dismissedUnrun = false;
@@ -192,8 +199,8 @@ beforeEach(() => {
   request.mockImplementation(async (query) => {
     const operation = String(query);
     if (operation.includes("query ActionCenter")) {
-      return {
-        actionCenter: dismissedUnrun
+      return both(
+        dismissedUnrun
           ? {
               ...page,
               items: page.items.filter(
@@ -203,7 +210,7 @@ beforeEach(() => {
               needsAttentionCount: page.needsAttentionCount - 1,
             }
           : page,
-      } as never;
+      ) as never;
     }
     if (operation.includes("AnswerActionCenterRunQuestion")) {
       return {
@@ -483,9 +490,7 @@ describe("Action Center requests", () => {
     },
   };
   test("shows pipeline and approval and offers Merge only for confirmed readiness", async () => {
-    request.mockResolvedValue({
-      actionCenter: { ...page, items: [pr] },
-    } as never);
+    request.mockResolvedValue(both({ ...page, items: [pr] }) as never);
     renderPage();
     expect(
       await screen.findByRole("link", { name: "#42 Ship search" }),
@@ -502,8 +507,8 @@ describe("Action Center requests", () => {
   ] as const)(
     "shows a neutral no-decision badge and Merge under Needs attention for %s",
     async (provider, resourceKind, approvalStatus) => {
-      request.mockResolvedValue({
-        actionCenter: {
+      request.mockResolvedValue(
+        both({
           ...page,
           items: [
             {
@@ -512,8 +517,8 @@ describe("Action Center requests", () => {
               request: { ...pr.request, provider, approvalStatus },
             },
           ],
-        },
-      } as never);
+        }) as never,
+      );
       renderPage();
       const attention = within(
         await screen.findByRole("region", { name: "Needs attention" }),
@@ -525,8 +530,8 @@ describe("Action Center requests", () => {
     },
   );
   test("shows failed request CI under Needs attention and colors missing required approval amber", async () => {
-    request.mockResolvedValue({
-      actionCenter: {
+    request.mockResolvedValue(
+      both({
         ...page,
         items: [
           {
@@ -540,8 +545,8 @@ describe("Action Center requests", () => {
             },
           },
         ],
-      },
-    } as never);
+      }) as never,
+    );
     renderPage();
     const attention = within(
       await screen.findByRole("region", { name: "Needs attention" }),
@@ -551,23 +556,51 @@ describe("Action Center requests", () => {
     expect(attention.queryByRole("button", { name: "Merge" })).toBeNull();
   });
   test("does not offer a green merge action for blocked or draft requests", async () => {
-    request.mockResolvedValue({
-      actionCenter: {
+    request.mockResolvedValue(
+      both({
         ...page,
         items: [{ ...pr, request: { ...pr.request, canMerge: false } }],
-      },
-    } as never);
+      }) as never,
+    );
     renderPage();
     await screen.findByRole("link", { name: "#42 Ship search" });
     expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
   });
-  test("requests the independently filtered sidebar surface", async () => {
+  test("reads the sidebar list and only the full totals in one request", async () => {
     render(<MiniActionCenter />);
     await screen.findByRole("link", { name: "Plan #4" });
-    expect(
-      request.mock.calls.some(
-        ([, variables]) => variables?.surface === "SIDEBAR",
-      ),
-    ).toBe(true);
+    const reads = request.mock.calls.filter(([query]) =>
+      String(query).includes("query ActionCenter"),
+    );
+    expect(reads).toHaveLength(1);
+    expect(String(reads[0]![0])).toContain("surface: SIDEBAR");
+    expect(String(reads[0]![0])).toContain("surface: FULL");
+    expect(reads[0]![1]).toEqual({ sidebarFirst: 50, fullFirst: 1 });
+  });
+
+  test("lists the full surface only while the page displays it", async () => {
+    const view = render(
+      <ActionCenterProvider>
+        <ActionCenterPage />
+        <MiniActionCenter />
+      </ActionCenterProvider>,
+    );
+    await screen.findAllByRole("link", { name: "Plan #4" });
+    const reads = () =>
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query ActionCenter("),
+      );
+    expect(reads()).toHaveLength(1);
+    expect(reads()[0]![1]).toEqual({ sidebarFirst: 50, fullFirst: 50 });
+
+    view.rerender(
+      <ActionCenterProvider>
+        <MiniActionCenter />
+      </ActionCenterProvider>,
+    );
+    // Leaving the page stops listing it; the shell keeps only its totals.
+    await waitFor(() =>
+      expect(reads().at(-1)![1]).toEqual({ sidebarFirst: 50, fullFirst: 1 }),
+    );
   });
 });

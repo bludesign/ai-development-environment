@@ -51,6 +51,9 @@ const frame = {
 const crash: CrashSummary = {
   id: "crash-1",
   format: "IPS",
+  kind: "CRASH",
+  occurredAt: "2026-09-20T21:21:33.000Z",
+  diskWrites: null,
   source: "API",
   status: "SYMBOLICATED",
   statusMessage: null,
@@ -163,6 +166,7 @@ test("filters dSYMs by the build in the address and links the build", async () =
 test("shows missing dSYMs and the symbolicated threads of a crash", async () => {
   const detail: CrashDetail = {
     ...crash,
+    diskWrites: null,
     status: "PARTIALLY_SYMBOLICATED",
     statusMessage: "Missing dSYMs for Widgets",
     sizeBytes: 6985,

@@ -160,6 +160,7 @@ export const ids = {
   },
   crashes: {
     checkout: "crash-acme-checkout",
+    diskWrites: "disk-writes-acme-indexing",
     checkoutRepeat: "crash-acme-checkout-repeat",
     metrickit: "crash-acme-metrickit",
     failed: "crash-acme-failed",

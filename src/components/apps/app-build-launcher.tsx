@@ -87,7 +87,7 @@ export function AppBuildLauncher({ appId }: { appId: string }) {
         const data = await controlPlaneRequest<Data>(
           `query AppBuildWorktrees($appId: ID!) {
         app(id: $appId) { repositories { id name iosAppProject { id } androidAppProject { id androidConfigurations { id } } latestBuild { ${BUILD_LIST_FIELDS} } } }
-        worktreeOverview(appId: $appId) { agents { agent { id name connectionStatus capabilities } codebases { repository { id } codebase { id } worktrees { id folder branch availability } } } }
+        worktreeOverview(appId: $appId, savedOnly: true) { agents { agent { id name connectionStatus capabilities } codebases { repository { id } codebase { id } worktrees { id folder branch availability } } } }
       }`,
           { appId },
           { signal },

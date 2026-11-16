@@ -754,13 +754,19 @@ export const routes: RouteEntry[] = [
     name: "crashes",
     path: "/debugging/crashes",
     readyGraphqlOperation: "CrashesPage",
-    readyTexts: ["EXC_BREAKPOINT · CartViewModel.item(at:)"],
+    readyTexts: ["EXC_BREAKPOINT · CartViewModel.item(at:)", "Disk Writes"],
   },
   {
     name: "crash-detail",
     path: `/debugging/crashes/${ids.crashes.checkout}`,
     readyGraphqlOperation: "CrashDetail",
     readyTexts: ["CheckoutView.submit()"],
+  },
+  {
+    name: "disk-write-detail",
+    path: `/debugging/crashes/${ids.crashes.diskWrites}`,
+    readyGraphqlOperation: "CrashDetail",
+    readyTexts: ["Heaviest Stack", "IndexStore.persistBatch()"],
   },
   {
     name: "crashes-dsyms",

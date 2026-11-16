@@ -9,6 +9,7 @@ import { OutOfDateBadge } from "@/components/builds/out-of-date-badge";
 
 import { readWorktreeBuildWindow } from "@/components/builds/build-history-window";
 
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -98,6 +99,8 @@ import {
   type WorktreeActivity,
 } from "./worktree-inspection";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
+import { useIntegrationAvailability } from "./use-integration-availability";
+import { useWorktreeLoading } from "./use-worktree-loading";
 import {
   findWorktreeOverviewEntry,
   worktreeDetailHref,
@@ -118,7 +121,7 @@ import {
 } from "./worktrees-page";
 
 export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50, $includeCoverage: Boolean = true, $includeQueue: Boolean = true) {
-  worktreeOverview(worktreeId: $worktreeId) {
+  worktreeOverview(worktreeId: $worktreeId, savedOnly: true) {
     hiddenCount
     settings { editorVariant updatedAt }
     tags { id name color createdAt updatedAt }
@@ -169,6 +172,10 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
 
 type CoverageHistoryReport = BuildReport & { build: BuildRecord };
 
+/** This is where people watch their own operations, so stay close to live. */
+const DETAIL_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const DETAIL_RECONCILE_INTERVAL_MS = 30_000;
+
 function replaceIssueParam(issueKey: string | null) {
   const params = new URLSearchParams(window.location.search);
   if (issueKey) params.set("issue", issueKey);
@@ -206,6 +213,14 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     repositoryId: string;
   } | null>(null);
 
+  // The saved overview answers at once. Pull requests, pipelines and tickets
+  // follow from their integrations, and only when what they describe changed.
+  const integrations = useIntegrationAvailability();
+  const { saved: savedOverview, forceNext: forceMetadata } = useWorktreeLoading(
+    undefined,
+    setOverview,
+    { worktreeId, integrations },
+  );
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const loadOverview = useCallback(
     () => overviewOwner.current?.refresh() ?? Promise.resolve(),
@@ -243,7 +258,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           signal,
         );
         if (signal.aborted) return;
-        setOverview(data.worktreeOverview);
+        savedOverview(data.worktreeOverview);
         setBuilds(history.items);
         setBuildsNextCursor(history.nextCursor);
         setCoverageReports(data.worktreeCoverageReports ?? []);
@@ -259,7 +274,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           setLoading(false);
       }
     },
-    [worktreeId],
+    [savedOverview, worktreeId],
   );
 
   const loadPipelines = useCallback(async () => {
@@ -358,7 +373,14 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   useEffect(() => {
     displayedGroup.current = null;
     const initial = window.setTimeout(() => void load(), 0);
-    const poll = window.setInterval(() => void load(), 30_000);
+    // A burst of events costs one saved read, and a hidden tab reads nothing.
+    const live = createLiveRefresh(() => loadOverview(), {
+      minIntervalMs: DETAIL_EVENT_REFRESH_INTERVAL_MS,
+    });
+    // Pipelines have no event of their own here; reconcile both while visible.
+    const reconcile = createLiveRefresh(() => load(), {
+      pollMs: DETAIL_RECONCILE_INTERVAL_MS,
+    });
     const subscriptions = controlPlaneSubscriptions();
     const unsubscribeWorktrees = subscriptions.subscribe<{
       worktreeOverviewChanged: {
@@ -373,14 +395,16 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       {
         next: (value) => {
           const changed = value.data?.worktreeOverviewChanged;
+          // An agent scan reports a codebase with no worktree; only this
+          // worktree's codebase, or a change that names neither, concerns us.
           if (
             !changed ||
-            changed.worktreeId === null ||
+            (changed.worktreeId === null && changed.codebaseId === null) ||
             changed.worktreeId === worktreeId ||
             (changed.codebaseId !== null &&
               changed.codebaseId === displayedGroup.current?.codebaseId)
           ) {
-            void loadOverview();
+            live.invalidate();
           }
         },
         error: () => undefined,
@@ -396,7 +420,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         variables: { worktreeId },
       },
       {
-        next: () => void loadOverview(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -418,7 +442,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             change?.codebaseId === null &&
             change.repositoryId === displayedGroup.current?.repositoryId
           ) {
-            void loadOverview();
+            live.invalidate();
           }
         },
         error: () => undefined,
@@ -434,7 +458,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       },
       {
         next: (value) => {
-          if (value.data?.workflowChanges) void loadOverview();
+          if (value.data?.workflowChanges) live.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -449,14 +473,15 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         variables: { worktreeId },
       },
       {
-        next: () => void loadOverview(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(poll);
+      live.dispose();
+      reconcile.dispose();
       latestOverviewLoad.current += 1;
       latestPipelinesLoad.current += 1;
       unsubscribeWorktrees();
@@ -560,6 +585,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       onLoadMoreBuilds={loadMoreBuilds}
       onPipelineCancelled={() => undefined}
       onPipelineRetried={() => undefined}
+      onForceMetadata={forceMetadata}
       onReload={load}
       onTicketChange={updateJiraTicket}
       onUpdate={updateWorktree}
@@ -585,6 +611,7 @@ function LoadedWorktreeDetail({
   onLoadMoreBuilds,
   onPipelineCancelled,
   onPipelineRetried,
+  onForceMetadata,
   onReload,
   onTicketChange,
   onUpdate,
@@ -602,6 +629,8 @@ function LoadedWorktreeDetail({
   onLoadMoreBuilds: () => Promise<void>;
   onPipelineCancelled: (runId: string) => void;
   onPipelineRetried: (runId: string) => void;
+  /** Ask the integrations again on the next reload, whatever they said last. */
+  onForceMetadata: () => void;
   onReload: () => Promise<void>;
   onTicketChange: (ticket: JiraTicketDetail) => void;
   onUpdate: (worktree: Worktree) => void;
@@ -710,6 +739,7 @@ function LoadedWorktreeDetail({
       await controlPlaneRequest(
         "mutation RefreshWorktrees { refreshWorktrees }",
       );
+      onForceMetadata();
       await reloadEverything();
       setOperationError(null);
     } catch (value) {

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
+  onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import {
   ActiveAgentProvider,
@@ -46,6 +47,11 @@ function Page({ page = "usage" }: { page?: string }) {
       </output>
       <output aria-label="baseline">{baseline}</output>
       <output aria-label="catalog-size">{focus.agents.length}</output>
+      <output aria-label="catalog">
+        {focus.agents
+          .map((agent) => `${agent.name}:${agent.connectionStatus}`)
+          .join(",")}
+      </output>
       <button onClick={() => setBaseline("a")}>Local A</button>
       <button onClick={() => focus.selectAgent("a")}>Focus A</button>
       <button onClick={() => focus.selectAgent("b")}>Focus B</button>
@@ -178,19 +184,93 @@ describe("active agent", () => {
     expect(screen.getByLabelText("effective").textContent).toBe("a");
   });
 
-  test("refreshes on agent events and foreground recovery", async () => {
-    const view = render(surface());
+  test("applies agent events in place and rereads only for an unlisted agent", async () => {
+    render(surface());
+    await waitFor(() =>
+      expect(screen.getByLabelText("catalog-size").textContent).toBe("2"),
+    );
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+    const client = vi
+      .mocked(controlPlaneSubscriptions)
+      .mock.results.at(-1)!.value;
+    const [payload, sink] = vi.mocked(client.subscribe).mock.calls[0]!;
+    expect(payload.query).toContain(
+      "agentChanged { id name hostname connectionStatus capabilities }",
+    );
+
+    // A heartbeat carries the agent, so nothing is read again.
+    await act(async () =>
+      sink.next({
+        data: { agentChanged: { ...agents[1], connectionStatus: "ONLINE" } },
+      }),
+    );
+    expect(screen.getByLabelText("catalog").textContent).toBe(
+      "Agent A:ONLINE,Agent B:ONLINE",
+    );
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+
+    const added = {
+      id: "c",
+      name: "Agent C",
+      hostname: "c.local",
+      connectionStatus: "ONLINE",
+    };
+    vi.mocked(controlPlaneRequest).mockResolvedValue({
+      agents: [...agents, added],
+    });
+    await act(async () => sink.next({ data: { agentChanged: added } }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("catalog-size").textContent).toBe("3"),
+    );
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(2);
+  });
+
+  test("keeps a heartbeat that arrives while the catalog is being read", async () => {
+    let finish!: (value: { agents: typeof agents }) => void;
+    vi.mocked(controlPlaneRequest).mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    );
+    render(surface());
     await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(1));
     const client = vi
       .mocked(controlPlaneSubscriptions)
       .mock.results.at(-1)!.value;
     const sink = vi.mocked(client.subscribe).mock.calls[0]![1];
-    await act(async () => sink.next({ data: { agentChanged: { id: "a" } } }));
+    await act(async () =>
+      sink.next({
+        data: { agentChanged: { ...agents[1], connectionStatus: "ONLINE" } },
+      }),
+    );
+    await act(async () => finish({ agents }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("catalog").textContent).toBe(
+        "Agent A:ONLINE,Agent B:ONLINE",
+      ),
+    );
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+  });
+
+  test("reconciles after a reconnect, waiting for a hidden tab to return", async () => {
+    const view = render(surface());
+    await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(1));
+    const recover = vi.mocked(onControlPlaneRecovery).mock.calls.at(-1)![0];
+
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    act(() => recover());
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(1);
+
+    visibility.mockReturnValue("visible");
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
     await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(2));
-    await act(async () => window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(controlPlaneRequest).toHaveBeenCalledTimes(3));
+
     view.unmount();
-    act(() => window.dispatchEvent(new Event("focus")));
-    expect(controlPlaneRequest).toHaveBeenCalledTimes(3);
+    act(() => recover());
+    expect(controlPlaneRequest).toHaveBeenCalledTimes(2);
   });
 });

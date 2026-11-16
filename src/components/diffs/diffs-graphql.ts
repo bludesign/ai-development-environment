@@ -4,7 +4,7 @@
  * whether commenting is safe.
  */
 export const DIFF_WORKTREES_QUERY = `query DiffWorktrees {
-  worktreeOverview {
+  worktreeOverview(savedOnly: true) {
     agents {
       agent { id name }
       codebases {

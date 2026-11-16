@@ -75,6 +75,7 @@ import {
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
+  WORKFLOWS_CHANGED_TOPIC,
   type AgentControlService,
 } from "@/services/agent-control";
 import type { CredentialService } from "@/services/credentials";
@@ -108,7 +109,6 @@ import {
   type WorkflowWaitInput,
 } from "./step-executor";
 
-const WORKFLOWS_CHANGED_TOPIC = "workflows:changed";
 const runTopic = (runId: string) => `workflow-run:${runId}`;
 const runEventTopic = (runId: string) => `workflow-run:${runId}:events`;
 const runQuestionTopic = (runId: string) => `workflow-run:${runId}:questions`;
@@ -525,6 +525,38 @@ function publishWorkflowChanged(id: string): void {
   agentEventBus.publish(WORKFLOWS_CHANGED_TOPIC, {
     workflowChanged: { id },
   });
+}
+
+type ChangedRunSubject = {
+  worktreeId: string | null;
+  workflowId: string;
+  resourceLinks: { kind: string; resourceId: string }[];
+} | null;
+const changedRunSubjects = new WeakMap<object, Promise<ChangedRunSubject>>();
+
+/**
+ * What a published run change is about. Every subscription filtering on a
+ * resource receives the same event object, so a page showing one card per
+ * worktree shares one lookup here instead of making one per card.
+ */
+function changedRunSubject(change: {
+  runId?: string;
+}): Promise<ChangedRunSubject> {
+  let subject = changedRunSubjects.get(change);
+  if (!subject) {
+    subject = getPrismaClient().then((prisma) =>
+      prisma.workflowRun.findUnique({
+        where: { id: change.runId },
+        select: {
+          worktreeId: true,
+          workflowId: true,
+          resourceLinks: { select: { kind: true, resourceId: true } },
+        },
+      }),
+    );
+    changedRunSubjects.set(change, subject);
+  }
+  return subject;
 }
 
 function publishRunChanged(runId: string): void {
@@ -6767,26 +6799,7 @@ export class WorkflowsService {
         return !input.workflowId || change.id === input.workflowId;
       if (!change.runId || (!input.workflowId && !input.resourceId))
         return true;
-      const prisma = await getPrismaClient();
-      const run = await prisma.workflowRun.findUnique({
-        where: { id: change.runId },
-        select: {
-          worktreeId: true,
-          workflowId: true,
-          ...(input.resourceId
-            ? {
-                resourceLinks: {
-                  where: {
-                    kind: input.resourceKind?.trim().toUpperCase(),
-                    resourceId: input.resourceId.trim(),
-                  },
-                  select: { id: true },
-                  take: 1,
-                },
-              }
-            : {}),
-        },
-      });
+      const run = await changedRunSubject(change);
       // A removed run has no remaining links; reconcile once to remove it from
       // previously linked views. Existing unrelated runs are filtered cheaply.
       if (!run) return true;
@@ -6799,7 +6812,12 @@ export class WorkflowsService {
         )
       )
         return false;
-      return !input.resourceId || Boolean(run.resourceLinks?.length);
+      if (!input.resourceId) return true;
+      const kind = input.resourceKind?.trim().toUpperCase();
+      const resourceId = input.resourceId.trim();
+      return run.resourceLinks.some(
+        (link) => link.kind === kind && link.resourceId === resourceId,
+      );
     });
   }
 

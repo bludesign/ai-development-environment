@@ -12,7 +12,6 @@ import { PostMergeSwitchProgress } from "./post-merge-switch-client";
 import { MergePullRequestButton } from "./merge-pull-request-button";
 import {
   dismissMergeOperationError,
-  dismissMergeOperationProgress,
   useMergeOperationErrors,
   useMergeOperationProgress,
 } from "./merge-operation-state";
@@ -63,16 +62,6 @@ export function MergeOperationWarnings({
             >
               {t("details")}
             </Button>
-            {entry.status.state === "COMPLETED" && (
-              <Button
-                aria-label={t("closeMergeResult")}
-                onClick={() => dismissMergeOperationProgress(entry.key)}
-                size="icon-sm"
-                variant="ghost"
-              >
-                <X />
-              </Button>
-            )}
           </AlertDescription>
         </Alert>
       ))}

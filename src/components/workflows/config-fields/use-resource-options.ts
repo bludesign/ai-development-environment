@@ -89,7 +89,7 @@ export function resourcePlan(
     case "worktree":
       return {
         query: `query WorkflowWorktreeOptions {
-          worktreeOverview {
+          worktreeOverview(savedOnly: true) {
             agents { codebases { codebase { folder } worktrees { id branch folder } } }
           }
           hiddenWorktrees { id branch folder }

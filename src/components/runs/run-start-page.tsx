@@ -154,7 +154,7 @@ export function RunStartPage({
           runDraft?: RunDraftView | null;
         }>(
           `query RunStartPage${draftId ? "($draftId: ID!, $appId: ID)" : "($appId: ID)"} {
-        worktreeOverview(appId: $appId) {
+        worktreeOverview(appId: $appId, savedOnly: true) {
           agents {
             agent { name connectionStatus capabilities }
             codebases {

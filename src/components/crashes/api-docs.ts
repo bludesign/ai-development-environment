@@ -38,7 +38,7 @@ export function crashApiDocumentation(baseUrl: string): string {
 
 ## Crash reports
 
-\`POST ${crashes}\` takes one crash report as the raw body: an \`.ips\` report, a \`.crash\` text report, or MetricKit JSON (an \`MXDiagnosticPayload\` or a single \`MXCrashDiagnostic\`). The body may be gzip-compressed and is capped at 5 MiB after decoding. No credential is needed, so shipped apps can report; send \`X-API-Key\` to record which key uploaded it. Anonymous uploads are limited to 30 a minute per address and are refused with 202 while crash collection is off.
+\`POST ${crashes}\` takes one report as the raw body: a JSON crash \`.ips\`, a device-exported \`.diskwrites_resource.ips\`, a \`.crash\` text report, or MetricKit JSON (an \`MXDiagnosticPayload\` or a single \`MXCrashDiagnostic\`). The body may be gzip-compressed and is capped at 5 MiB after decoding. No credential is needed, so shipped apps can report; send \`X-API-Key\` to record which key uploaded it. Anonymous uploads are limited to 30 a minute per address and are refused with 202 while crash collection is off.
 
 \`\`\`bash
 curl --request POST '${crashes}' \\
@@ -46,6 +46,8 @@ curl --request POST '${crashes}' \\
   --header 'x-crash-filename: MyApp-2026-09-20.ips' \\
   --data-binary @MyApp-2026-09-20.ips
 \`\`\`
+
+For a disk-write .ips, send the entire file as text/plain or application/octet-stream, including the JSON header.
 
 From an app, forward MetricKit crash diagnostics when they arrive:
 
@@ -66,7 +68,7 @@ final class CrashReporter: NSObject, MXMetricManagerSubscriber {
 // At launch: MXMetricManager.shared.add(crashReporter)
 \`\`\`
 
-Responses: 201 with \`{ "crashes": [{ "id", "status", "url" }] }\`, 200 for a report already uploaded, 413 over 5 MiB, 415 for an unrecognized format, 422 for an .ips that is not a crash, and 429 when rate limited.
+Responses: 201 with \`{ "crashes": [{ "id", "status", "url" }] }\`, 200 for a report already uploaded, 413 over 5 MiB, 415 for an unrecognized format, 422 for a malformed report or unsupported event, and 429 when rate limited.
 
 ## dSYMs
 

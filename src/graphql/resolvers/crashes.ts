@@ -12,8 +12,12 @@ import {
 import {
   displayFrames,
   displayThreads,
+  heaviestStack,
   renderCrashText,
+  sampledCallTree,
+  topAppFrame,
 } from "@/services/crashes/symbolication";
+import { crashReportKind } from "@/services/crashes/types";
 import type {
   CrashSymbolication,
   DisplayFrame,
@@ -31,6 +35,7 @@ const iso = (value: Date | null | undefined) => value?.toISOString() ?? null;
 
 type CrashParent = {
   id: string;
+  format?: string;
   signature: string;
   normalizedJson: string;
   symbolicationJson: string;
@@ -114,6 +119,22 @@ export const createCrashResolvers = (service: CrashesService) => ({
     createdAt: (row: CrashParent) => row.createdAt.toISOString(),
     updatedAt: (row: CrashParent) => row.updatedAt.toISOString(),
     crashedAt: (row: CrashParent) => iso(row.crashedAt),
+    kind: (row: CrashParent) => crashReportKind(row.format ?? ""),
+    occurredAt: (row: CrashParent) => {
+      const disk = details(row).crash?.diskWrites;
+      return (
+        disk?.endedAt ??
+        disk?.reportedAt ??
+        disk?.startedAt ??
+        iso(row.crashedAt)
+      );
+    },
+    diskWrites: (row: CrashParent) => {
+      const { crash, symbolication } = details(row);
+      return crash?.diskWrites
+        ? { ...crash.diskWrites, crash, symbolication }
+        : null;
+    },
     symbolicatedAt: (row: CrashParent) => iso(row.symbolicatedAt),
     exceptionSubtype: (row: CrashParent) =>
       details(row).crash?.exceptionSubtype ?? null,
@@ -131,14 +152,7 @@ export const createCrashResolvers = (service: CrashesService) => ({
     },
     topAppFrame: (row: CrashParent) => {
       const { crash, symbolication } = details(row);
-      const thread =
-        crash?.threads.find((entry) => entry.crashed) ?? crash?.threads[0];
-      if (!crash || !thread) return null;
-      const frame = displayFrames(
-        thread.frames,
-        crash.images,
-        symbolication,
-      ).find((entry) => entry.isAppFrame && !entry.inlined);
+      const frame = crash ? topAppFrame(crash, symbolication) : null;
       return frame ? frameView(frame) : null;
     },
     lastExceptionBacktrace: (row: CrashParent) => {
@@ -174,6 +188,24 @@ export const createCrashResolvers = (service: CrashesService) => ({
       `/api/crash-files/reports/${row.id}`,
     symbolicatedDownloadUrl: (row: CrashParent) =>
       `/api/crash-files/reports/${row.id}?variant=symbolicated`,
+  },
+  DiskWriteDetails: {
+    heaviestStack: (row: {
+      crash: NormalizedCrash;
+      symbolication: CrashSymbolication;
+    }) =>
+      heaviestStack(row.crash, row.symbolication).map((entry) => ({
+        ...entry,
+        frames: entry.frames.map(frameView),
+      })),
+    callTree: (row: {
+      crash: NormalizedCrash;
+      symbolication: CrashSymbolication;
+    }) =>
+      sampledCallTree(row.crash, row.symbolication).map((entry) => ({
+        ...entry,
+        frames: entry.frames.map(frameView),
+      })),
   },
   CrashBinaryImage: {
     dsym: (image: { dsymId: string | null }) =>

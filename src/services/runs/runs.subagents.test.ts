@@ -22,6 +22,12 @@ vi.mock("@/data/prisma-client", () => ({
 }));
 
 import { PrismaClient } from "@/generated/prisma/client";
+import {
+  ACTION_CENTER_CHANGED_TOPIC,
+  RUNS_CHANGED_TOPIC,
+  SIDEBAR_STATUS_CHANGED_TOPIC,
+  agentEventBus,
+} from "@/services/agent-control";
 import { RunsService, type RunEventInput } from "./runs.service";
 
 let directory: string;
@@ -184,6 +190,33 @@ describe("run subagent sessions", () => {
     expect(await prisma.runEvent.count()).toBe(0);
     expect(await service.subagents("run")).toEqual([]);
     expect(await service.subagents("other-run")).toEqual([]);
+  });
+
+  test("tells a run's own views about new events without waking every open tab", async () => {
+    const publish = vi.spyOn(agentEventBus, "publish");
+    try {
+      await service.appendEvents("owner", "run", "run-attempt", [
+        event(0, { type: "system", subtype: "init" }),
+      ]);
+      const topics = publish.mock.calls.map(([topic]) => topic);
+      expect(topics).toContain(RUNS_CHANGED_TOPIC);
+      // A working run appends events every few seconds. The sidebar totals
+      // and the Action Center only change with a run's state.
+      expect(topics).not.toContain(SIDEBAR_STATUS_CHANGED_TOPIC);
+      expect(topics).not.toContain(ACTION_CENTER_CHANGED_TOPIC);
+
+      publish.mockClear();
+      await service.archive(["run"], true);
+      expect(publish.mock.calls.map(([topic]) => topic)).toEqual(
+        expect.arrayContaining([
+          RUNS_CHANGED_TOPIC,
+          SIDEBAR_STATUS_CHANGED_TOPIC,
+          ACTION_CENTER_CHANGED_TOPIC,
+        ]),
+      );
+    } finally {
+      publish.mockRestore();
+    }
   });
 
   test("records nested task parent IDs and excludes non-agent background tasks", async () => {

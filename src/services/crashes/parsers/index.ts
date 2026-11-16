@@ -1,6 +1,7 @@
 import { CrashParseError, type NormalizedCrash } from "../types";
 import { looksLikeAppleTextCrash, parseAppleTextCrash } from "./apple-text";
-import { parseIps, splitIps } from "./ips";
+import { parseDiskWritesIps } from "./disk-writes";
+import { parseIps, readIpsHeader } from "./ips";
 import { isMetricKitPayload, parseMetricKit } from "./metrickit";
 
 export { isAppImage } from "./common";
@@ -9,7 +10,7 @@ export { parseIps } from "./ips";
 export { parseMetricKit } from "./metrickit";
 
 /**
- * Works out which of the three formats a file is and parses it. The content
+ * Identifies the report format and parses it. The content
  * decides, not the file name: apps post MetricKit JSON without one, and an
  * `.ips` saved from Mail can arrive renamed to `.txt`.
  */
@@ -22,7 +23,13 @@ export function detectAndParse(bytes: Uint8Array): NormalizedCrash[] {
   }
   if (!contents.trim()) throw new CrashParseError("The crash report is empty");
 
-  if (splitIps(contents)) return [parseIps(contents)];
+  const ips = readIpsHeader(contents);
+  if (ips) {
+    if (String(ips.header.bug_type) === "145") {
+      return [parseDiskWritesIps(ips.header, ips.bodyText)];
+    }
+    return [parseIps(contents)];
+  }
 
   const trimmed = contents.trimStart();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {

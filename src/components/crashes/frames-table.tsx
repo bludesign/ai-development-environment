@@ -1,6 +1,6 @@
 "use client";
 
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -17,8 +17,15 @@ export function frameLocation(frame: CrashFrame): string | null {
 }
 
 /** One backtrace, with app frames emphasized and inlined frames indented. */
-export function FramesTable({ frames }: { frames: CrashFrame[] }) {
+export function FramesTable({
+  frames,
+  sampleCounts,
+}: {
+  frames: CrashFrame[];
+  sampleCounts?: number[];
+}) {
   const t = useTranslations("crashes");
+  const number = new Intl.NumberFormat(useLocale());
   if (!frames.length) {
     return (
       <p className="px-4 py-3 text-sm text-muted-foreground">{t("noFrames")}</p>
@@ -31,7 +38,10 @@ export function FramesTable({ frames }: { frames: CrashFrame[] }) {
         return (
           <li
             className={cn(
-              "grid grid-cols-[2rem_minmax(0,6rem)_minmax(0,1fr)] gap-x-3 px-4 py-1.5 sm:grid-cols-[2.5rem_minmax(0,11rem)_minmax(0,1fr)]",
+              "grid gap-x-3 px-4 py-1.5",
+              sampleCounts
+                ? "grid-cols-[3rem_minmax(0,6rem)_minmax(0,1fr)] sm:grid-cols-[4rem_minmax(0,11rem)_minmax(0,1fr)]"
+                : "grid-cols-[2rem_minmax(0,6rem)_minmax(0,1fr)] sm:grid-cols-[2.5rem_minmax(0,11rem)_minmax(0,1fr)]",
               frame.isAppFrame
                 ? "bg-primary/5 text-foreground"
                 : "text-muted-foreground",
@@ -45,7 +55,10 @@ export function FramesTable({ frames }: { frames: CrashFrame[] }) {
                 frame.inlined && "text-muted-foreground",
               )}
             >
-              {frame.index}
+              {sampleCounts
+                ? !frame.inlined &&
+                  number.format(sampleCounts[frame.index] ?? 0)
+                : frame.index}
             </span>
             <span className="truncate" title={frame.imageName ?? undefined}>
               {frame.imageName ?? "???"}

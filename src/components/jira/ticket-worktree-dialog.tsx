@@ -113,7 +113,7 @@ export function TicketWorktreeDialog({
       const data = await controlPlaneRequest<{
         worktreeOverview: DialogOverview;
       }>(`query TicketWorktreeDestinations {
-        worktreeOverview {
+        worktreeOverview(savedOnly: true) {
           agents {
             agent { id name hostname connectionStatus capabilities }
             codebases {

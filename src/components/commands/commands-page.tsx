@@ -73,6 +73,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import {
@@ -97,6 +98,9 @@ import {
   type CommandRun,
   type CommandWorktree,
 } from "./types";
+
+const TARGET_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const TARGET_RECONCILE_INTERVAL_MS = 60_000;
 
 const statusVariant = (status: string) =>
   status === "SUCCEEDED"
@@ -241,6 +245,7 @@ export function CommandsPage() {
   const choosingTarget = customOpen || targetCommand !== null;
   useEffect(() => {
     if (!choosingTarget) return;
+    const listedAgents = new Set<string>();
     const owner = createRefreshCoalescer(async (signal) => {
       try {
         const data = await controlPlaneRequest<{
@@ -257,7 +262,7 @@ export function CommandsPage() {
         }>(
           `query CommandLaunchTargets {
           agents { id name hostname connectionStatus capabilities }
-          worktreeOverview { agents { agent { id name } codebases {
+          worktreeOverview(savedOnly: true) { agents { agent { id name } codebases {
             repository { id name } worktrees { id folder branch highlightColor }
           } } }
         }`,
@@ -266,6 +271,8 @@ export function CommandsPage() {
         );
         if (signal.aborted) return;
         setAgents(data.agents);
+        listedAgents.clear();
+        for (const { id } of data.agents) listedAgents.add(id);
         setWorktrees(
           data.worktreeOverview.agents.flatMap((group) =>
             group.codebases.flatMap((codebase) =>
@@ -285,6 +292,11 @@ export function CommandsPage() {
       }
     });
     void owner.refresh();
+    // Agent deletion and heartbeat expiry can change targets without an event.
+    const live = createLiveRefresh(() => owner.refresh(), {
+      minIntervalMs: TARGET_EVENT_REFRESH_INTERVAL_MS,
+      pollMs: TARGET_RECONCILE_INTERVAL_MS,
+    });
     const client = controlPlaneSubscriptions();
     const disposers = [
       client.subscribe(
@@ -293,23 +305,41 @@ export function CommandsPage() {
             "subscription CommandTargetWorktrees { worktreeOverviewChanged { worktreeId } }",
         },
         {
-          next: () => void owner.refresh(),
+          next: () => live.invalidate(),
           error: () => undefined,
           complete: () => undefined,
         },
       ),
-      client.subscribe(
-        { query: "subscription CommandTargetAgents { agentChanged { id } }" },
+      client.subscribe<{ agentChanged: CommandAgent }>(
         {
-          next: () => void owner.refresh(),
+          query:
+            "subscription CommandTargetAgents { agentChanged { id name hostname connectionStatus capabilities } }",
+        },
+        {
+          next: (value) => {
+            const changed = value.data?.agentChanged;
+            if (!changed) return;
+            // A heartbeat carries the agent; only an agent this dialog has
+            // not listed yet needs the targets read again.
+            if (!listedAgents.has(changed.id)) {
+              live.invalidate();
+              return;
+            }
+            setAgents((current) =>
+              current.map((agent) =>
+                agent.id === changed.id ? { ...agent, ...changed } : agent,
+              ),
+            );
+          },
           error: () => undefined,
           complete: () => undefined,
         },
       ),
-      onControlPlaneRecovery(() => void owner.refresh()),
+      onControlPlaneRecovery(() => live.invalidate()),
     ];
     return () => {
       disposers.forEach((dispose) => dispose());
+      live.dispose();
       owner.dispose();
     };
   }, [choosingTarget]);

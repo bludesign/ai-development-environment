@@ -2,7 +2,14 @@
 
 import { ChevronDown, GitMerge, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { DateTime } from "@/components/common/date-time";
 import {
   BASE_BRANCH_UPDATE_FIELDS,
@@ -90,6 +97,8 @@ type Batch = {
 };
 
 type Scope = { appId: string | null; agentId: string | null };
+const wrappingButton =
+  "h-auto max-w-full min-w-0 py-1.5 wrap-anywhere whitespace-normal";
 
 const REQUEST_FIELDS = `
   worktreeId repositoryName agentName branch folder provider
@@ -326,11 +335,13 @@ export function WorktreeBulkMerge({
   agentId,
   disabled,
   onReload,
+  renderHeader,
 }: {
   appId?: string;
   agentId: string | null;
   disabled: boolean;
   onReload: () => Promise<void>;
+  renderHeader?: (trigger: ReactNode) => ReactNode;
 }) {
   const t = useTranslations("worktrees.bulkMerge");
   const scope = { appId: appId ?? null, agentId };
@@ -345,6 +356,7 @@ export function WorktreeBulkMerge({
   const [candidateError, setCandidateError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const dialogOpen = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const candidateRequest = useRef<AbortController | null>(null);
   const submission = useRef<{ requestId: string; fingerprint: string } | null>(
     null,
@@ -357,16 +369,15 @@ export function WorktreeBulkMerge({
     refresh,
   } = useMergeBatches(scope, onReload);
 
+  const activeBatches = batches.filter((batch) => batch.status === "ACTIVE");
   const activeRequests = new Set(
-    batches
-      .filter((batch) => batch.status === "ACTIVE")
-      .flatMap((batch) =>
-        batch.items
-          .filter(
-            (item) => item.status === "PENDING" || item.status === "SUBMITTING",
-          )
-          .map(({ requestKey }) => requestKey),
-      ),
+    activeBatches.flatMap((batch) =>
+      batch.items
+        .filter(
+          (item) => item.status === "PENDING" || item.status === "SUBMITTING",
+        )
+        .map(({ requestKey }) => requestKey),
+    ),
   );
   const mergedRequests = new Set(
     batches.flatMap((batch) =>
@@ -514,25 +525,75 @@ export function WorktreeBulkMerge({
     }
   };
 
-  return (
-    <>
+  const trigger = (
+    <Button
+      aria-label={t("button")}
+      disabled={disabled && batches.length === 0}
+      onClick={() => changeOpen(true)}
+      ref={triggerRef}
+      variant="outline"
+    >
+      {activeCount ? <Spinner aria-hidden="true" /> : <GitMerge />}
+      {t("button")}
+      {activeCount > 0 && <Badge variant="secondary">{activeCount}</Badge>}
+    </Button>
+  );
+  const status = activeCount > 0 && (
+    <section
+      aria-label={t("running")}
+      className="flex min-w-0 flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3 wrap-anywhere"
+    >
+      <div role="status" className="min-w-0 space-y-1">
+        <h2 className="flex items-center gap-2 text-sm font-medium">
+          <Spinner aria-hidden="true" />
+          {t("running")}
+        </h2>
+        {activeBatches.map((batch) => (
+          <p key={batch.id} className="text-sm text-muted-foreground">
+            {activeCount > 1 && (
+              <>
+                <DateTime value={batch.createdAt} /> ·{" "}
+              </>
+            )}
+            {t("progress", {
+              completed: processedCount(batch),
+              total: batch.items.length,
+            })}
+          </p>
+        ))}
+      </div>
       <Button
-        aria-label={t("button")}
-        disabled={disabled && batches.length === 0}
+        className={wrappingButton}
         onClick={() => changeOpen(true)}
+        size="sm"
         variant="outline"
       >
-        {activeCount ? <Spinner aria-hidden="true" /> : <GitMerge />}
-        {t("button")}
-        {activeCount > 0 && <Badge variant="secondary">{activeCount}</Badge>}
+        {t("viewProgress")}
       </Button>
+      {progressError && (
+        <p className="basis-full text-sm text-muted-foreground" role="status">
+          {t("monitoringError")} {progressError}
+        </p>
+      )}
+    </section>
+  );
+  return (
+    <>
+      {renderHeader ? renderHeader(trigger) : trigger}
+      {status}
       <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogContent className="flex max-h-[85dvh] w-[calc(100%-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <DialogContent
+          className="flex max-h-[85dvh] w-[calc(100%-2rem)] min-w-0 flex-col gap-0 overflow-hidden p-0 wrap-anywhere sm:max-w-3xl"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            triggerRef.current?.focus();
+          }}
+        >
           <DialogHeader className="shrink-0 border-b p-4 pr-12">
             <DialogTitle>{t("button")}</DialogTitle>
             <DialogDescription>{t("description")}</DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-4">
+          <div className="min-h-0 min-w-0 flex-1 space-y-5 overflow-y-auto p-4">
             {submitError && (
               <Alert variant="destructive">
                 <AlertDescription>{submitError}</AlertDescription>
@@ -554,6 +615,7 @@ export function WorktreeBulkMerge({
                 <div className="flex flex-wrap items-center gap-2">
                   {readyRequests.size > 0 && (
                     <Button
+                      className={wrappingButton}
                       size="sm"
                       variant="ghost"
                       disabled={
@@ -592,7 +654,7 @@ export function WorktreeBulkMerge({
                 <p className="text-sm text-muted-foreground">{t("empty")}</p>
               )}
               {rows.length > 0 && (
-                <ul className="divide-y rounded-lg border">
+                <ul className="min-w-0 divide-y rounded-lg border">
                   {rows.map(
                     ({
                       candidate,
@@ -651,7 +713,7 @@ export function WorktreeBulkMerge({
             {selectedRows.length > 0 && (
               <section
                 aria-label={t("review")}
-                className="space-y-2 rounded-md border p-3"
+                className="min-w-0 space-y-2 rounded-md border p-3"
               >
                 <h3 className="font-medium">{t("review")}</h3>
                 <ul className="space-y-2">
@@ -680,10 +742,15 @@ export function WorktreeBulkMerge({
             )}
             <p className="text-xs text-muted-foreground">{t("background")}</p>
             <div className="flex flex-wrap justify-end gap-2">
-              <Button onClick={() => changeOpen(false)} variant="outline">
-                {t("close")}
+              <Button
+                className={wrappingButton}
+                onClick={() => changeOpen(false)}
+                variant="outline"
+              >
+                {t(activeCount ? "continueInBackground" : "close")}
               </Button>
               <Button
+                className={wrappingButton}
                 disabled={
                   disabled ||
                   loading ||
@@ -746,7 +813,7 @@ function MergeCandidateRow({
   const t = useTranslations("worktrees.bulkMerge");
   const id = useId();
   return (
-    <li className="flex items-start gap-3 p-3">
+    <li className="flex min-w-0 items-start gap-3 p-3">
       <Checkbox
         aria-label={t("selectWorktree", { branch: candidate.branch })}
         aria-describedby={`${id}-checkout`}
@@ -789,7 +856,7 @@ function MergeCandidateRow({
           <Collapsible>
             <CollapsibleTrigger asChild>
               <Button
-                className="group px-0"
+                className={`group justify-start px-0 text-left ${wrappingButton}`}
                 size="sm"
                 variant="ghost"
                 disabled={disabled}
@@ -806,7 +873,7 @@ function MergeCandidateRow({
                 disabled={disabled}
               />
               <Button
-                className="mt-2"
+                className={`mt-2 ${wrappingButton}`}
                 size="sm"
                 variant="outline"
                 disabled={disabled}
@@ -858,14 +925,18 @@ function MergeFollowUpSummary({
   );
 }
 
-function MergeBatchProgress({ batch }: { batch: Batch }) {
-  const t = useTranslations("worktrees.bulkMerge");
-  const completed = batch.items.filter(
+function processedCount(batch: Batch) {
+  return batch.items.filter(
     ({ status }) => status !== "PENDING" && status !== "SUBMITTING",
   ).length;
+}
+
+function MergeBatchProgress({ batch }: { batch: Batch }) {
+  const t = useTranslations("worktrees.bulkMerge");
+  const completed = processedCount(batch);
   const progress = t("progress", { completed, total: batch.items.length });
   return (
-    <section className="space-y-3 rounded-md border p-3">
+    <section className="min-w-0 space-y-3 rounded-md border p-3">
       <div role="status" className="space-y-1">
         <h3 className="flex items-center gap-2 font-medium">
           {batch.status === "ACTIVE" && <Spinner aria-hidden="true" />}
@@ -886,8 +957,9 @@ function MergeBatchProgress({ batch }: { batch: Batch }) {
         {batch.items.map((item) => (
           <li key={item.id} className="space-y-1 py-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="break-all font-medium">{item.branch}</p>
+              <p className="min-w-0 wrap-anywhere font-medium">{item.branch}</p>
               <Badge
+                className="h-auto max-w-full min-w-0 wrap-anywhere whitespace-normal"
                 variant={
                   item.status === "MERGED"
                     ? "success"

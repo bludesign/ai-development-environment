@@ -6,6 +6,7 @@ import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
 
 import { useActiveAgent } from "@/components/active-agent/active-agent-provider";
 
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -183,10 +184,8 @@ import { QuickActionsRow } from "./quick-actions-row";
 import { WorktreeDetailPanel } from "./worktree-detail-panel";
 import { WorktreeFetchProgress } from "./worktree-fetch-progress";
 import { WorktreeLoadingStatus } from "./worktree-loading-status";
-import {
-  preserveWorktreeMetadata,
-  useWorktreeLoading,
-} from "./use-worktree-loading";
+import { useWorktreeLoading } from "./use-worktree-loading";
+import { useIntegrationAvailability } from "./use-integration-availability";
 import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
   CODEBASE_FIELDS,
@@ -255,6 +254,9 @@ const COLORS = [
 ] as const;
 const LAYOUT_KEY = "worktrees-layout";
 const GROUP_BY_KEY = "worktrees-group-by";
+/** This is where people watch their own operations, so stay close to live. */
+const OVERVIEW_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const OVERVIEW_RECONCILE_INTERVAL_MS = 30_000;
 const FILTERS_KEY = "worktrees-filters";
 const ALL_FILTER_VALUE = "__all__";
 const DIRTY_FILTER_VALUE = "dirty";
@@ -755,6 +757,7 @@ export function WorktreesPage({
     );
   };
   const latestLoad = useRef(0);
+  const integrations = useIntegrationAvailability();
   const {
     timings,
     begin: beginLoad,
@@ -762,7 +765,7 @@ export function WorktreesPage({
     saved: savedLoad,
     forceNext,
     retry: retryEnrichment,
-  } = useWorktreeLoading(appId, setOverview);
+  } = useWorktreeLoading(appId, setOverview, { integrations });
 
   const overviewOwner = useRef<RefreshCoalescer | null>(null);
   const load = useCallback(
@@ -830,9 +833,6 @@ export function WorktreesPage({
           { signal },
         );
         if (request !== latestLoad.current || signal.aborted) return;
-        setOverview((current) =>
-          preserveWorktreeMetadata(current, data.worktreeOverview),
-        );
         savedLoad(data.worktreeOverview);
         setLoadError(null);
       } catch (value) {
@@ -873,7 +873,13 @@ export function WorktreesPage({
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
-    const poll = window.setInterval(() => void load(), 30_000);
+    // Every agent scan and every build step reports here. A burst costs one
+    // saved read, a hidden tab reads nothing, and the poll only covers an
+    // event the socket dropped.
+    const live = createLiveRefresh(() => load(), {
+      minIntervalMs: OVERVIEW_EVENT_REFRESH_INTERVAL_MS,
+      pollMs: OVERVIEW_RECONCILE_INTERVAL_MS,
+    });
     const subscriptions = controlPlaneSubscriptions();
     const unsubscribeWorktrees = subscriptions.subscribe(
       {
@@ -881,7 +887,7 @@ export function WorktreesPage({
           "subscription WorktreesChanged { worktreeOverviewChanged { worktreeId codebaseId } }",
       },
       {
-        next: () => void load(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -889,7 +895,7 @@ export function WorktreesPage({
     const unsubscribeBuilds = subscriptions.subscribe(
       { query: "subscription WorktreeBuildsChanged { buildsChanged { id } }" },
       {
-        next: () => void load(),
+        next: () => live.invalidate(),
         error: () => undefined,
         complete: () => undefined,
       },
@@ -907,7 +913,8 @@ export function WorktreesPage({
       {
         next: (value) => {
           const change = value.data?.codebaseOverviewChanged;
-          if (change?.repositoryId && change.codebaseId === null) void load();
+          if (change?.repositoryId && change.codebaseId === null)
+            live.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -926,7 +933,7 @@ export function WorktreesPage({
                 { definitionsChanged?: boolean } | undefined
             )?.definitionsChanged
           )
-            void load();
+            live.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
@@ -934,7 +941,7 @@ export function WorktreesPage({
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(poll);
+      live.dispose();
       latestLoad.current += 1;
       unsubscribeWorktrees();
       unsubscribeBuilds();
@@ -1122,118 +1129,117 @@ export function WorktreesPage({
     changesFilter !== ALL_FILTER_VALUE ||
     branchFilter !== ALL_FILTER_VALUE;
 
+  const renderHeader = (mergeTrigger: React.ReactNode) => (
+    <div className="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{t("title")}</h1>
+        <p className="mt-1 text-sm text-muted-foreground">{t("description")}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={busy || fetchOperation.active}
+          onClick={() => void refresh()}
+          variant="outline"
+        >
+          <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
+          {t("refresh")}
+        </Button>
+        <Button
+          disabled={busy || fetchOperation.active || !overview?.agents.length}
+          onClick={() => void fetchNow()}
+          variant="outline"
+        >
+          {fetchOperation.active ? (
+            <Spinner aria-hidden="true" />
+          ) : (
+            <Download />
+          )}{" "}
+          {fetchOperation.active && fetchOperation.batch
+            ? t(`fetchProgress.${fetchOperation.batch.phase}`)
+            : t("fetchNow")}
+        </Button>
+        <WorktreeBulkSync
+          agentId={globalAgent.activeAgentId}
+          appId={appId}
+          disabled={busy || fetchOperation.active || !overview?.agents.length}
+          key={`${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+          onReload={refreshPage}
+          overview={overview}
+          scopeRepositoryIds={scopeRepositoryIds}
+        />
+        {mergeTrigger}
+        <WorktreeBulkBranch
+          agentId={globalAgent.activeAgentId}
+          agents={filteredAgents}
+          allAgents={overview?.agents ?? []}
+          appId={appId}
+          disabled={busy || fetchOperation.active || !overview}
+          key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+          onReload={refreshPage}
+        />
+        <Button onClick={() => setHiddenOpen(true)} variant="outline">
+          <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
+        </Button>
+        <Select
+          onValueChange={(value) => {
+            if (value === "agent" || value === "repository") {
+              setGroupByAndRemember(value);
+            }
+          }}
+          value={groupBy}
+        >
+          <SelectTrigger aria-label={t("groupBy")}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="agent">{t("groupByAgent")}</SelectItem>
+            <SelectItem value="repository">{t("groupByRepository")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <ToggleGroup
+          aria-label={`${t("cards")} / ${t("table")}`}
+          onValueChange={(value) => {
+            if (value === "cards" || value === "table") {
+              setLayoutAndRemember(value);
+            }
+          }}
+          spacing={0}
+          type="single"
+          value={layout}
+          variant="outline"
+        >
+          <ToggleGroupItem
+            aria-label={t("cards")}
+            className="px-2"
+            value="cards"
+          >
+            <Grid2X2 />
+          </ToggleGroupItem>
+          <ToggleGroupItem
+            aria-label={t("table")}
+            className="px-2"
+            value="table"
+          >
+            <List />
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+    </div>
+  );
+
   return (
     <section className="flex w-full flex-col gap-6">
       <WorktreeMergeFollowUps
         groups={overview?.agents.flatMap((agent) => agent.codebases) ?? []}
       />
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {t("title")}
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("description")}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            disabled={busy || fetchOperation.active}
-            onClick={() => void refresh()}
-            variant="outline"
-          >
-            <RefreshCw className={loading ? "animate-spin" : undefined} />{" "}
-            {t("refresh")}
-          </Button>
-          <Button
-            disabled={busy || fetchOperation.active || !overview?.agents.length}
-            onClick={() => void fetchNow()}
-            variant="outline"
-          >
-            {fetchOperation.active ? (
-              <Spinner aria-hidden="true" />
-            ) : (
-              <Download />
-            )}{" "}
-            {fetchOperation.active && fetchOperation.batch
-              ? t(`fetchProgress.${fetchOperation.batch.phase}`)
-              : t("fetchNow")}
-          </Button>
-          <WorktreeBulkSync
-            agentId={globalAgent.activeAgentId}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview?.agents.length}
-            key={`${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-            overview={overview}
-            scopeRepositoryIds={scopeRepositoryIds}
-          />
-          <WorktreeBulkMerge
-            agentId={globalAgent.activeAgentId}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview}
-            key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-          />
-          <WorktreeBulkBranch
-            agentId={globalAgent.activeAgentId}
-            agents={filteredAgents}
-            allAgents={overview?.agents ?? []}
-            appId={appId}
-            disabled={busy || fetchOperation.active || !overview}
-            key={`branch:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
-            onReload={refreshPage}
-          />
-          <Button onClick={() => setHiddenOpen(true)} variant="outline">
-            <Archive /> {t("hidden", { count: overview?.hiddenCount ?? 0 })}
-          </Button>
-          <Select
-            onValueChange={(value) => {
-              if (value === "agent" || value === "repository") {
-                setGroupByAndRemember(value);
-              }
-            }}
-            value={groupBy}
-          >
-            <SelectTrigger aria-label={t("groupBy")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="agent">{t("groupByAgent")}</SelectItem>
-              <SelectItem value="repository">
-                {t("groupByRepository")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <ToggleGroup
-            aria-label={`${t("cards")} / ${t("table")}`}
-            onValueChange={(value) => {
-              if (value === "cards" || value === "table") {
-                setLayoutAndRemember(value);
-              }
-            }}
-            spacing={0}
-            type="single"
-            value={layout}
-            variant="outline"
-          >
-            <ToggleGroupItem
-              aria-label={t("cards")}
-              className="px-2"
-              value="cards"
-            >
-              <Grid2X2 />
-            </ToggleGroupItem>
-            <ToggleGroupItem
-              aria-label={t("table")}
-              className="px-2"
-              value="table"
-            >
-              <List />
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </div>
-      </div>
+      <WorktreeBulkMerge
+        agentId={globalAgent.activeAgentId}
+        appId={appId}
+        disabled={busy || fetchOperation.active || !overview}
+        key={`merge:${appId ?? "all"}:${globalAgent.activeAgentId ?? "all"}`}
+        onReload={refreshPage}
+        renderHeader={renderHeader}
+      />
 
       <WorktreeLoadingStatus
         timings={timings}

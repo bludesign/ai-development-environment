@@ -423,10 +423,10 @@ describe("Simulator management", () => {
     const studioGroup = screen.getByRole("checkbox", {
       name: "Select all simulators on Studio Mac",
     });
-    expect((studioGroup as HTMLButtonElement).disabled).toBe(true);
-    await waitFor(() =>
-      expect((remoteGroup as HTMLButtonElement).disabled).toBe(false),
-    );
+    await waitFor(() => {
+      expect((studioGroup as HTMLButtonElement).disabled).toBe(false);
+      expect((remoteGroup as HTMLButtonElement).disabled).toBe(false);
+    });
     fireEvent.click(
       screen.getByRole("checkbox", { name: `Select ${appleTv.name}` }),
     );
@@ -445,7 +445,7 @@ describe("Simulator management", () => {
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
-    expect(screen.getByText("2 selected")).toBeTruthy();
+    expect(screen.getByText("3 selected")).toBeTruthy();
 
     fireEvent.change(
       screen.getByRole("textbox", { name: "Search simulators" }),
@@ -634,109 +634,183 @@ describe("Simulator management", () => {
     expect(refreshes).toEqual(["remote", "studio", "remote", "studio"]);
   });
 
-  test("reconciles the current agent and reports failures after switching scope during a confirmed batch", async () => {
-    const studio = { ...appleTv, name: "Studio TV" };
-    const remoteRefreshes: string[] = [];
-    const attempted: string[] = [];
-    let remoteDeleted = false;
-    let finishRemote!: () => void;
-    const remoteResult = new Promise<void>((resolve) => {
-      finishRemote = resolve;
-    });
-    const fallback = request.getMockImplementation()!;
-    request.mockImplementation(async (query, variables, options) => {
-      if (query.includes("mutation RefreshSimulatorInventory")) {
-        const id = String(variables?.agentId);
-        if (id === "remote") {
-          remoteRefreshes.push(
-            remoteDeleted ? "after delete" : "before delete",
-          );
-          return inventory(id, remoteDeleted ? [] : [appleTv]) as never;
+  test.each(["DELETE", "SHUTDOWN"] as const)(
+    "%s keeps its confirmed targets and reconciles inventory after an agent change",
+    async (action) => {
+      const deleting = action === "DELETE";
+      const actionLabel = deleting ? "Delete selected" : "Shut down selected";
+      const remote = deleting ? appleTv : iphone;
+      const studio = { ...remote, name: "Studio TV" };
+      const remoteRefreshes: string[] = [];
+      const attempted: string[] = [];
+      let finished = false;
+      let finishRemote!: () => void;
+      const remoteResult = new Promise<void>((resolve) => {
+        finishRemote = resolve;
+      });
+      const fallback = request.getMockImplementation()!;
+      request.mockImplementation(async (query, variables, options) => {
+        if (query.includes("mutation RefreshSimulatorInventory")) {
+          const id = String(variables?.agentId);
+          if (id === "remote") {
+            remoteRefreshes.push(finished ? "after" : "before");
+            const target = finished ? { ...remote, state: "Shutdown" } : remote;
+            const unaffected = { ...appleTv, id: "untargeted" };
+            return inventory(
+              id,
+              deleting ? (finished ? [] : [target]) : [target, unaffected],
+            ) as never;
+          }
+          return inventory(id, [studio]) as never;
         }
-        return inventory(id, [studio]) as never;
-      }
-      if (query.includes("mutation SimulatorAction")) {
-        const input = variables?.input as {
-          agentId: string;
-          simulatorId: string;
-          action: string;
-        };
-        expect(input.action).toBe("DELETE");
-        attempted.push(`${input.agentId}:${input.simulatorId}`);
-        if (input.agentId === "studio")
-          return {
-            performSimulatorAction: terminal("studio", {
-              status: "FAILED",
-              error: "Device is busy",
+        if (query.includes("mutation SimulatorAction")) {
+          const input = variables?.input as {
+            agentId: string;
+            simulatorId: string;
+            action: string;
+          };
+          expect(input.action).toBe(action);
+          attempted.push(`${input.agentId}:${input.simulatorId}`);
+          if (input.agentId === "studio")
+            return {
+              performSimulatorAction: terminal("studio", {
+                status: "FAILED",
+                error: "Device is busy",
+              }),
+            } as never;
+          await remoteResult;
+          finished = true;
+          return { performSimulatorAction: terminal("remote") } as never;
+        }
+        return fallback(query, variables, options);
+      });
+      render(
+        <ActiveAgentProvider userId="simulator-test">
+          <SimulatorsPage />
+        </ActiveAgentProvider>,
+      );
+      await screen.findByRole("link", { name: studio.name });
+      fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+      const remoteGroup = screen.getByRole("checkbox", {
+        name: "Select all simulators on Remote Mac",
+      });
+      await waitFor(() =>
+        expect((remoteGroup as HTMLButtonElement).disabled).toBe(false),
+      );
+      fireEvent.click(remoteGroup);
+      fireEvent.click(
+        screen.getByRole("checkbox", {
+          name: "Select all simulators on Studio Mac",
+        }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: actionLabel }));
+      fireEvent.click(
+        within(screen.getByRole("alertdialog")).getByRole("button", {
+          name: actionLabel,
+        }),
+      );
+      try {
+        await waitFor(() =>
+          expect(attempted).toEqual([
+            `remote:${remote.id}`,
+            `studio:${studio.id}`,
+          ]),
+        );
+        act(() =>
+          window.dispatchEvent(
+            new StorageEvent("storage", {
+              key: activeAgentStorageKey("simulator-test"),
+              newValue: JSON.stringify({
+                activeAgentId: "remote",
+                pageAgents: {},
+              }),
             }),
-          } as never;
-        await remoteResult;
-        remoteDeleted = true;
-        return { performSimulatorAction: terminal("remote") } as never;
+          ),
+        );
+        await waitFor(() =>
+          expect(remoteRefreshes).toEqual(["before", "before"]),
+        );
+        expect(
+          screen.getByText(
+            deleting
+              ? "Deleting selected simulators…"
+              : "Shutting down selected simulators…",
+          ),
+        ).toBeTruthy();
+        expect(
+          await screen.findByRole("link", { name: remote.name }),
+        ).toBeTruthy();
+      } finally {
+        finishRemote();
       }
-      return fallback(query, variables, options);
+      await screen.findByText("Studio TV on Studio Mac — Device is busy");
+      await waitFor(() => {
+        const row = screen
+          .queryByRole("link", { name: remote.name })
+          ?.closest("tr");
+        if (deleting) expect(row).toBeUndefined();
+        else
+          expect(
+            within(row!).getByRole("button", { name: "Start" }),
+          ).toBeDefined();
+      });
+      expect(remoteRefreshes).toEqual(["before", "before", "after"]);
+      expect(attempted).toHaveLength(2);
+    },
+  );
+
+  test("shuts down selected Android emulators through the Android agent job", async () => {
+    const emulator = {
+      ...iphone,
+      id: "android:Pixel_9",
+      name: "Pixel 9",
+      platform: "Android",
+    };
+    request.mockImplementation(async (query) => {
+      if (query.includes("query ActiveAgentOptions"))
+        return {
+          agents: [{ ...agents[0], capabilities: ["android.simulators"] }],
+        } as never;
+      if (query.includes("mutation RefreshSimulatorInventory"))
+        return inventory("studio", [emulator]) as never;
+      if (query.includes("mutation SimulatorAction"))
+        return { performSimulatorAction: terminal("studio") } as never;
+      throw new Error(`Unexpected operation: ${query}`);
     });
     render(
       <ActiveAgentProvider userId="simulator-test">
-        <SimulatorsPage />
+        <SimulatorsPage initialPlatform="ANDROID" />
       </ActiveAgentProvider>,
     );
-    await screen.findByRole("link", { name: studio.name });
+    await screen.findByRole("link", { name: emulator.name });
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    const remoteGroup = screen.getByRole("checkbox", {
-      name: "Select all simulators on Remote Mac",
-    });
-    await waitFor(() =>
-      expect((remoteGroup as HTMLButtonElement).disabled).toBe(false),
-    );
-    fireEvent.click(remoteGroup);
-    fireEvent.click(
-      screen.getByRole("checkbox", {
-        name: "Select all simulators on Studio Mac",
-      }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Delete selected" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Pixel 9" }));
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Delete selected" })
+        .disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Shut down selected" }));
     fireEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
-        name: "Delete selected",
+        name: "Shut down selected",
       }),
     );
-    try {
-      await waitFor(() =>
-        expect(attempted).toEqual([
-          `remote:${appleTv.id}`,
-          `studio:${studio.id}`,
-        ]),
-      );
-      act(() =>
-        window.dispatchEvent(
-          new StorageEvent("storage", {
-            key: activeAgentStorageKey("simulator-test"),
-            newValue: JSON.stringify({
-              activeAgentId: "remote",
-              pageAgents: {},
-            }),
-          }),
-        ),
-      );
-      await waitFor(() =>
-        expect(remoteRefreshes).toEqual(["before delete", "before delete"]),
-      );
-      expect(screen.getByText("Deleting selected simulators…")).toBeTruthy();
-      expect(
-        await screen.findByRole("link", { name: appleTv.name }),
-      ).toBeTruthy();
-    } finally {
-      finishRemote();
-    }
-    await screen.findByText("Studio TV on Studio Mac — Device is busy");
-    await waitFor(() =>
-      expect(screen.queryByRole("link", { name: appleTv.name })).toBeNull(),
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation SimulatorAction"),
+      {
+        input: expect.objectContaining({
+          agentId: "studio",
+          simulatorId: emulator.id,
+          action: "SHUTDOWN",
+          platform: "ANDROID",
+        }),
+      },
+      { signal: expect.any(AbortSignal) },
     );
-    expect(remoteRefreshes).toEqual([
-      "before delete",
-      "before delete",
-      "after delete",
-    ]);
+    await waitFor(() =>
+      expect(
+        screen.queryByText("Shutting down selected simulators…"),
+      ).toBeNull(),
+    );
   });
 });

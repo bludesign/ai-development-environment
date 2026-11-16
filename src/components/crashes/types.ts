@@ -43,9 +43,41 @@ export type CrashThread = {
   frames: CrashFrame[];
 };
 
+export type CrashReportKind = "CRASH" | "DISK_WRITES";
+
+export type DiskWriteSummary = {
+  writesBytes: number;
+  durationSeconds: number | null;
+  action: string | null;
+  distributor: string | null;
+  isBeta: boolean | null;
+};
+
+export type SampledFrame = { sampleCount: number; frames: CrashFrame[] };
+export type SampledNode = SampledFrame & {
+  id: number;
+  parentId: number | null;
+};
+
+export type DiskWriteDetails = DiskWriteSummary & {
+  limitBytes: number | null;
+  limitDurationSeconds: number | null;
+  averageBytesPerSecond: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  sampledDurationSeconds: number | null;
+  samplesCaptured: number | null;
+  samplesLost: number | null;
+  heaviestStack: SampledFrame[];
+  callTree: SampledNode[];
+};
+
 export type CrashSummary = {
   id: string;
-  format: "IPS" | "CRASH" | "METRICKIT";
+  format: "IPS" | "CRASH" | "METRICKIT" | "DISK_WRITES_IPS";
+  kind: CrashReportKind;
+  occurredAt: string | null;
+  diskWrites: DiskWriteSummary | null;
   source: "UPLOAD" | "API";
   status: CrashReportStatus;
   statusMessage: string | null;
@@ -118,6 +150,7 @@ export type CrashBinaryImage = {
 };
 
 export type CrashDetail = CrashSummary & {
+  diskWrites: DiskWriteDetails | null;
   sizeBytes: number;
   incidentId: string | null;
   arch: string | null;

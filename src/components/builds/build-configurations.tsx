@@ -206,7 +206,7 @@ export function BuildConfigurationDetail({
         `query BuildConfigurationDetail($id: ID!) {
         buildConfiguration(id: $id) { ${FIELDS} }
         androidBuildConfiguration(id: $id) { ${ANDROID_FIELDS} }
-        worktreeOverview { agents { agent { name connectionStatus capabilities } codebases { codebase { id } repository { id } worktrees { id folder branch primary availability } } } }
+        worktreeOverview(savedOnly: true) { agents { agent { name connectionStatus capabilities } codebases { codebase { id } repository { id } worktrees { id folder branch primary availability } } } }
       }`,
         { id },
       );

@@ -188,7 +188,7 @@ export function BulkMergeSettings({
   disabled: boolean;
 }) {
   return (
-    <div className="space-y-4 rounded-md border p-3">
+    <div className="min-w-0 space-y-4 rounded-md border p-3 wrap-anywhere">
       {row.provider === "GITHUB" && draft.provider === "GITHUB" && (
         <GitHubSettings
           options={row.options}
@@ -230,6 +230,8 @@ export function BulkMergeSettings({
 }
 
 const DEFAULT_EMAIL = "__github_account_default__";
+const wrappingTrigger =
+  "h-auto min-h-8 max-w-full min-w-0 wrap-anywhere whitespace-normal text-left [&>[data-slot=select-value]]:block [&>[data-slot=select-value]]:min-w-0 [&>[data-slot=select-value]]:line-clamp-none";
 
 function GitHubSettings({
   options,
@@ -255,10 +257,13 @@ function GitHubSettings({
             onChange({ ...draft, method: method as GitHubMergeMethod })
           }
         >
-          <SelectTrigger id={`${id}-method`}>
+          <SelectTrigger className={wrappingTrigger} id={`${id}-method`}>
             <SelectValue placeholder={t("selectMergeType")} />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent
+            className="max-w-(--radix-select-content-available-width) wrap-anywhere"
+            position="popper"
+          >
             {options.availableMethods.map((method) => (
               <SelectItem key={method} value={method}>
                 {t(`mergeTypes.${method}`)}
@@ -301,10 +306,13 @@ function GitHubSettings({
             })
           }
         >
-          <SelectTrigger id={`${id}-email`}>
+          <SelectTrigger className={wrappingTrigger} id={`${id}-email`}>
             <SelectValue />
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent
+            className="max-w-(--radix-select-content-available-width) wrap-anywhere"
+            position="popper"
+          >
             <SelectItem value={DEFAULT_EMAIL}>
               {t("githubDefaultEmail")}
             </SelectItem>
@@ -345,7 +353,7 @@ function GitLabSettings({
         {t("mergeMethod")}
         <Badge variant="secondary">{t(`mergeMethods.${method}`)}</Badge>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Checkbox
           id={`${id}-squash`}
           checked={draft.squash}

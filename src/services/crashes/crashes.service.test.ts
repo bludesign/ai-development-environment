@@ -127,6 +127,8 @@ async function completeLatestJob(crashId: string) {
     "0xd6c": ["Loader.item(at:)", 3],
     "0xb18": ["handleTap(_:)", 5],
     "0x9c8": ["main", 6],
+    "0xd70": ["SearchIndex.refresh()", 12],
+    "0xd74": ["IndexStore.updateMetadata()", 16],
   };
   const completed = await prisma.agentJob.update({
     where: { id: job.id },
@@ -216,6 +218,68 @@ beforeEach(async () => {
 });
 
 describe("CrashesService", () => {
+  test("imports and groups disk-write reports, keeps the original, and symbolicates their stacks", async () => {
+    const filename = "AcmeApp.diskwrites_resource.ips";
+    const {
+      crashes: [report],
+    } = await ingest(filename);
+    expect(report).toMatchObject({
+      format: "DISK_WRITES_IPS",
+      crashedAt: null,
+      status: "MISSING_DSYMS",
+    });
+    expect(await ingest(filename)).toMatchObject({
+      duplicate: true,
+      crashes: [{ id: report!.id }],
+    });
+    await ingest("CrashDemo.ips");
+    expect((await service.crashReports({ kind: "CRASH" })).matchingCount).toBe(
+      1,
+    );
+    expect(
+      (await service.crashReports({ kind: "DISK_WRITES" })).nodes.map(
+        ({ id }) => id,
+      ),
+    ).toEqual([report!.id]);
+
+    const original = await service.crashDownload(report!.id, "ORIGINAL");
+    expect(original).toMatchObject({ filename, contentType: "text/plain" });
+    expect(readFileSync(original!.path!)).toEqual(
+      readFileSync(join(fixtures, filename)),
+    );
+    const repeated = await service.ingestCrashReport({
+      bytes: Buffer.from(
+        readFileSync(join(fixtures, filename), "utf8").replace(
+          "33A9E92A9B34",
+          "33A9E92A9B35",
+        ),
+      ),
+      filename: "renamed.txt",
+      uploader: {
+        source: "API",
+        uploadedBy: null,
+        apiKeyId: null,
+        apiKeyName: null,
+        clientIp: null,
+      },
+    });
+    expect(await service.similarCrashCount(report!)).toBe(1);
+
+    await importDsym();
+    await service.reconcile();
+    await completeLatestJob(report!.id);
+    await completeLatestJob(repeated.crashes[0]!.id);
+    const symbolicated = await service.crashReport(report!.id);
+    expect(symbolicated?.status).toBe("SYMBOLICATED");
+    expect(await service.similarCrashCount(symbolicated!)).toBe(1);
+    const download = await service.crashDownload(report!.id, "SYMBOLICATED");
+    expect(download).toMatchObject({
+      filename: "AcmeApp.diskwrites_resource-symbolicated.txt",
+      body: expect.stringContaining("SearchIndex.refresh()"),
+    });
+    expect(download!.body).toContain("Sampled call tree:");
+    expect(download!.body).not.toContain("Triggered by Thread");
+  });
   test("waits for a dSYM, then symbolicates on the macOS agent", async () => {
     const { crashes } = await ingest("CrashDemo.ips");
     const [crash] = crashes;

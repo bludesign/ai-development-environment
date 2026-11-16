@@ -19,6 +19,125 @@ function appFrames(crash: ReturnType<typeof detectAndParse>[number]) {
 }
 
 describe("crash parsers", () => {
+  test("parses disk-write metrics, sample counts and an app image with an open-ended range", () => {
+    const [report] = detectAndParse(read("AcmeApp.diskwrites_resource.ips"));
+    expect(report).toMatchObject({
+      format: "DISK_WRITES_IPS",
+      crashedAt: null,
+      crashedThread: null,
+      deviceModel: "iPhone17,1",
+      diskWrites: {
+        writesBytes: 1_073_760_000,
+        limitBytes: 1_073_740_000,
+        limitDurationSeconds: 86_400,
+        durationSeconds: 742.41,
+        averageBytesPerSecond: 1_446_330,
+        startedAt: "2026-09-23T11:58:26.301Z",
+        endedAt: "2026-09-23T12:10:48.709Z",
+        samplesCaptured: 90,
+        samplesLost: 202,
+        action: "none",
+      },
+    });
+    expect(report!.images[0]).toMatchObject({
+      uuid: APP_UUID,
+      size: null,
+      arch: "arm64",
+    });
+    expect(report!.diskWrites!.heaviestStack[2]).toMatchObject({
+      sampleCount: 40,
+      frame: { imageIndex: 0, imageOffset: "0xd6c" },
+    });
+    expect(
+      report!.diskWrites!.callTree.map((node) => [
+        node.parentId,
+        node.sampleCount,
+      ]),
+    ).toEqual([
+      [null, 45],
+      [0, 44],
+      [1, 40],
+      [2, 38],
+      [1, 4],
+      [4, 4],
+      [null, 45],
+    ]);
+  });
+
+  test("distinguishes malformed disk-write events from other resource events", () => {
+    expect(() =>
+      detectAndParse(Buffer.from('{"bug_type":145}\nEvent: cpu usage')),
+    ).toThrow("Unsupported resource report");
+    expect(() =>
+      detectAndParse(Buffer.from('{"bug_type":145}\nEvent: disk writes')),
+    ).toThrow("missing a valid write volume");
+    const [report] = detectAndParse(
+      Buffer.from(
+        '{"bug_type":145}\r\nEvent: disk writes\r\nWrites caused: 1.5 GB',
+      ),
+    );
+    expect(report!.diskWrites).toMatchObject({
+      writesBytes: 1_500_000_000,
+      callTree: [],
+      heaviestStack: [],
+    });
+  });
+
+  test("uses report-wide sample counts when powerstats cover multiple processes", () => {
+    const lines = [
+      '{"bug_type":145}',
+      "Event: disk writes",
+      "Writes caused: 1.5 GB",
+      "Steps: 196 (202 samples lost, 10.49 MB/step)",
+      "Powerstats for: AcmeApp [407]",
+      "Num samples: 64 (33%)",
+      "Powerstats for: AnotherProcess [408]",
+      "Num samples: 132 (67%)",
+    ];
+    const [report] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(report!.diskWrites).toMatchObject({
+      samplesCaptured: 196,
+      samplesLost: 202,
+    });
+
+    lines.splice(3, 1);
+    const [withoutSteps] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(withoutSteps!.diskWrites).toMatchObject({
+      samplesCaptured: null,
+      samplesLost: null,
+    });
+  });
+
+  test("parses sampled frames with parenthesized symbols and binary names", () => {
+    const lines = [
+      '{"bug_type":145}',
+      "Event: disk writes",
+      "Writes: 1.5 GB of file backed memory dirtied over 260 seconds (5.5 MiB per second average)",
+      "Heaviest stack for the target process:",
+      "  30 Acme::read(Storage&, Handler (Storage::*)()) + 16 (AcmeApp (Staging) + 32) [0x1020] (p-core)",
+      "  Binary Images:",
+      `    0x1000 - ??? AcmeApp (Staging) <${APP_UUID}> /Applications/AcmeApp (Staging).app/AcmeApp (Staging)`,
+    ];
+    const [report] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(report!.diskWrites).toMatchObject({
+      writesBytes: 1_500_000_000,
+      averageBytesPerSecond: 5_767_168,
+      heaviestStack: [
+        {
+          sampleCount: 30,
+          frame: {
+            imageIndex: 0,
+            imageName: "AcmeApp (Staging)",
+            imageOffset: "0x20",
+            address: "0x1020",
+            symbol: "Acme::read(Storage&, Handler (Storage::*)())",
+            symbolOffset: 16,
+          },
+        },
+      ],
+    });
+  });
+
   test("reads an .ips report and its image offsets", () => {
     const [crash] = detectAndParse(read("CrashDemo.ips"));
     expect(crash).toMatchObject({
