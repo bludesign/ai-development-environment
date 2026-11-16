@@ -12,7 +12,9 @@ enum CrashReportFormat {
 
 "The type of event an uploaded report describes."
 enum CrashReportKind {
+  "A process crash."
   CRASH
+  "A device diagnostic about disk write activity."
   DISK_WRITES
 }
 
@@ -130,7 +132,7 @@ type CrashBinaryImage {
   dsym: Dsym
 }
 
-"An uploaded iOS crash report."
+"One frame position in the heaviest sampled call stack."
 type CrashSampledFrame {
   "Number of samples containing this frame at its position in the stack."
   sampleCount: Int!
@@ -138,12 +140,15 @@ type CrashSampledFrame {
   frames: [CrashFrame!]!
 }
 
+"One node in the sampled call tree for a disk-write diagnostic."
 type CrashSampledNode {
   "Stable node index within the report."
   id: Int!
   "Index of the parent node, or null for a root."
   parentId: Int
+  "Number of samples containing this node in the call tree."
   sampleCount: Int!
+  "The frame and any functions the compiler inlined at this address."
   frames: [CrashFrame!]!
 }
 
@@ -151,9 +156,13 @@ type CrashSampledNode {
 type DiskWriteDetails {
   "Bytes of file-backed memory dirtied, as reported by the device."
   writesBytes: Float!
+  "Write budget in bytes, when the report specifies a limit."
   limitBytes: Float
+  "Window in seconds over which the write budget applies, when reported."
   limitDurationSeconds: Float
+  "Duration of the disk write event in seconds, when reported."
   durationSeconds: Float
+  "Average write rate in bytes per second, as reported by the device."
   averageBytesPerSecond: Float
   "ISO 8601 time the event began."
   startedAt: String
@@ -161,10 +170,15 @@ type DiskWriteDetails {
   endedAt: String
   "Action reported by the OS, such as none."
   action: String
+  "Time covered by stack sampling in seconds, when reported."
   sampledDurationSeconds: Float
+  "Number of stack samples captured, when reported."
   samplesCaptured: Int
+  "Number of stack samples lost, when reported."
   samplesLost: Int
+  "App distribution channel identifier, such as com.apple.TestFlight, when reported."
   distributor: String
+  "Whether the app build was a beta. Null when the report does not say."
   isBeta: Boolean
   "The device's heaviest sampled stack, ordered from caller to callee."
   heaviestStack: [CrashSampledFrame!]!
@@ -172,11 +186,13 @@ type DiskWriteDetails {
   callTree: [CrashSampledNode!]!
 }
 
+"An uploaded iOS crash report or disk-write diagnostic."
 type CrashReport {
   "Stable identifier for this crash report."
   id: ID!
   "Format the report arrived in."
   format: CrashReportFormat!
+  "Type of event the report describes."
   kind: CrashReportKind!
   "ISO 8601 crash time or the end of the resource event, when available."
   occurredAt: String

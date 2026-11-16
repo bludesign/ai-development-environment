@@ -75,6 +75,7 @@ import {
   COMMAND_RUN_OUTPUT_CHANGED_TOPIC,
   ACTION_CENTER_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
+  WORKFLOWS_CHANGED_TOPIC,
   type AgentControlService,
 } from "@/services/agent-control";
 import type { CredentialService } from "@/services/credentials";
@@ -108,7 +109,6 @@ import {
   type WorkflowWaitInput,
 } from "./step-executor";
 
-const WORKFLOWS_CHANGED_TOPIC = "workflows:changed";
 const runTopic = (runId: string) => `workflow-run:${runId}`;
 const runEventTopic = (runId: string) => `workflow-run:${runId}:events`;
 const runQuestionTopic = (runId: string) => `workflow-run:${runId}:questions`;

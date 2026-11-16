@@ -101,6 +101,7 @@ export const SIGNING_ASSETS_CHANGED_TOPIC = "signing-assets.changed";
 export const PUSH_NOTIFICATIONS_CHANGED_TOPIC = "push-notifications.changed";
 export const APP_NOTIFICATIONS_CHANGED_TOPIC = "app-notifications.changed";
 export const RUNS_CHANGED_TOPIC = "runs.changed";
+export const WORKFLOWS_CHANGED_TOPIC = "workflows:changed";
 export const COMMANDS_CHANGED_TOPIC = "commands.changed";
 export const COMMAND_RUNS_CHANGED_TOPIC = "command-runs.changed";
 export const COMMAND_RUN_OUTPUT_CHANGED_TOPIC = "command-runs.output.changed";
