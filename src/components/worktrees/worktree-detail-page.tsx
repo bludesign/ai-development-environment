@@ -100,10 +100,7 @@ import {
 } from "./worktree-inspection";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import { useIntegrationAvailability } from "./use-integration-availability";
-import {
-  preserveWorktreeMetadata,
-  useWorktreeLoading,
-} from "./use-worktree-loading";
+import { useWorktreeLoading } from "./use-worktree-loading";
 import {
   findWorktreeOverviewEntry,
   worktreeDetailHref,
@@ -261,9 +258,6 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           signal,
         );
         if (signal.aborted) return;
-        setOverview((current) =>
-          preserveWorktreeMetadata(current, data.worktreeOverview),
-        );
         savedOverview(data.worktreeOverview);
         setBuilds(history.items);
         setBuildsNextCursor(history.nextCursor);

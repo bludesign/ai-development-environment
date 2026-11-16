@@ -174,13 +174,15 @@ describe("createLiveRefresh", () => {
 });
 
 describe("onPageVisible", () => {
+  let page: EventTarget & { visibilityState: DocumentVisibilityState };
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
-    vi.stubGlobal(
-      "document",
-      Object.assign(new EventTarget(), { visibilityState: "visible" }),
-    );
+    page = Object.assign(new EventTarget(), {
+      visibilityState: "visible" as DocumentVisibilityState,
+    });
+    vi.stubGlobal("document", page);
     vi.stubGlobal("window", new EventTarget());
   });
   afterEach(() => {
@@ -188,27 +190,63 @@ describe("onPageVisible", () => {
     vi.useRealTimers();
   });
 
-  test("reports one return when focus and visibility change together", () => {
+  function changeVisibility(visibilityState: DocumentVisibilityState) {
+    page.visibilityState = visibilityState;
+    page.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  test.each([
+    ["focus", "visibilitychange"],
+    ["visibilitychange", "focus"],
+  ])("reports one return when %s arrives first", (first, second) => {
     const listener = vi.fn();
     const off = onPageVisible(listener);
-    const page = document as unknown as { visibilityState: string };
 
-    page.visibilityState = "hidden";
-    document.dispatchEvent(new Event("visibilitychange"));
+    changeVisibility("hidden");
     expect(listener).not.toHaveBeenCalled();
 
     page.visibilityState = "visible";
-    document.dispatchEvent(new Event("visibilitychange"));
-    window.dispatchEvent(new Event("focus"));
+    for (const event of [first, second]) {
+      const target = event === "focus" ? window : page;
+      target.dispatchEvent(new Event(event));
+    }
     expect(listener).toHaveBeenCalledTimes(1);
 
-    vi.advanceTimersByTime(5_000);
-    window.dispatchEvent(new Event("focus"));
-    expect(listener).toHaveBeenCalledTimes(2);
-
     off();
-    vi.advanceTimersByTime(5_000);
+    changeVisibility("hidden");
+    changeVisibility("visible");
+    window.dispatchEvent(new Event("focus"));
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  test("reports a new focus after a blur even if visibility just changed", () => {
+    const listener = vi.fn();
+    const off = onPageVisible(listener);
+
+    changeVisibility("hidden");
+    changeVisibility("visible");
+    window.dispatchEvent(new Event("blur"));
     window.dispatchEvent(new Event("focus"));
     expect(listener).toHaveBeenCalledTimes(2);
+    off();
+  });
+
+  test("restarts polling when a tab switch straddles a poll just after focus", () => {
+    const refresh = vi.fn();
+    const live = createLiveRefresh(refresh, { pollMs: 30_000 });
+
+    vi.advanceTimersByTime(29_500);
+    window.dispatchEvent(new Event("focus"));
+
+    changeVisibility("hidden");
+    vi.advanceTimersByTime(600);
+    expect(refresh).not.toHaveBeenCalled();
+
+    changeVisibility("visible");
+    window.dispatchEvent(new Event("focus"));
+    expect(refresh).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(30_000);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    live.dispose();
   });
 });

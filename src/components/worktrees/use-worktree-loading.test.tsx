@@ -241,13 +241,15 @@ test("uses fresh requested-changes status even if the approvals endpoint fails",
 test("preserves last good metadata on saved refreshes but drops it after a commit changes", () => {
   const previous = overview(worktree({ ticketTitle: "Fresh title" }));
   expect(
-    first(preserveWorktreeMetadata(previous, overview())).ticketTitle,
+    first(preserveWorktreeMetadata(previous, overview(), overview()))
+      .ticketTitle,
   ).toBe("Fresh title");
   expect(
     first(
       preserveWorktreeMetadata(
         previous,
         overview(worktree({ headSha: "head-2" })),
+        overview(),
       ),
     ).ticketTitle,
   ).toBe("Saved title");
@@ -299,9 +301,103 @@ test("shows a newly discovered merge request with a warning and retains it on sa
   );
   expect(first(hook.current.value!).sourceControlRequest?.id).toBe("mr-1");
   expect(
-    first(preserveWorktreeMetadata(hook.current.value!, overview()))
+    first(preserveWorktreeMetadata(hook.current.value!, overview(), overview()))
       .sourceControlRequest?.id,
   ).toBe("mr-1");
+});
+
+test("uses changed saved merge request metadata while retaining details from enrichment", () => {
+  const storedRequest = {
+    ...mergeRequest,
+    approvalState: null,
+    unresolvedDiscussionsCount: null,
+  };
+  const before = overview(worktree({ sourceControlRequest: storedRequest }));
+  const enriched = overview(worktree({ sourceControlRequest: mergeRequest }));
+  const after = overview(
+    worktree({ sourceControlRequest: { ...storedRequest, title: "Renamed" } }),
+  );
+  expect(
+    first(preserveWorktreeMetadata(enriched, after, before))
+      .sourceControlRequest,
+  ).toMatchObject({
+    title: "Renamed",
+    approvalState: "APPROVED",
+    unresolvedDiscussionsCount: 0,
+  });
+});
+
+test("adopts saved GitLab pipeline status and retains enrichment for pipelines still present", () => {
+  const pipeline = {
+    id: "pipeline-1",
+    projectId: "42",
+    status: "RUNNING",
+    duration: null,
+  } as Worktree["gitLabPipelines"][number];
+  const before = overview(worktree({ gitLabPipelines: [pipeline] }));
+  const enriched = overview(
+    worktree({ gitLabPipelines: [{ ...pipeline, duration: 15 }] }),
+  );
+  const after = overview(
+    worktree({ gitLabPipelines: [{ ...pipeline, status: "SUCCESS" }] }),
+  );
+
+  expect(
+    first(preserveWorktreeMetadata(enriched, after, before)).gitLabPipelines,
+  ).toEqual([expect.objectContaining({ status: "SUCCESS", duration: 15 })]);
+  expect(
+    first(preserveWorktreeMetadata(enriched, overview(), before))
+      .gitLabPipelines,
+  ).toEqual([]);
+});
+
+test("GitHub enrichment does not replace GitLab details with a saved merge request", () => {
+  const enriched = overview(
+    worktree({ sourceControlRequest: mergeRequest, canAssignReviewers: true }),
+  );
+  const update = worktree({
+    canAssignReviewers: false,
+    sourceControlRequest: { ...mergeRequest, approvalState: null },
+  });
+  const merged = mergeWorktreeEnrichment(
+    enriched,
+    result(update).worktreeEnrichment.updates,
+    "GITHUB",
+    identity(),
+  );
+  expect(first(merged).sourceControlRequest).toEqual(mergeRequest);
+  expect(first(merged).canAssignReviewers).toBe(true);
+});
+
+test("an in-flight enrichment cannot erase a newly saved pull request", async () => {
+  const origin = "github.com/acme/app";
+  const stale = result(worktree({ sourceControlRequest: null }));
+  stale.worktreeEnrichment.updates[0]!.canonicalOrigin = origin;
+  const finish = Promise.withResolvers<typeof stale>();
+  request.mockReturnValue(finish.promise as never);
+  const { result: hook } = renderHook(() =>
+    useLoader(undefined, {
+      integrations: { github: true, gitlab: false, jira: false },
+    }),
+  );
+  act(() => hook.current.loading.saved(overview(worktree(), origin)));
+  await waitFor(() => expect(request).toHaveBeenCalledOnce());
+
+  const pullRequest = { id: "pr-1", title: "New pull request" } as NonNullable<
+    Worktree["pullRequest"]
+  >;
+  const saved = overview(worktree({ pullRequest }), origin);
+  act(() => hook.current.loading.saved(saved));
+  expect(first(hook.current.value!).pullRequest).toEqual(pullRequest);
+  await act(async () => finish.resolve(stale));
+  expect(hook.current.loading.timings.GITHUB.status).toBe("complete");
+  expect(first(hook.current.value!).pullRequest).toEqual(pullRequest);
+  expect(request).toHaveBeenCalledOnce();
+
+  act(() => hook.current.loading.saved(overview(worktree(), origin)));
+  expect(first(hook.current.value!).pullRequest).toBeNull();
+  await act(settle);
+  expect(request).toHaveBeenCalledOnce();
 });
 
 test("slow pipelines do not block Jira, saved refreshes, or other integration timings", async () => {

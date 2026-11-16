@@ -139,6 +139,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   request.mockReset();
   subscriptions.mockReset();
 });
@@ -417,5 +418,30 @@ describe("CommandsPage", () => {
       ),
     );
     expect(push).toHaveBeenCalledWith("/dashboard/commands/runs/custom-run");
+  });
+
+  test("removes a deleted agent from an open command dialog without an event", async () => {
+    render(<CommandsPage />);
+    await screen.findByRole("link", { name: "#42" });
+    vi.useFakeTimers();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run custom" }));
+    });
+    fireEvent.change(screen.getByLabelText("Shell script"), {
+      target: { value: "printf custom" },
+    });
+    const target = { name: /Studio · studio\.local/ };
+    fireEvent.click(screen.getByRole("button", target));
+    const run = screen.getByRole<HTMLButtonElement>("button", { name: "Run" });
+    expect(run.disabled).toBe(false);
+
+    request.mockResolvedValue({
+      agents: [],
+      worktreeOverview: { agents: [] },
+    } as never);
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+
+    expect(screen.queryByRole("button", target)).toBeNull();
+    expect(run.disabled).toBe(true);
   });
 });

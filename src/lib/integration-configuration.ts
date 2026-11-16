@@ -7,53 +7,73 @@ import {
 } from "./control-plane-client";
 
 export const GITHUB_CONFIGURATION_QUERY = `query GitHubPageConfiguration { githubSettings { tokenConfigured defaultJiraKeyRegex defaultMergeMethod emptyMergeCommitDescription defaultMoveTicketToDone defaultDeleteWorktree updatedAt } }`;
-const cache = new Map<string, { provider: string; value: unknown }>();
+type ProviderScope = string | readonly string[];
+const cache = new Map<
+  string,
+  { providers: readonly string[]; value: unknown }
+>();
 const revisions = new Map<string, number>();
-const listeners = new Set<{ provider: string | null; listener: () => void }>();
+let resetRevision = 0;
+const listeners = new Set<{
+  providers: readonly string[] | null;
+  listener: () => void;
+}>();
 let disposeSubscription: (() => void) | null = null;
 
 export function clearIntegrationConfigurationCache(provider?: string) {
+  if (!provider) {
+    cache.clear();
+    resetRevision += 1;
+    return;
+  }
   for (const [key, entry] of cache)
-    if (!provider || entry.provider === provider) cache.delete(key);
-  const providers = provider
-    ? [provider]
-    : ["github", "gitlab", "jira", "cacheServer"];
-  for (const key of providers)
-    revisions.set(key, (revisions.get(key) ?? 0) + 1);
+    if (entry.providers.includes(provider)) cache.delete(key);
+  revisions.set(provider, (revisions.get(provider) ?? 0) + 1);
 }
 
 export async function readIntegrationConfiguration<T>(
-  provider: string,
+  scope: ProviderScope,
   query: string,
   options: { signal?: AbortSignal } = {},
 ): Promise<T> {
-  const key = JSON.stringify([provider, query]);
+  const providers = typeof scope === "string" ? [scope] : scope;
+  const key = JSON.stringify([providers, query]);
   for (;;) {
     if (options.signal?.aborted)
       throw new DOMException("Aborted", "AbortError");
     const existing = cache.get(key);
     if (existing) return existing.value as T;
-    const revision = revisions.get(provider) ?? 0;
+    const reset = resetRevision;
+    const readRevisions = providers.map((provider) => revisions.get(provider));
     const value = await controlPlaneRequest<T>(query, undefined, options);
     if (options.signal?.aborted)
       throw new DOMException("Aborted", "AbortError");
-    if (revision !== (revisions.get(provider) ?? 0)) continue;
-    cache.set(key, { provider, value });
+    if (
+      reset !== resetRevision ||
+      providers.some(
+        (provider, index) => revisions.get(provider) !== readRevisions[index],
+      )
+    )
+      continue;
+    cache.set(key, { providers, value });
     return value;
   }
 }
 
 export function subscribeIntegrationConfiguration(
-  provider: string | null,
+  scope: ProviderScope | null,
   listener: () => void,
 ): () => void {
-  const entry = { provider, listener };
+  const entry = {
+    providers: typeof scope === "string" ? [scope] : scope,
+    listener,
+  };
   listeners.add(entry);
   if (!disposeSubscription) {
     const invalidate = (changed?: string) => {
       clearIntegrationConfigurationCache(changed);
       for (const item of listeners)
-        if (!changed || !item.provider || item.provider === changed)
+        if (!changed || !item.providers || item.providers.includes(changed))
           item.listener();
     };
     const dispose = controlPlaneSubscriptions().subscribe<{

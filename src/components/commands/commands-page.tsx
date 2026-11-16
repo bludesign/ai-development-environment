@@ -100,6 +100,7 @@ import {
 } from "./types";
 
 const TARGET_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const TARGET_RECONCILE_INTERVAL_MS = 60_000;
 
 const statusVariant = (status: string) =>
   status === "SUCCEEDED"
@@ -291,9 +292,10 @@ export function CommandsPage() {
       }
     });
     void owner.refresh();
-    // Agents scan and report every few seconds while this dialog is open.
+    // Agent deletion and heartbeat expiry can change targets without an event.
     const live = createLiveRefresh(() => owner.refresh(), {
       minIntervalMs: TARGET_EVENT_REFRESH_INTERVAL_MS,
+      pollMs: TARGET_RECONCILE_INTERVAL_MS,
     });
     const client = controlPlaneSubscriptions();
     const disposers = [

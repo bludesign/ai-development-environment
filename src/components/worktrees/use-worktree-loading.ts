@@ -13,7 +13,11 @@ import {
   createRefreshCoalescer,
   type RefreshCoalescer,
 } from "@/lib/refresh-coalescer";
-import type { Worktree, WorktreeOverview } from "./types";
+import type {
+  Worktree,
+  WorktreeOverview,
+  WorktreeSourceControlRequest,
+} from "./types";
 import type { GitLabMergeRequestSummaryField } from "@/services/gitlab/types";
 import {
   PULL_REQUEST_FIELDS,
@@ -76,6 +80,16 @@ type Identity = Pick<
 > & {
   canonicalOrigin: string;
 };
+type IndexedWorktree = Worktree & Pick<Identity, "canonicalOrigin">;
+type WorktreeMetadata = Pick<
+  Worktree,
+  | "pullRequest"
+  | "sourceControlRequest"
+  | "canAssignReviewers"
+  | "gitLabPipelines"
+  | "ticketTitle"
+  | "ticketStatus"
+>;
 type Update = { canonicalOrigin: string; worktree: Worktree };
 type EnrichmentWarning = {
   worktreeId: string;
@@ -136,7 +150,7 @@ function sameIdentity(a: Identity | undefined, b: Identity) {
 function metadata(
   worktree: Worktree,
   kind?: EnrichmentKind,
-): Partial<Worktree> {
+): Partial<WorktreeMetadata> {
   switch (kind) {
     case "GITHUB":
       return {
@@ -165,12 +179,86 @@ function metadata(
   }
 }
 
-/** Preserve good metadata across saved reads without carrying it to a new checkout identity. */
+/** Keep metadata from enrichment where the raw saved value has not changed. */
+function unchangedSavedFields(
+  enriched: Partial<WorktreeMetadata>,
+  before: WorktreeMetadata,
+  saved: WorktreeMetadata,
+): Partial<WorktreeMetadata> {
+  return Object.fromEntries(
+    Object.entries(enriched).filter(([key]) => {
+      const field = key as keyof WorktreeMetadata;
+      return JSON.stringify(before[field]) === JSON.stringify(saved[field]);
+    }),
+  );
+}
+
+const GITLAB_SUMMARY_FIELDS: GitLabMergeRequestSummaryField[] = [
+  "APPROVAL_STATE",
+  "UNRESOLVED_DISCUSSIONS_COUNT",
+];
+
+function retainGitLabSummary(
+  previous: WorktreeSourceControlRequest | null,
+  next: WorktreeSourceControlRequest | null,
+  fields: readonly GitLabMergeRequestSummaryField[],
+) {
+  if (
+    previous?.provider !== "GITLAB" ||
+    next?.provider !== "GITLAB" ||
+    previous.id !== next.id ||
+    previous.projectId !== next.projectId ||
+    previous.headRefOid !== next.headRefOid
+  )
+    return next;
+  return {
+    ...next,
+    ...(fields.includes("APPROVAL_STATE") && next.approvalState == null
+      ? { approvalState: previous.approvalState ?? null }
+      : {}),
+    ...(fields.includes("UNRESOLVED_DISCUSSIONS_COUNT") &&
+    next.unresolvedDiscussionsCount == null
+      ? {
+          unresolvedDiscussionsCount:
+            previous.unresolvedDiscussionsCount ?? null,
+        }
+      : {}),
+  };
+}
+
+/** A stored GitLab pipeline includes its state, with only a subset of its details. */
+function mergeSavedPipelines(
+  previous: Worktree["gitLabPipelines"],
+  saved: Worktree["gitLabPipelines"],
+): Worktree["gitLabPipelines"] {
+  const byId = new Map(
+    previous.map((item) => [`${item.projectId}:${item.id}`, item]),
+  );
+  return saved.map((pipeline) => {
+    const detail = byId.get(`${pipeline.projectId}:${pipeline.id}`);
+    if (!detail) return pipeline;
+    return {
+      ...detail,
+      ...pipeline,
+      iid: pipeline.iid ?? detail.iid,
+      mergeRequests: detail.mergeRequests,
+      startedAt: pipeline.startedAt ?? detail.startedAt,
+      createdAt: pipeline.createdAt ?? detail.createdAt,
+      finishedAt: pipeline.finishedAt ?? detail.finishedAt,
+      duration: pipeline.duration ?? detail.duration,
+      queuedDuration: pipeline.queuedDuration ?? detail.queuedDuration,
+    };
+  });
+}
+
 export function preserveWorktreeMetadata(
   previous: WorktreeOverview | null,
   next: WorktreeOverview,
+  lastSaved: WorktreeOverview | null,
 ): WorktreeOverview {
+  if (!previous || !lastSaved) return next;
   const existing = indexed(previous);
+  const saved = indexed(lastSaved);
   return {
     ...next,
     agents: next.agents.map((agent) => ({
@@ -179,21 +267,42 @@ export function preserveWorktreeMetadata(
         ...group,
         worktrees: group.worktrees.map((worktree) => {
           const old = existing.get(worktree.id);
-          return sameIdentity(old, {
+          const before = saved.get(worktree.id);
+          const identity = {
             ...worktree,
             canonicalOrigin: group.repository.canonicalOrigin,
-          })
-            ? {
-                ...worktree,
-                ...metadata(old!),
-                ...(old!.ticketKey !== worktree.ticketKey
-                  ? {
-                      ticketTitle: worktree.ticketTitle,
-                      ticketStatus: worktree.ticketStatus,
-                    }
-                  : {}),
-              }
-            : worktree;
+          };
+          if (
+            !old ||
+            !before ||
+            !sameIdentity(old, identity) ||
+            !sameIdentity(before, identity)
+          )
+            return worktree;
+          const retained = unchangedSavedFields(
+            metadata(old),
+            before,
+            worktree,
+          );
+          const result = { ...worktree, ...retained };
+          if (old.ticketKey !== worktree.ticketKey) {
+            result.ticketTitle = worktree.ticketTitle;
+            result.ticketStatus = worktree.ticketStatus;
+          }
+          result.sourceControlRequest = retainGitLabSummary(
+            old.sourceControlRequest,
+            result.sourceControlRequest,
+            GITLAB_SUMMARY_FIELDS,
+          );
+          if (
+            retained.gitLabPipelines === undefined &&
+            worktree.gitLabPipelines
+          )
+            result.gitLabPipelines = mergeSavedPipelines(
+              old.gitLabPipelines ?? [],
+              worktree.gitLabPipelines,
+            );
+          return result;
         }),
       })),
     })),
@@ -204,8 +313,9 @@ export function mergeWorktreeEnrichment(
   current: WorktreeOverview,
   updates: Update[],
   kind: EnrichmentKind,
-  requested: Map<string, Identity>,
+  requested: ReadonlyMap<string, IndexedWorktree>,
   warnings: EnrichmentWarning[] = [],
+  latestSaved?: ReadonlyMap<string, IndexedWorktree>,
 ): WorktreeOverview {
   const byId = new Map(updates.map((update) => [update.worktree.id, update]));
   return {
@@ -221,8 +331,10 @@ export function mergeWorktreeEnrichment(
             ...update.worktree,
             canonicalOrigin: update.canonicalOrigin,
           };
+          const before = requested.get(worktree.id);
           if (
-            !sameIdentity(requested.get(worktree.id), identity) ||
+            !before ||
+            !sameIdentity(before, identity) ||
             !sameIdentity(
               {
                 ...worktree,
@@ -231,7 +343,7 @@ export function mergeWorktreeEnrichment(
               identity,
             ) ||
             (kind === "JIRA" &&
-              (requested.get(worktree.id)?.ticketKey !== identity.ticketKey ||
+              (before.ticketKey !== identity.ticketKey ||
                 worktree.ticketKey !== identity.ticketKey))
           )
             return worktree;
@@ -239,34 +351,32 @@ export function mergeWorktreeEnrichment(
           const previousRequest = worktree.sourceControlRequest;
           const nextRequest = refreshed.sourceControlRequest;
           if (
-            kind === "GITLAB_MERGE_REQUESTS" &&
-            previousRequest?.provider === "GITLAB" &&
-            nextRequest?.provider === "GITLAB" &&
-            previousRequest.id === nextRequest.id &&
-            previousRequest.projectId === nextRequest.projectId &&
-            previousRequest.headRefOid === nextRequest.headRefOid
+            (kind === "GITHUB" &&
+              (previousRequest?.provider === "GITLAB" ||
+                nextRequest?.provider === "GITLAB")) ||
+            (kind === "GITLAB_MERGE_REQUESTS" &&
+              previousRequest?.provider === "GITHUB" &&
+              nextRequest?.provider !== "GITLAB")
           ) {
-            const preserveFields = new Set(
+            // The provider's lookup can return the stored request of the other provider.
+            delete refreshed.sourceControlRequest;
+            delete refreshed.canAssignReviewers;
+          } else if (kind === "GITLAB_MERGE_REQUESTS" && nextRequest) {
+            refreshed.sourceControlRequest = retainGitLabSummary(
+              previousRequest,
+              nextRequest,
               warnings
                 .filter((warning) => warning.worktreeId === worktree.id)
                 .flatMap((warning) => warning.preserveFields ?? []),
             );
-            refreshed.sourceControlRequest = {
-              ...nextRequest,
-              ...(preserveFields.has("APPROVAL_STATE") &&
-              nextRequest.approvalState == null
-                ? { approvalState: previousRequest.approvalState ?? null }
-                : {}),
-              ...(preserveFields.has("UNRESOLVED_DISCUSSIONS_COUNT") &&
-              nextRequest.unresolvedDiscussionsCount == null
-                ? {
-                    unresolvedDiscussionsCount:
-                      previousRequest.unresolvedDiscussionsCount ?? null,
-                  }
-                : {}),
-            };
           }
-          return { ...worktree, ...refreshed };
+          const saved = latestSaved?.get(worktree.id);
+          return {
+            ...worktree,
+            ...(saved
+              ? unchangedSavedFields(refreshed, before, saved)
+              : refreshed),
+          };
         }),
       })),
     })),
@@ -369,7 +479,8 @@ export function useWorktreeLoading(
           owner: createRefreshCoalescer(async (signal) => {
             const forced = lifetime.owners.get(kind)!.force;
             lifetime.owners.get(kind)!.force = false;
-            const requested = indexed(lifetime.snapshot);
+            const snapshot = lifetime.snapshot;
+            const requested = indexed(snapshot);
             const startedAt = Date.now();
             mark(kind, {
               status: "running",
@@ -398,6 +509,10 @@ export function useWorktreeLoading(
               );
               if (!lifetime.active || signal.aborted) return;
               const { updates, warnings, durationMs } = worktreeEnrichment;
+              const latestSaved =
+                snapshot === lifetime.snapshot
+                  ? undefined
+                  : indexed(lifetime.snapshot);
               setOverview((current) =>
                 lifetime.active && current
                   ? mergeWorktreeEnrichment(
@@ -406,6 +521,7 @@ export function useWorktreeLoading(
                       kind,
                       requested,
                       warnings,
+                      latestSaved,
                     )
                   : current,
               );
@@ -481,7 +597,13 @@ export function useWorktreeLoading(
     (snapshot: WorktreeOverview) => {
       const lifetime = scope.current;
       if (!lifetime?.active) return;
+      const previous = lifetime.snapshot;
       lifetime.snapshot = snapshot;
+      setOverview((current) =>
+        lifetime.active
+          ? preserveWorktreeMetadata(current, snapshot, previous)
+          : current,
+      );
       mark("SAVED", {
         status: "complete",
         finishedAt: Date.now(),
@@ -493,7 +615,7 @@ export function useWorktreeLoading(
         enrich();
       }, 0);
     },
-    [enrich, mark],
+    [enrich, mark, setOverview],
   );
 
   return {

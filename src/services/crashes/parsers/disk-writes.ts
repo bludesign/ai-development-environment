@@ -11,12 +11,14 @@ import { appleDate, isAppImage, optionalUuid, text, toHex } from "./common";
 
 type Header = Record<string, unknown>;
 
-const FIELD = /^([A-Za-z][\w /-]*):\s*(.+)$/;
-const IMAGE =
-  /^\s*(0x[\da-f]+)\s*-\s*(0x[\da-f]+|\?\?\?)\s+(.+?)\s+<([\da-f-]+)>\s*(.*?)\s*$/i;
-const FRAME =
-  /^(\s*)(\d+)\s+(.+?)\s+\((.+?)\s+\+\s+(\d+)\)\s+\[(0x[\da-f]+)\]/i;
-const AMOUNT = /(\d+(?:\.\d+)?)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|bytes?|B)\b/i;
+const FIELD_NAME = /^[A-Za-z][\w /-]*$/;
+const IMAGE_RANGE = /^\s*(0x[\da-f]{1,16})\s*-\s*(0x[\da-f]{1,16}|\?\?\?)\s+/i;
+const IMAGE_UUID = /(?<!\s)\s+<([\da-f-]{1,36})>/i;
+const FRAME_COUNT = /^(\s*)(\d{1,10})\s+/;
+const FRAME_ADDRESS = /\)\s+\[(0x[\da-f]{1,16})\]/i;
+const TRAILING_OFFSET = /(?<!\s)\s+\+\s+(\d{1,20})$/;
+const AMOUNT =
+  /^\s*(\d+(?:\.\d+)?)\s*(KiB|MiB|GiB|TiB|KB|MB|GB|TB|bytes?|B)\b/i;
 const UNITS: Record<string, number> = {
   byte: 1,
   bytes: 1,
@@ -56,9 +58,12 @@ function count(value?: string): number | null {
 function fields(lines: string[]) {
   const result = new Map<string, string>();
   for (const line of lines) {
-    const match = FIELD.exec(line);
-    if (match && !result.has(match[1]!))
-      result.set(match[1]!, match[2]!.trim());
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    const name = line.slice(0, separator);
+    if (!FIELD_NAME.test(name) || result.has(name)) continue;
+    const value = line.slice(separator + 1).trim();
+    if (value) result.set(name, value);
   }
   return result;
 }
@@ -70,19 +75,24 @@ function binaryImages(
 ) {
   const images: NormalizedImage[] = [];
   for (const line of lines) {
-    const match = IMAGE.exec(line);
-    if (!match) continue;
-    const [, start, end, label, rawUuid, rawPath] = match;
-    const path = text(rawPath);
-    const imageArch = label!.match(
+    const range = IMAGE_RANGE.exec(line);
+    if (!range) continue;
+    const description = line.slice(range[0].length);
+    const uuid = IMAGE_UUID.exec(description);
+    if (!uuid) continue;
+    const label = description.slice(0, uuid.index).trim();
+    if (!label) continue;
+    const path = text(description.slice(uuid.index + uuid[0].length));
+    const imageArch = label.match(
       /\b(?:arm64e?|arm64_32|x86_64h?|i386)\b/,
     )?.[0];
-    const name = path?.split("/").pop() ?? label!.split(/\s/)[0]!;
+    const name = path?.split("/").pop() ?? label.split(/\s/, 1)[0]!;
+    const [, start, end] = range;
     const base = BigInt(start!);
     const size = end === "???" ? null : Number(BigInt(end!) - base + BigInt(1));
     images.push({
       index: images.length,
-      uuid: optionalUuid(rawUuid),
+      uuid: optionalUuid(uuid[1]),
       name,
       arch: imageArch ?? (path && path === processPath ? arch : null),
       base: toHex(base),
@@ -95,36 +105,73 @@ function binaryImages(
   return images;
 }
 
-function readFrame(line: string, imagesByBase: Map<string, NormalizedImage[]>) {
-  const match = FRAME.exec(line);
-  if (!match) return null;
-  const [, indent, samples, label, imageName, offsetText, addressText] = match;
-  const sampleCount = count(samples);
+function matchingOpenParen(value: string, end: number): number {
+  let depth = 0;
+  for (let index = end - 1; index >= 0; index -= 1) {
+    if (value[index] === ")") depth += 1;
+    if (value[index] !== "(") continue;
+    if (depth === 0) return index;
+    depth -= 1;
+  }
+  return -1;
+}
+
+type ImagesByBase = Map<
+  string,
+  { byName: Map<string, NormalizedImage>; fallback?: NormalizedImage }
+>;
+
+function readFrame(line: string, imagesByBase: ImagesByBase) {
+  const prefix = FRAME_COUNT.exec(line);
+  if (!prefix) return null;
+  const sampleCount = count(prefix[2]);
   if (sampleCount === null) return null;
-  const address = BigInt(addressText!);
-  const offset = BigInt(offsetText!);
+
+  // Read the image reference from the address back toward the symbol so
+  // parentheses in demangled names cannot be mistaken for the image reference.
+  const addressMatch = FRAME_ADDRESS.exec(line);
+  if (!addressMatch) return null;
+  const reference = line.slice(prefix[0].length, addressMatch.index);
+  const imageOffset = TRAILING_OFFSET.exec(reference);
+  if (!imageOffset) return null;
+  const openingParen = matchingOpenParen(reference, imageOffset.index);
+  if (openingParen <= 0) return null;
+  const label = reference.slice(0, openingParen).trimEnd();
+  const imageName = reference.slice(openingParen + 1, imageOffset.index).trim();
+  if (!label || !imageName) return null;
+
+  const address = BigInt(addressMatch[1]!);
+  const offset = BigInt(imageOffset[1]!);
   // The explicit offset identifies the image even when its address range is open-ended.
   const candidates =
-    address >= offset ? (imagesByBase.get(toHex(address - offset)) ?? []) : [];
-  const image =
-    candidates.find((entry) => entry.name === imageName) ??
-    (candidates.length === 1 ? candidates[0] : undefined);
-  const symbol = label!.match(/^(.*?)\s+\+\s+(\d+)$/);
+    address >= offset ? imagesByBase.get(toHex(address - offset)) : undefined;
+  const image = candidates?.byName.get(imageName) ?? candidates?.fallback;
+  const symbolOffset = TRAILING_OFFSET.exec(label);
   const frame: NormalizedFrame = {
     imageIndex: image?.index ?? null,
     imageName: text(imageName, 500),
     imageOffset: toHex(offset),
     address: toHex(address),
-    symbol: label === "???" ? null : text(symbol?.[1] ?? label, 4000),
-    symbolOffset: numberIn(symbol?.[2]),
+    symbol:
+      label === "???"
+        ? null
+        : text(symbolOffset ? label.slice(0, symbolOffset.index) : label, 4000),
+    symbolOffset: numberIn(symbolOffset?.[1]),
     sourceFile: null,
     sourceLine: null,
   };
   return {
-    indentation: indent!.replaceAll("\t", "        ").length,
+    indentation: prefix[1]!.replaceAll("\t", "        ").length,
     sampleCount,
     frame,
   };
+}
+
+function averageWriteRate(writes?: string): number | null {
+  for (const [, details] of (writes ?? "").matchAll(/\(([^()]*)\)/g)) {
+    if (/\sper second average$/i.test(details!)) return quantity(details);
+  }
+  return null;
 }
 
 /** Apple's device export has a one-line JSON header followed by a Microstackshots text report. */
@@ -175,12 +222,19 @@ export function parseDiskWritesIps(
     imagesAt === -1
       ? []
       : binaryImages(lines.slice(imagesAt + 1), arch, processPath);
-  const imagesByBase = new Map<string, NormalizedImage[]>();
+  const imagesByBase: ImagesByBase = new Map();
   for (const image of images) {
     const base = image.base!;
-    const matches = imagesByBase.get(base) ?? [];
-    matches.push(image);
-    imagesByBase.set(base, matches);
+    const matches = imagesByBase.get(base);
+    if (!matches) {
+      imagesByBase.set(base, {
+        byName: new Map([[image.name, image]]),
+        fallback: image,
+      });
+      continue;
+    }
+    matches.fallback = undefined;
+    if (!matches.byName.has(image.name)) matches.byName.set(image.name, image);
   }
 
   const heaviestStack: SampledFrame[] = [];
@@ -204,7 +258,6 @@ export function parseDiskWritesIps(
     powerAt === -1
       ? []
       : lines.slice(powerAt + 1, imagesAt > powerAt ? imagesAt : undefined);
-  const power = fields(powerLines);
   const ancestors: { id: number; indentation: number }[] = [];
   for (const line of powerLines) {
     if (/^Powerstats for:/i.test(line.trim())) break;
@@ -226,13 +279,11 @@ export function parseDiskWritesIps(
   }
 
   const processName = text(report.get("Command"), 500);
-  const version = /^(.*?)\s+\(([^()]+)\)$/.exec(report.get("Version") ?? "");
+  const version = report.get("Version") ?? "";
+  const build = /(?<!\s)\s+\(([^()]+)\)$/.exec(version);
   const steps = report.get("Steps");
   const durationMs = numberIn(text(header.duration_ms) ?? undefined);
   const action = text(report.get("Action taken"), 200);
-  const average = quantity(
-    writes?.match(/\(([^()]+?)\s+per second average\)/i)?.[1],
-  );
   return {
     format: DISK_WRITES_FORMAT,
     incidentId:
@@ -243,8 +294,8 @@ export function parseDiskWritesIps(
     bundleId: text(header.bundleID, 500) ?? text(report.get("Identifier"), 500),
     appVersion:
       text(header.app_version, 200) ??
-      text(version?.[1] ?? report.get("Version"), 200),
-    buildVersion: text(header.build_version, 200) ?? text(version?.[2], 200),
+      text(build ? version.slice(0, build.index) : version, 200),
+    buildVersion: text(header.build_version, 200) ?? text(build?.[1], 200),
     osVersion:
       text(header.os_version, 200) ?? text(report.get("OS Version"), 200),
     deviceModel: text(report.get("Hardware model"), 200),
@@ -271,14 +322,14 @@ export function parseDiskWritesIps(
         numberIn(report.get("Duration")) ??
         (durationMs === null ? null : durationMs / 1000) ??
         numberIn(report.get("Writes duration")),
-      averageBytesPerSecond: average,
+      averageBytesPerSecond: averageWriteRate(writes),
       startedAt: appleDate(report.get("Date/Time")),
       endedAt: appleDate(report.get("End time")),
       reportedAt: appleDate(header.timestamp),
       action,
       sampledDurationSeconds: numberIn(report.get("Duration Sampled")),
-      samplesCaptured: count(power.get("Num samples")) ?? count(steps),
-      samplesLost: count(steps?.match(/(\d+)\s+samples? lost/i)?.[1]),
+      samplesCaptured: count(steps),
+      samplesLost: count(steps?.match(/(?<!\d)(\d+)\s+samples? lost/i)?.[1]),
       distributor: text(header.distributor_id, 200),
       isBeta:
         header.is_beta === 1 ||

@@ -82,6 +82,62 @@ describe("crash parsers", () => {
       heaviestStack: [],
     });
   });
+
+  test("uses report-wide sample counts when powerstats cover multiple processes", () => {
+    const lines = [
+      '{"bug_type":145}',
+      "Event: disk writes",
+      "Writes caused: 1.5 GB",
+      "Steps: 196 (202 samples lost, 10.49 MB/step)",
+      "Powerstats for: AcmeApp [407]",
+      "Num samples: 64 (33%)",
+      "Powerstats for: AnotherProcess [408]",
+      "Num samples: 132 (67%)",
+    ];
+    const [report] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(report!.diskWrites).toMatchObject({
+      samplesCaptured: 196,
+      samplesLost: 202,
+    });
+
+    lines.splice(3, 1);
+    const [withoutSteps] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(withoutSteps!.diskWrites).toMatchObject({
+      samplesCaptured: null,
+      samplesLost: null,
+    });
+  });
+
+  test("parses sampled frames with parenthesized symbols and binary names", () => {
+    const lines = [
+      '{"bug_type":145}',
+      "Event: disk writes",
+      "Writes: 1.5 GB of file backed memory dirtied over 260 seconds (5.5 MiB per second average)",
+      "Heaviest stack for the target process:",
+      "  30 Acme::read(Storage&, Handler (Storage::*)()) + 16 (AcmeApp (Staging) + 32) [0x1020] (p-core)",
+      "  Binary Images:",
+      `    0x1000 - ??? AcmeApp (Staging) <${APP_UUID}> /Applications/AcmeApp (Staging).app/AcmeApp (Staging)`,
+    ];
+    const [report] = detectAndParse(Buffer.from(lines.join("\n")));
+    expect(report!.diskWrites).toMatchObject({
+      writesBytes: 1_500_000_000,
+      averageBytesPerSecond: 5_767_168,
+      heaviestStack: [
+        {
+          sampleCount: 30,
+          frame: {
+            imageIndex: 0,
+            imageName: "AcmeApp (Staging)",
+            imageOffset: "0x20",
+            address: "0x1020",
+            symbol: "Acme::read(Storage&, Handler (Storage::*)())",
+            symbolOffset: 16,
+          },
+        },
+      ],
+    });
+  });
+
   test("reads an .ips report and its image offsets", () => {
     const [crash] = detectAndParse(read("CrashDemo.ips"));
     expect(crash).toMatchObject({

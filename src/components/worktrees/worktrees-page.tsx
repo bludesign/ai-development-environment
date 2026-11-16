@@ -184,10 +184,7 @@ import { QuickActionsRow } from "./quick-actions-row";
 import { WorktreeDetailPanel } from "./worktree-detail-panel";
 import { WorktreeFetchProgress } from "./worktree-fetch-progress";
 import { WorktreeLoadingStatus } from "./worktree-loading-status";
-import {
-  preserveWorktreeMetadata,
-  useWorktreeLoading,
-} from "./use-worktree-loading";
+import { useWorktreeLoading } from "./use-worktree-loading";
 import { useIntegrationAvailability } from "./use-integration-availability";
 import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
@@ -836,9 +833,6 @@ export function WorktreesPage({
           { signal },
         );
         if (request !== latestLoad.current || signal.aborted) return;
-        setOverview((current) =>
-          preserveWorktreeMetadata(current, data.worktreeOverview),
-        );
         savedLoad(data.worktreeOverview);
         setLoadError(null);
       } catch (value) {

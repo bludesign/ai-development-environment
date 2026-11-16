@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 
 import {
-  clearIntegrationConfigurationCache,
   readIntegrationConfiguration,
   subscribeIntegrationConfiguration,
 } from "@/lib/integration-configuration";
@@ -14,8 +13,7 @@ const QUERY = `query WorktreeIntegrationAvailability {
   sourceControlIntegrationState { github { configured } gitlab { configured } }
   jiraSettings { tokenConfigured }
 }`;
-/** One cached answer covers three providers, so any provider change clears it. */
-const CACHE_KEY = "worktreeEnrichment";
+const PROVIDERS = ["github", "gitlab", "jira"];
 const ASSUME_CONNECTED: IntegrationAvailability = {
   github: true,
   gitlab: true,
@@ -44,7 +42,7 @@ export function useIntegrationAvailability():
   useEffect(() => {
     const controller = new AbortController();
     const load = () => {
-      void readIntegrationConfiguration<Response>(CACHE_KEY, QUERY, {
+      void readIntegrationConfiguration<Response>(PROVIDERS, QUERY, {
         signal: controller.signal,
       })
         .then((data) => {
@@ -60,10 +58,7 @@ export function useIntegrationAvailability():
         });
     };
     load();
-    const off = subscribeIntegrationConfiguration(null, () => {
-      clearIntegrationConfigurationCache(CACHE_KEY);
-      load();
-    });
+    const off = subscribeIntegrationConfiguration(PROVIDERS, load);
     return () => {
       controller.abort();
       off();

@@ -31,10 +31,7 @@ import {
 } from "@/components/worktrees/worktree-navigation";
 import type { WorktreeOverview } from "@/components/worktrees/types";
 import { useIntegrationAvailability } from "@/components/worktrees/use-integration-availability";
-import {
-  preserveWorktreeMetadata,
-  useWorktreeLoading,
-} from "@/components/worktrees/use-worktree-loading";
+import { useWorktreeLoading } from "@/components/worktrees/use-worktree-loading";
 import {
   BaseFreshnessBadge,
   OriginStatusBadges,
@@ -111,9 +108,6 @@ export function RunWorktreeCards({ worktreeId }: { worktreeId: string }) {
           worktreeId,
         )?.group;
         displayedCodebaseId.current = group?.codebase.id ?? null;
-        setOverview((current) =>
-          preserveWorktreeMetadata(current, data.worktreeOverview),
-        );
         savedOverview(data.worktreeOverview);
         setBuilds(history.items);
         setNextCursor(history.nextCursor);

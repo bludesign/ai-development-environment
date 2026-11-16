@@ -9,26 +9,41 @@ export type PageVisibility = {
 const RETURN_DEDUPE_MS = 1_000;
 
 /**
- * One signal per return to the page. Returning to a tab fires `visibilitychange`
- * and `focus` together; a window that was only unfocused fires `focus` alone.
- * Listening to both without this refreshes twice on every tab switch.
+ * A tab return can fire `visibilitychange` and `focus` in either order. A window
+ * can also regain focus without a visibility change. A hide or blur starts a
+ * separate return, even inside the deduplication window.
  */
 export function onPageVisible(listener: () => void): () => void {
   if (typeof document === "undefined" || typeof window === "undefined")
     return () => undefined;
-  let last = Number.NEGATIVE_INFINITY;
-  const returned = () => {
-    if (document.visibilityState === "hidden") return;
-    const now = Date.now();
-    if (now - last < RETURN_DEDUPE_MS) return;
-    last = now;
+  let lastReturn: { type: string; time: number } | null = null;
+  const clearPair = () => {
+    lastReturn = null;
+  };
+  const returned = ({ type }: Event) => {
+    if (document.visibilityState === "hidden") {
+      clearPair();
+      return;
+    }
+    const time = Date.now();
+    if (
+      lastReturn &&
+      lastReturn.type !== type &&
+      time - lastReturn.time < RETURN_DEDUPE_MS
+    ) {
+      clearPair();
+      return;
+    }
+    lastReturn = { type, time };
     listener();
   };
   document.addEventListener("visibilitychange", returned);
   window.addEventListener("focus", returned);
+  window.addEventListener("blur", clearPair);
   return () => {
     document.removeEventListener("visibilitychange", returned);
     window.removeEventListener("focus", returned);
+    window.removeEventListener("blur", clearPair);
   };
 }
 

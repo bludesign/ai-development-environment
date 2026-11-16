@@ -5,6 +5,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { subscribeIntegrationConfiguration } from "@/lib/integration-configuration";
 
 import { useIntegrationAvailability } from "./use-integration-availability";
 
@@ -26,13 +27,15 @@ let configurationChanged: (provider: string) => void;
 
 beforeEach(() => {
   request.mockReset();
-  vi.mocked(controlPlaneSubscriptions).mockReturnValue({
-    subscribe: vi.fn((_payload, sink) => {
-      configurationChanged = (provider) =>
-        sink.next({ data: { integrationConfigurationChanged: provider } });
-      return vi.fn();
-    }),
-  } as never);
+  vi.mocked(controlPlaneSubscriptions)
+    .mockReset()
+    .mockReturnValue({
+      subscribe: vi.fn((_payload, sink) => {
+        configurationChanged = (provider) =>
+          sink.next({ data: { integrationConfigurationChanged: provider } });
+        return vi.fn();
+      }),
+    } as never);
 });
 afterEach(cleanup);
 
@@ -75,4 +78,27 @@ test("reads the answer again when any integration is connected or removed", asyn
     expect(result.current).toEqual({ github: true, gitlab: true, jira: false }),
   );
   expect(request).toHaveBeenCalledTimes(2);
+});
+
+test("invalidates the shared answer if a provider changes away from the worktree route", async () => {
+  const leaveDashboard = subscribeIntegrationConfiguration(null, vi.fn());
+  try {
+    request.mockResolvedValueOnce(answer(true, false, false) as never);
+    const route = renderHook(() => useIntegrationAvailability());
+    await waitFor(() =>
+      expect(route.result.current).toMatchObject({ gitlab: false }),
+    );
+    route.unmount();
+
+    configurationChanged("gitlab");
+    request.mockResolvedValueOnce(answer(true, true, false) as never);
+    const reopened = renderHook(() => useIntegrationAvailability());
+    await waitFor(() =>
+      expect(reopened.result.current).toMatchObject({ gitlab: true }),
+    );
+    expect(controlPlaneSubscriptions).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(2);
+  } finally {
+    leaveDashboard();
+  }
 });
