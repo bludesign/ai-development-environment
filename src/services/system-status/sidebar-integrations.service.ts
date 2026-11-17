@@ -5,6 +5,7 @@ import {
   ACTION_CENTER_CHANGED_TOPIC,
   ACTION_CENTER_SETTINGS_CHANGED_TOPIC,
   GITHUB_ACTIONS_COUNT_CHANGED_TOPIC,
+  GITHUB_PIPELINE_STATUS_CHANGED_TOPIC,
   INTEGRATION_CONFIGURATION_CHANGED_TOPIC,
   SIDEBAR_STATUS_CHANGED_TOPIC,
   agentEventBus,
@@ -36,6 +37,8 @@ export type SidebarIntegrationCounts = {
   mergeRequests: number | null;
   pipelines: number | null;
   activeRunsKnown: boolean;
+  githubActiveRunsKnown: boolean;
+  gitlabActiveRunsKnown: boolean;
 };
 
 export const EMPTY_INTEGRATION_COUNTS: SidebarIntegrationCounts = {
@@ -44,6 +47,8 @@ export const EMPTY_INTEGRATION_COUNTS: SidebarIntegrationCounts = {
   mergeRequests: null,
   pipelines: null,
   activeRunsKnown: true,
+  githubActiveRunsKnown: true,
+  gitlabActiveRunsKnown: true,
 };
 
 /** Provider scans run once per server, independently of the number of connected clients. */
@@ -61,6 +66,10 @@ export class SidebarIntegrationsService {
   private readonly pending = new Set<Provider>();
   private readonly refreshDeadlines = new Map<Provider, number>();
   private lastStarted = -Infinity;
+  private readonly demandRefreshes = new Map<
+    Provider,
+    { generation: number; startedAt: number; pending?: Promise<void> }
+  >();
 
   constructor(
     private readonly github: Pick<
@@ -110,15 +119,15 @@ export class SidebarIntegrationsService {
     this.observe(GITLAB_PIPELINE_STATUS_CHANGED_TOPIC, () =>
       this.requestRefresh(false, ["gitlab"]),
     );
-    this.observe(GITHUB_ACTIONS_COUNT_CHANGED_TOPIC, () => {
-      if (!this.enabled) return;
+    const refreshCachedActions = () => {
+      if (!this.enabled && !this.demandRefreshes.has("github")) return;
       const generation = this.snapshots.github.generation;
       void this.github
         .cachedActiveActionsCount()
         .then((count) => {
           if (
             !this.active ||
-            !this.enabled ||
+            (!this.enabled && !this.demandRefreshes.has("github")) ||
             generation !== this.snapshots.github.generation
           )
             return;
@@ -127,7 +136,9 @@ export class SidebarIntegrationsService {
           this.publish();
         })
         .catch(() => undefined);
-    });
+    };
+    this.observe(GITHUB_ACTIONS_COUNT_CHANGED_TOPIC, refreshCachedActions);
+    this.observe(GITHUB_PIPELINE_STATUS_CHANGED_TOPIC, refreshCachedActions);
     // Reconciliation and age-setting changes affect request totals without scanning CI again.
     this.observe(ACTION_CENTER_CHANGED_TOPIC, () => this.publish());
     this.observe(ACTION_CENTER_SETTINGS_CHANGED_TOPIC, (event) => {
@@ -319,9 +330,15 @@ export class SidebarIntegrationsService {
     return this.running;
   }
 
-  async counts(): Promise<SidebarIntegrationCounts> {
+  async counts({
+    includeHiddenActivity = false,
+    selectedActivityProviders = { github: true, gitlab: true },
+  }: {
+    includeHiddenActivity?: boolean;
+    selectedActivityProviders?: { github: boolean; gitlab: boolean };
+  } = {}): Promise<SidebarIntegrationCounts> {
     const settings = await actionCenterSettings();
-    if (!settings.showIntegrationCountsInSidebar)
+    if (!settings.showIntegrationCountsInSidebar && !includeHiddenActivity)
       return EMPTY_INTEGRATION_COUNTS;
     const [githubConfiguration, gitlabConfiguration, prisma] =
       await Promise.all([
@@ -348,19 +365,63 @@ export class SidebarIntegrationsService {
     };
     const github = githubConfiguration ?? this.snapshots.github;
     const gitlab = gitlabConfiguration ?? this.snapshots.gitlab;
+    if (includeHiddenActivity && !settings.showIntegrationCountsInSidebar) {
+      // Native consumers can select CI independently of sidebar visibility. Scan on demand,
+      // at most once per minute per provider, without enabling the sidebar's poll timer.
+      if (githubConfiguration && selectedActivityProviders.github)
+        await this.refreshOnDemand("github", github);
+      if (gitlabConfiguration && selectedActivityProviders.gitlab)
+        await this.refreshOnDemand("gitlab", gitlab);
+    }
     const actions = github.configured ? github.count : null;
     const pipelines = gitlab.configured ? gitlab.count : null;
+    const githubActiveRunsKnown =
+      githubConfiguration !== null && (!github.configured || actions !== null);
+    const gitlabActiveRunsKnown =
+      gitlabConfiguration !== null &&
+      (!gitlab.configured || pipelines !== null);
     return {
       pullRequests: github.configured ? total("GITHUB") : null,
       actions,
       mergeRequests: gitlab.configured ? total("GITLAB") : null,
       pipelines,
-      activeRunsKnown:
-        githubConfiguration !== null &&
-        gitlabConfiguration !== null &&
-        (!github.configured || actions !== null) &&
-        (!gitlab.configured || pipelines !== null),
+      activeRunsKnown: githubActiveRunsKnown && gitlabActiveRunsKnown,
+      githubActiveRunsKnown,
+      gitlabActiveRunsKnown,
     };
+  }
+
+  private async refreshOnDemand(
+    provider: Provider,
+    snapshot: Snapshot,
+  ): Promise<void> {
+    if (!snapshot.configured) return;
+    const previous = this.demandRefreshes.get(provider);
+    if (previous?.generation === snapshot.generation) {
+      if (previous.pending) return previous.pending;
+      if (Date.now() - previous.startedAt < POLL_MS) return;
+    }
+    const generation = snapshot.generation;
+    const refresh: {
+      generation: number;
+      startedAt: number;
+      pending?: Promise<void>;
+    } = { generation, startedAt: Date.now() };
+    refresh.pending = (async () => {
+      try {
+        const count =
+          provider === "github"
+            ? await this.github.activeActionsCount()
+            : await this.gitlab.activePipelinesCount();
+        if (snapshot.generation === generation) snapshot.count = count;
+      } catch {
+        // Preserve this connection's last successful count; an unseen provider remains unknown.
+      } finally {
+        refresh.pending = undefined;
+      }
+    })();
+    this.demandRefreshes.set(provider, refresh);
+    return refresh.pending;
   }
 
   private publish(): void {

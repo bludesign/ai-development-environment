@@ -858,6 +858,11 @@ export const routes: RouteEntry[] = [
 
   // Notifications & push
   { name: "notifications", path: "/dashboard/notifications" },
+  {
+    name: "notification-settings",
+    path: "/dashboard/notifications",
+    clickTab: "Settings",
+  },
   { name: "push-notifications", path: "/debugging/push-notifications" },
 
   // System

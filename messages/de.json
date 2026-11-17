@@ -1222,7 +1222,25 @@
     "deviceInactive": "Inaktiv",
     "removeDevice": "{device} entfernen",
     "removeDeviceTitle": "Dieses registrierte Gerät entfernen?",
-    "removeDeviceDescription": "Dieses Gerät erhält keine nativen Benachrichtigungen mehr. Es kann sich über die App erneut registrieren."
+    "removeDeviceDescription": "Dieses Gerät erhält keine nativen Benachrichtigungen mehr. Es kann sich über die App erneut registrieren.",
+    "liveActivity": {
+      "title": "Live-Aktivitäten",
+      "description": "Wähle aus, welche aktiven Arbeitstypen zur Anzahl und Zusammenfassung der Live-Aktivität auf iPhone und iPad beitragen.",
+      "scope": "Änderungen werden automatisch gespeichert und gelten für alle mit dieser Steuerzentrale verbundenen Geräte. Standardmäßig sind alle Arbeitstypen eingeschlossen.",
+      "attention": "Eine Live-Aktivität endet, wenn keine ausgewählte Arbeit aktiv ist. Elemente, die Aufmerksamkeit erfordern, erscheinen während aktiver Arbeit in einem separaten Abzeichen.",
+      "saving": "Einstellungen für Live-Aktivitäten werden gespeichert…",
+      "loading": "Einstellungen für Live-Aktivitäten werden geladen…",
+      "retry": "Erneut versuchen",
+      "items": {
+        "includePlans": "Pläne",
+        "includeSessions": "Sitzungen",
+        "includeBuilds": "Builds",
+        "includeWorkflows": "Workflow-Ausführungen",
+        "includeCommands": "Befehlsausführungen",
+        "includeGitHubActions": "GitHub-Actions-Ausführungen",
+        "includeGitLabPipelines": "GitLab-Pipelines"
+      }
+    }
   },
   "credentials": {
     "title": "Anmeldedaten",

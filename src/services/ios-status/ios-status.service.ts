@@ -23,6 +23,11 @@ import {
   registrationId,
   registrationObject,
 } from "./registration";
+import {
+  DEFAULT_LIVE_ACTIVITY_SETTINGS,
+  liveActivitySettings,
+  type LiveActivityCategorySettings,
+} from "./live-activity-settings";
 
 const WIDGET_TTL_MS = 30 * 24 * 60 * 60_000;
 const ACTIVITY_TTL_MS = 8 * 60 * 60_000;
@@ -55,16 +60,19 @@ export function workActivityContent(
   needsAttentionCount: number,
   now = new Date(),
   integrationsKnown = true,
+  settings: LiveActivityCategorySettings = DEFAULT_LIVE_ACTIVITY_SETTINGS,
 ): WorkActivityContent {
-  const kinds = [
-    [counts.plans, "plan"],
-    [counts.sessions, "session"],
-    [counts.builds, "build"],
-    [counts.workflows, "workflow"],
-    [counts.commands, "command"],
-    [counts.actions ?? 0, "action"],
-    [counts.pipelines ?? 0, "pipeline"],
-  ] as const;
+  const kinds = (
+    [
+      [counts.plans, "plan", settings.includePlans],
+      [counts.sessions, "session", settings.includeSessions],
+      [counts.builds, "build", settings.includeBuilds],
+      [counts.workflows, "workflow", settings.includeWorkflows],
+      [counts.commands, "command", settings.includeCommands],
+      [counts.actions ?? 0, "action", settings.includeGitHubActions],
+      [counts.pipelines ?? 0, "pipeline", settings.includeGitLabPipelines],
+    ] as const
+  ).filter(([, , enabled]) => enabled);
   return {
     activeCount: kinds.reduce((sum, [count]) => sum + count, 0),
     needsAttentionCount,
@@ -112,13 +120,28 @@ export class IosStatusService {
   }
 
   private async collectSnapshot() {
+    const settings = await liveActivitySettings();
     const [sidebar, actions] = await Promise.all([
-      this.systemStatus.status(false, { includeUnfinishedWork: true }),
+      this.systemStatus.status(false, {
+        includeUnfinishedWork: true,
+        liveActivityIntegrations: {
+          github: settings.includeGitHubActions,
+          gitlab: settings.includeGitLabPipelines,
+        },
+      }),
       this.actionCenter.list({ first: 8 }),
     ]);
     const now = new Date();
     const { unfinishedWork } = sidebar;
-    const integrationsKnown = unfinishedWork?.integrationsKnown ?? false;
+    const integrationsKnown =
+      (!settings.includeGitHubActions ||
+        (unfinishedWork?.githubKnown ??
+          unfinishedWork?.integrationsKnown ??
+          false)) &&
+      (!settings.includeGitLabPipelines ||
+        (unfinishedWork?.gitlabKnown ??
+          unfinishedWork?.integrationsKnown ??
+          false));
     const snapshot = {
       collectedAt: now.toISOString(),
       usageToday: sidebar.usageToday,
@@ -143,6 +166,7 @@ export class IosStatusService {
         actions.needsAttentionCount,
         now,
         integrationsKnown,
+        settings,
       ),
     };
     return { snapshot, integrationsKnown };

@@ -365,6 +365,14 @@ test.describe("app screenshots", () => {
         const tab = page.getByRole("tab", { name: route.clickTab });
         await tab.click();
         await expect(tab).toHaveAttribute("aria-selected", "true");
+        if (route.name === "notification-settings") {
+          await expect(
+            page.getByRole("switch", {
+              name: "GitHub Actions runs",
+              exact: true,
+            }),
+          ).toBeEnabled();
+        }
       }
       if (route.buildWorkflow === "start" || route.buildWorkflow === "custom") {
         await page
