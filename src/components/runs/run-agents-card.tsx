@@ -32,6 +32,7 @@ import {
   controlPlaneRequest,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -230,16 +231,15 @@ function RunAgentsContents({
       if (document.visibilityState !== "hidden") void refreshOwner.refresh();
     };
     const recovery = onControlPlaneRecovery(recover);
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     const activeRequests = requests.current;
     return () => {
       disposed.current = true;
       window.clearTimeout(timer);
       refreshOwner.dispose();
       recovery();
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
+      offVisible();
       for (const request of activeRequests.values()) request.abort();
       activeRequests.clear();
       if (owner.current === refreshOwner) owner.current = null;

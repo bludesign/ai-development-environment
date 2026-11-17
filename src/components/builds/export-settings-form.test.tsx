@@ -26,19 +26,32 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const subscribe = vi.fn(() => vi.fn());
 
+let refreshJobs: Array<{
+  id: string;
+  agentId: string;
+  status: string;
+  error: string | null;
+}>;
+
 beforeEach(() => {
+  refreshJobs = [
+    {
+      id: "refresh-job-1",
+      agentId: "agent-1",
+      status: "SUCCEEDED",
+      error: null,
+    },
+  ];
   subscribe.mockClear();
   subscriptions.mockReturnValue({ subscribe } as never);
   request.mockImplementation(async (query) => {
     const operation = String(query);
-    if (operation.includes("query ExportSigningInventoryJob")) {
+    if (operation.includes("query ExportSigningInventoryJobs")) {
       return {
-        agentJob: {
-          id: "refresh-job-1",
-          agentId: "agent-1",
+        agentJobsByIds: refreshJobs.map((job) => ({
+          ...job,
           status: "SUCCEEDED",
-          error: null,
-        },
+        })),
       } as never;
     }
     if (operation.includes("query ExportSigningInventory {")) {
@@ -49,16 +62,7 @@ beforeEach(() => {
       } as never;
     }
     if (operation.includes("mutation RefreshExportSigningInventory")) {
-      return {
-        refreshSigningAssets: [
-          {
-            id: "refresh-job-1",
-            agentId: "agent-1",
-            status: "SUCCEEDED",
-            error: null,
-          },
-        ],
-      } as never;
+      return { refreshSigningAssets: refreshJobs } as never;
     }
     throw new Error(`Unexpected request: ${operation}`);
   });
@@ -70,6 +74,45 @@ afterEach(() => {
 });
 
 describe("ExportSettingsForm", () => {
+  test("follows every agent's refresh with one status read", async () => {
+    refreshJobs = ["agent-1", "agent-2", "agent-3"].map((agentId, index) => ({
+      id: `refresh-job-${index + 1}`,
+      agentId,
+      status: "RUNNING",
+      error: null,
+    }));
+    render(
+      <ExportSettingsForm
+        onChange={vi.fn()}
+        value={{ ...DEFAULT_EXPORT_SETTINGS, signingStyle: "MANUAL" }}
+      />,
+    );
+    const refresh = await screen.findByRole("button", {
+      name: "Refresh inventory",
+    });
+    await waitFor(() =>
+      expect((refresh as HTMLButtonElement).disabled).toBe(false),
+    );
+    fireEvent.click(refresh);
+
+    const statusReads = () =>
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query ExportSigningInventoryJobs"),
+      );
+    await waitFor(() => expect(statusReads()).toHaveLength(1));
+    expect(statusReads()[0]![1]).toEqual({
+      ids: ["refresh-job-1", "refresh-job-2", "refresh-job-3"],
+    });
+    // Each finished job reloads the inventory once all of them are done.
+    await waitFor(() =>
+      expect(
+        request.mock.calls.filter(([query]) =>
+          String(query).includes("query ExportSigningInventory {"),
+        ),
+      ).toHaveLength(2),
+    );
+  });
+
   test("refreshes signing inventory from agents and reloads the available profiles", async () => {
     render(
       <ExportSettingsForm

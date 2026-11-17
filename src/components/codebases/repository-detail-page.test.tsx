@@ -129,6 +129,7 @@ describe("RepositoryDetailPage", () => {
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
+    vi.restoreAllMocks();
     request.mockReset();
     subscriptions.mockReset();
   });
@@ -153,7 +154,18 @@ describe("RepositoryDetailPage", () => {
       typeof agent,
       "id" | "connectionStatus" | "capabilities"
     >;
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    // The page reconciles on a thirty-second timer while it is visible.
+    const nativeSetTimeout = globalThis.setTimeout.bind(globalThis);
+    let reconcile: (() => void) | undefined;
+    vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      handler: (...values: unknown[]) => void,
+      delay?: number,
+      ...args: unknown[]
+    ) => {
+      if (delay !== 30_000) return nativeSetTimeout(handler, delay, ...args);
+      reconcile = () => handler(...args);
+      return nativeSetTimeout(() => undefined, 0);
+    }) as typeof setTimeout);
     let publishAgentChange: ((changed: AgentUpdate) => void) | undefined;
     subscriptions.mockReturnValue({
       subscribe: vi.fn<
@@ -205,9 +217,11 @@ describe("RepositoryDetailPage", () => {
     expect(
       await checkout.findByText("Android build tools ready"),
     ).toBeDefined();
+    // An expired heartbeat emits no event; the timer is what notices it.
     setCheckoutSnapshot({ ...ready, connectionStatus: "OFFLINE" });
-    await act(async () => vi.advanceTimersByTimeAsync(30_000));
-    expect(checkout.getByText("Agent offline")).toBeDefined();
+    expect(reconcile).toBeDefined();
+    act(() => reconcile!());
+    expect(await checkout.findByText("Agent offline")).toBeDefined();
   });
 
   test("edits shared repository settings and hosts iOS settings across agents", async () => {

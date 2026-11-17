@@ -104,6 +104,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import { formatProviderLabel } from "@/lib/enum-label";
 import { latestFinalCheckpoint } from "@/lib/run-checkpoint-changes";
 import { McpPresetPicker } from "@/components/tools/mcp-preset-picker";
@@ -978,16 +979,15 @@ export function RunDetailPage({
       if (document.visibilityState !== "hidden") void owner.refresh();
     };
     const recovery = onControlPlaneRecovery(recover);
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     return () => {
       window.clearTimeout(timer);
       owner.dispose();
       recovery();
       olderRequest.current?.abort();
       olderRequest.current = null;
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
+      offVisible();
       if (eventOwner.current === owner) eventOwner.current = null;
     };
   }, [fetchEvents]);

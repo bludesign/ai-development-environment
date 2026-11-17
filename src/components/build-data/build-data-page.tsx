@@ -74,6 +74,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneConnected,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import { dayKey, formatDateValue } from "@/lib/date-format";
 import { cn } from "@/lib/utils";
 import { rowLinkClass } from "@/lib/row-activation";
@@ -339,17 +340,13 @@ function BuildDataScope({
       if (!starting) void reconcile();
     };
     const offConnected = onControlPlaneConnected(recover);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") recover();
-    };
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", onVisible);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     return () => {
       disposed = true;
       controller.abort();
       offConnected();
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", onVisible);
+      offVisible();
       subscription();
       window.clearInterval(timer);
     };

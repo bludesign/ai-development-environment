@@ -371,9 +371,10 @@ export function GitHubPipelineStatusProvider({
   }, [scheduleFlush]);
 
   useEffect(() => {
-    const unsubscribeConnection = onControlPlaneRecovery(reconcile, {
-      includeInitial: true,
-    });
+    // A first connection registers the subscription, which replays the current
+    // state of everything watched. Reading it again then would repeat the read
+    // each row made when it was registered; only a lost connection needs one.
+    const unsubscribeConnection = onControlPlaneRecovery(reconcile);
     scheduleFlush();
     return () => {
       unsubscribeConnection();

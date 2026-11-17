@@ -1,4 +1,11 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -81,5 +88,42 @@ describe("PollingPage", () => {
     expect(screen.getAllByRole("columnheader", { name: "Agent" })).toHaveLength(
       1,
     );
+  });
+
+  test("rereads once for a burst of agent heartbeats and not at all while hidden", async () => {
+    const sinks: Array<{ next: (value: unknown) => void }> = [];
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn((_operation, sink) => {
+        sinks.push(sink);
+        return vi.fn();
+      }),
+    } as never);
+    render(<PollingPage />);
+    await screen.findByText("Builder");
+    const reads = () => request.mock.calls.length;
+    const before = reads();
+    const heartbeat = () =>
+      sinks.forEach((sink) =>
+        sink.next({ data: { agentChanged: { id: "a" } } }),
+      );
+
+    // Every agent heartbeats every few seconds, on all three subscriptions.
+    act(() => {
+      for (let index = 0; index < 10; index++) heartbeat();
+    });
+    await waitFor(() => expect(reads()).toBe(before + 1));
+
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    try {
+      // The burst's trailing read comes due, and more heartbeats arrive.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      act(() => heartbeat());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(reads()).toBe(before + 1);
+    } finally {
+      visibility.mockRestore();
+    }
   });
 });

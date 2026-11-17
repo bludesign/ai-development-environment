@@ -52,6 +52,46 @@ describe("integration configuration cache", () => {
     expect(github).toHaveBeenCalledTimes(2);
     expect(gitlab).toHaveBeenCalledTimes(1);
   });
+  test("keeps what was read while subscribing when the registration replay arrives promptly", async () => {
+    const listener = vi.fn();
+    dispose.push(subscribeIntegrationConfiguration(null, listener));
+    mocks.request.mockResolvedValue({ configured: true });
+    await readIntegrationConfiguration("github", "query G {}");
+    const sink = mocks.subscribe.mock.calls[0][1];
+
+    // The server sends ALL once the subscription is listening. It is not a
+    // change, and every consumer has just read its configuration.
+    sink.next({ data: { integrationConfigurationChanged: "ALL" } });
+    expect(listener).not.toHaveBeenCalled();
+    await readIntegrationConfiguration("github", "query G {}");
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+
+    // Only the first one is the replay; a later ALL is a real invalidation.
+    sink.next({ data: { integrationConfigurationChanged: "ALL" } });
+    expect(listener).toHaveBeenCalledTimes(1);
+    await readIntegrationConfiguration("github", "query G {}");
+    expect(mocks.request).toHaveBeenCalledTimes(2);
+  });
+  test("treats a replay that arrives late as a change", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const listener = vi.fn();
+      dispose.push(subscribeIntegrationConfiguration(null, listener));
+      mocks.request.mockResolvedValue({ configured: true });
+      await readIntegrationConfiguration("github", "query G {}");
+
+      // The socket took a while, so what was read is no longer moments old.
+      vi.setSystemTime(Date.now() + 6_000);
+      mocks.subscribe.mock.calls[0][1].next({
+        data: { integrationConfigurationChanged: "ALL" },
+      });
+      expect(listener).toHaveBeenCalledTimes(1);
+      await readIntegrationConfiguration("github", "query G {}");
+      expect(mocks.request).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   test("does not cache a pre-invalidation response or a failed read", async () => {
     let resolve!: (v: unknown) => void;
     mocks.request

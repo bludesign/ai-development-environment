@@ -12,6 +12,7 @@ import type {
 
 const client = vi.hoisted(() => ({
   connected: null as (() => void) | null,
+  includeInitial: false,
   observer: null as {
     next: (value: {
       data?: { githubPipelineStatusChanged: GitHubPipelineStatusChangeView };
@@ -27,8 +28,12 @@ vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneSubscriptions: () => ({
     subscribe: client.subscribe,
   }),
-  onControlPlaneRecovery: (listener: () => void) => {
+  onControlPlaneRecovery: (
+    listener: () => void,
+    options?: { includeInitial?: boolean },
+  ) => {
     client.connected = listener;
+    client.includeInitial = options?.includeInitial ?? false;
     return () => {
       client.connected = null;
     };
@@ -283,6 +288,12 @@ describe("GitHubPipelineStatusProvider", () => {
       </GitHubPipelineStatusProvider>,
     );
     await waitFor(() => expect(client.subscribe).toHaveBeenCalledOnce());
+    // The subscription replays current state when a first connection
+    // registers it, so only a recovered connection asks for a fresh read.
+    expect(client.includeInitial).toBe(false);
+    expect(client.subscribe.mock.calls[0]![0].query).toContain(
+      "replayCurrent: true",
+    );
     client.request.mockClear();
     act(() => client.connected?.());
     await waitFor(() =>

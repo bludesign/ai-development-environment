@@ -60,6 +60,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneConnected,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 
 import type { SkillGroupSummary, SkillSyncItem, SkillSyncRun } from "./types";
 import { SKILL_SYNC_RUN_FIELDS } from "./types";
@@ -228,11 +229,8 @@ export function SkillSyncPage({ runId }: { runId: string }) {
         reload();
     }, 10_000);
     const offConnected = onControlPlaneConnected(reload);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") reload();
-    };
-    window.addEventListener("focus", reload);
-    document.addEventListener("visibilitychange", onVisible);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(reload);
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       skillSyncRunChanged: SkillSyncRun;
     }>(
@@ -257,8 +255,7 @@ export function SkillSyncPage({ runId }: { runId: string }) {
       window.clearInterval(refresh);
       unsubscribe();
       offConnected();
-      window.removeEventListener("focus", reload);
-      document.removeEventListener("visibilitychange", onVisible);
+      offVisible();
     };
   }, [applyRun, load, runId]);
 

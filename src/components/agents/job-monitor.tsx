@@ -19,6 +19,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { sequenceRanges } from "@/lib/sequence-ranges";
 import { cn } from "@/lib/utils";
@@ -190,8 +191,8 @@ export function JobMonitor({
       if (document.visibilityState !== "hidden") void owner.refresh();
     };
     const recovery = onControlPlaneRecovery(recover);
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     const initialLoad = window.setTimeout(() => void owner.refresh(), 0);
     return () => {
       owner.dispose();
@@ -201,8 +202,7 @@ export function JobMonitor({
       olderRequest.current?.abort();
       olderRequest.current = null;
       window.clearTimeout(initialLoad);
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
+      offVisible();
     };
   }, [jobId, mergeLogs, seeded]);
 

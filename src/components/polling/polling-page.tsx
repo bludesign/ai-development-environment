@@ -22,6 +22,7 @@ import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import { Link } from "@/i18n/navigation";
 
 type PollingOperation = {
@@ -40,6 +41,7 @@ type PollingOperation = {
   details: Record<string, unknown>;
 };
 
+const EVENT_REFRESH_INTERVAL_MS = 1_000;
 const FIELDS = `
   id kind runtime status enabled cadenceSeconds lastStartedAt lastCompletedAt
   lastSucceededAt nextScheduledAt durationMs lastError details
@@ -198,12 +200,18 @@ export function PollingPage() {
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
+    // Every poll that starts or finishes, every agent heartbeat and every
+    // codebase scan reports here. A burst costs one reread, and a hidden tab
+    // reads nothing until it is shown again.
+    const live = createLiveRefresh(() => load(), {
+      minIntervalMs: EVENT_REFRESH_INTERVAL_MS,
+    });
     const client = controlPlaneSubscriptions();
     const subscriptions = [
       client.subscribe<{ pollingOperationChanged: string }>(
         { query: "subscription { pollingOperationChanged }" },
         {
-          next: () => void load(),
+          next: () => live.invalidate(),
           error: () => undefined,
           complete: () => undefined,
         },
@@ -211,7 +219,7 @@ export function PollingPage() {
       client.subscribe<{ agentChanged: { id: string } }>(
         { query: "subscription { agentChanged { id } }" },
         {
-          next: () => void load(),
+          next: () => live.invalidate(),
           error: () => undefined,
           complete: () => undefined,
         },
@@ -224,7 +232,7 @@ export function PollingPage() {
             "subscription { codebaseOverviewChanged { codebaseId repositoryId } }",
         },
         {
-          next: () => void load(),
+          next: () => live.invalidate(),
           error: () => undefined,
           complete: () => undefined,
         },
@@ -232,6 +240,7 @@ export function PollingPage() {
     ];
     return () => {
       window.clearTimeout(initial);
+      live.dispose();
       subscriptions.forEach((unsubscribe) => unsubscribe());
     };
   }, [load]);
