@@ -10,6 +10,7 @@ import {
 } from "@/services/agent-control";
 import type { ActionCenterService } from "@/services/action-center";
 import type { UserPrincipal } from "@/services/auth/principal";
+import type { DiskSpaceService } from "@/services/disk-space";
 import {
   CREDENTIALS,
   apnsTokenConnectionSettings,
@@ -113,6 +114,7 @@ export class IosStatusService {
     private readonly actionCenter: Pick<ActionCenterService, "list">,
     private readonly credentials: CredentialService,
     private readonly apns = new ApnsClient(),
+    private readonly diskSpace?: Pick<DiskSpaceService, "summary">,
   ) {}
 
   async snapshot() {
@@ -121,7 +123,7 @@ export class IosStatusService {
 
   private async collectSnapshot() {
     const settings = await liveActivitySettings();
-    const [sidebar, actions] = await Promise.all([
+    const [sidebar, actions, diskSummary] = await Promise.all([
       this.systemStatus.status(false, {
         includeUnfinishedWork: true,
         liveActivityIntegrations: {
@@ -130,6 +132,7 @@ export class IosStatusService {
         },
       }),
       this.actionCenter.list({ first: 8 }),
+      this.diskSpace?.summary() ?? Promise.resolve({ agents: [] }),
     ]);
     const now = new Date();
     const { unfinishedWork } = sidebar;
@@ -146,7 +149,29 @@ export class IosStatusService {
       collectedAt: now.toISOString(),
       usageToday: sidebar.usageToday,
       activity: sidebar.activity,
+      diskSpace: diskSummary.agents
+        .filter(({ enabled }) => enabled)
+        .flatMap(({ agent, status, volumes }) => {
+          // Match the sidebar: one ring per agent, using its least-free monitored volume.
+          const volume = volumes
+            .filter(({ monitored }) => monitored)
+            .sort((first, second) => first.freeBytes - second.freeBytes)[0];
+          return volume
+            ? [
+                {
+                  id: agent.id,
+                  agentName: agent.name,
+                  volumeId: volume.id,
+                  totalBytes: volume.totalBytes,
+                  freeBytes: volume.freeBytes,
+                  status,
+                },
+              ]
+            : [];
+        })
+        .slice(0, 4),
       actionCenter: {
+        totalCount: actions.totalCount,
         needsAttentionCount: actions.needsAttentionCount,
         activeCount: actions.activeCount,
         items: actions.items.map((item) => ({
@@ -352,6 +377,7 @@ export class IosStatusService {
         usageToday: snapshot.usageToday,
         activity: snapshot.activity,
         actionCenter: snapshot.actionCenter,
+        diskSpace: snapshot.diskSpace,
       });
       const activityHash = hash(work);
       // Wait for configured providers to report before treating an empty count as completion.

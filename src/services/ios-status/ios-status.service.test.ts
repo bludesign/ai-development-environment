@@ -4,6 +4,7 @@ import type { IosStatusSubscription } from "@/generated/prisma/client";
 import type { SystemStatusService } from "@/services/system-status";
 import type { ActionCenterService } from "@/services/action-center";
 import type { ApnsClient } from "@/services/push-notifications/apns-client";
+import type { DiskSpaceService } from "@/services/disk-space";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
@@ -127,6 +128,7 @@ function harness(records: Registration[] = [registration()]) {
     },
   }));
   const list = vi.fn(async () => ({
+    totalCount: 3,
     activeCount: 1,
     needsAttentionCount: 2,
     items: [
@@ -223,11 +225,16 @@ function harness(records: Registration[] = [registration()]) {
       value: { teamId: "TEAM123456", keyId: "KEY1234567" },
     }),
   } as unknown as CredentialService;
+  const diskSummary = { agents: [] } as Awaited<
+    ReturnType<DiskSpaceService["summary"]>
+  >;
+  const diskSpace = { summary: vi.fn(async () => diskSummary) };
   const service = new IosStatusService(
     { status } as unknown as SystemStatusService,
     { list } as unknown as ActionCenterService,
     credentials,
     { send, close: vi.fn() } as unknown as ApnsClient,
+    diskSpace,
   );
   services.push(service);
   return {
@@ -240,6 +247,8 @@ function harness(records: Registration[] = [registration()]) {
     settings,
     records,
     credentials,
+    diskSummary,
+    diskSpace,
   };
 }
 
@@ -395,6 +404,82 @@ describe("native status subscriptions", () => {
     });
     expect(snapshot.actionCenter.items[0]).not.toHaveProperty("error");
     expect(snapshot.activity.pullRequests).toBe(2);
+    expect(snapshot.actionCenter.totalCount).toBe(3);
+    expect(snapshot.diskSpace).toEqual([]);
+  });
+
+  test("includes at most four enabled agents using each sidebar representative monitored volume", async () => {
+    const { service, counts, diskSummary, diskSpace } = harness();
+    const report = (id: string, enabled = true) => ({
+      agent: { id, name: `Agent ${id}` },
+      enabled,
+      status: "IDLE" as const,
+      volumes: [
+        { id: "unmonitored", totalBytes: 1000, freeBytes: 1, monitored: false },
+        { id: "data", totalBytes: 1000, freeBytes: 200, monitored: true },
+        { id: "least-free", totalBytes: 1000, freeBytes: 50, monitored: true },
+      ].map((volume) => ({
+        ...volume,
+        capacityId: volume.id,
+        roles: ["DERIVED_DATA" as const],
+        paths: ["/private/build-cache"],
+        status: "PRESSURE" as const,
+        effectiveThresholdBytes: 100,
+      })),
+    });
+    diskSummary.agents.push(
+      report("disabled", false),
+      { ...report("missing"), volumes: [] },
+      ...["A", "B", "C", "D", "E"].map((id) => report(id)),
+    );
+    counts.actions = 99;
+    const snapshot = await service.snapshot();
+    expect(snapshot.diskSpace).toEqual(
+      ["A", "B", "C", "D"].map((id) => ({
+        id,
+        agentName: `Agent ${id}`,
+        volumeId: "least-free",
+        totalBytes: 1000,
+        freeBytes: 50,
+        status: "IDLE",
+      })),
+    );
+    expect(snapshot.actionCenter.totalCount).toBe(3);
+    expect(snapshot.actionCenter.totalCount).not.toBe(
+      snapshot.activity.actions,
+    );
+    expect(diskSpace.summary).toHaveBeenCalledOnce();
+    expect(JSON.stringify(snapshot.diskSpace)).not.toContain("/private");
+  });
+
+  test("disk-space changes invalidate widget pushes even when work and usage are unchanged", async () => {
+    const { service, send, diskSummary } = harness();
+    diskSummary.agents.push({
+      agent: { id: "studio", name: "Studio Mac" },
+      enabled: true,
+      status: "IDLE",
+      volumes: [
+        {
+          id: "data",
+          capacityId: "data",
+          totalBytes: 1000,
+          freeBytes: 500,
+          monitored: true,
+          roles: ["DERIVED_DATA"],
+          paths: [],
+          status: "IDLE",
+          effectiveThresholdBytes: 100,
+        },
+      ],
+    });
+    await service.flush();
+    expect(send).toHaveBeenCalledOnce();
+    await service.flush();
+    expect(send).toHaveBeenCalledOnce();
+    diskSummary.agents[0]!.volumes[0]!.freeBytes = 300;
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    await service.flush();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 
   test("keeps a queued workflow in the Live Activity until it finishes", async () => {
@@ -717,10 +802,11 @@ describe("native status subscriptions", () => {
   });
 
   test("requires no status reads or APNs connection without credentials", async () => {
-    const { service, credentials, status, send } = harness();
+    const { service, credentials, status, send, diskSpace } = harness();
     vi.mocked(credentials.getText).mockResolvedValue(null);
     await service.flush();
     expect(status).not.toHaveBeenCalled();
+    expect(diskSpace.summary).not.toHaveBeenCalled();
     expect(send).not.toHaveBeenCalled();
   });
 });

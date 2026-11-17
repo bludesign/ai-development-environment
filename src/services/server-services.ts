@@ -244,6 +244,8 @@ function createServerServices(): ServerServices {
     systemStatusService,
     actionCenterService,
     credentialService,
+    undefined,
+    diskSpaceService,
   );
   const appsService = new AppsService();
   const repositoryCloneService = new RepositoryCloneService(
