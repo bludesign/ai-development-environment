@@ -19,6 +19,14 @@ const listeners = new Set<{
   listener: () => void;
 }>();
 let disposeSubscription: (() => void) | null = null;
+/**
+ * The server answers a new subscription with ALL once it is listening, so that
+ * a read made before then cannot miss a change. Whatever was read while the
+ * subscription was being set up is moments old, so a prompt replay is not
+ * treated as a change. One that arrives late, after a slow connection, still
+ * is.
+ */
+const REGISTRATION_REPLAY_WINDOW_MS = 5_000;
 
 export function clearIntegrationConfigurationCache(provider?: string) {
   if (!provider) {
@@ -70,6 +78,8 @@ export function subscribeIntegrationConfiguration(
   };
   listeners.add(entry);
   if (!disposeSubscription) {
+    const subscribedAt = Date.now();
+    let replayPending = true;
     const invalidate = (changed?: string) => {
       clearIntegrationConfigurationCache(changed);
       for (const item of listeners)
@@ -86,6 +96,14 @@ export function subscribeIntegrationConfiguration(
       {
         next: (result) => {
           const changed = result.data?.integrationConfigurationChanged;
+          const promptReplay =
+            replayPending &&
+            changed === "ALL" &&
+            Date.now() - subscribedAt < REGISTRATION_REPLAY_WINDOW_MS;
+          replayPending = false;
+          // Every consumer read its configuration as it subscribed. Reading it
+          // all again here would repeat those reads on each page load.
+          if (promptReplay) return;
           invalidate(changed === "ALL" ? undefined : changed);
         },
         error: () => undefined,
@@ -93,8 +111,8 @@ export function subscribeIntegrationConfiguration(
       },
     );
     const recover = onControlPlaneRecovery((event) => {
-      // The subscription emits ALL after its initial registration, closing the
-      // HTTP/subscribe gap without an additional connection-ack read.
+      // The subscription emits ALL after its initial registration, which
+      // covers a first connection without an additional connection-ack read.
       if (!event?.initialConnection) invalidate();
     });
     disposeSubscription = () => {

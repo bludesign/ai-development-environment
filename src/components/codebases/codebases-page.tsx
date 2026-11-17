@@ -86,6 +86,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -98,6 +99,8 @@ import { BranchesTab } from "./branches-tab";
 
 const RECONCILE_INTERVAL_MS = 30_000;
 const OVERVIEW_EVENT_DEBOUNCE_MS = 100;
+/** This is where people watch their own operations, so stay close to live. */
+const OVERVIEW_EVENT_REFRESH_INTERVAL_MS = 1_000;
 const CODEBASE_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
   statusError defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
@@ -174,15 +177,18 @@ export function CodebasesPage() {
 
   useEffect(() => {
     let eventReload: number | null = null;
+    // Agents report every codebase on every scan. A burst costs one reread, a
+    // steady stream at most one a second, a hidden tab reads nothing, and the
+    // poll only covers a dropped event.
+    const live = createLiveRefresh(() => load(), {
+      minIntervalMs: OVERVIEW_EVENT_REFRESH_INTERVAL_MS,
+      pollMs: RECONCILE_INTERVAL_MS,
+    });
     const recovery = onControlPlaneRecovery(() => {
       ++settingsRevision.current;
-      void load();
+      live.invalidate();
     });
     const initial = window.setTimeout(() => void load(), 0);
-    const reconcile = window.setInterval(
-      () => void load(),
-      RECONCILE_INTERVAL_MS,
-    );
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       codebaseOverviewChanged: {
         repositoryId: string | null;
@@ -202,7 +208,7 @@ export function CodebasesPage() {
           if (eventReload !== null) window.clearTimeout(eventReload);
           eventReload = window.setTimeout(() => {
             eventReload = null;
-            void load();
+            live.invalidate();
           }, OVERVIEW_EVENT_DEBOUNCE_MS);
         },
         error: () => undefined,
@@ -211,8 +217,8 @@ export function CodebasesPage() {
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(reconcile);
       if (eventReload !== null) window.clearTimeout(eventReload);
+      live.dispose();
       latestLoad.current += 1;
       unsubscribe();
       recovery();

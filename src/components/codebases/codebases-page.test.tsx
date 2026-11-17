@@ -390,6 +390,32 @@ describe("CodebasesPage", () => {
     await waitFor(() => expect(overviewCalls()).toBe(before + 1));
   });
 
+  test("reads nothing for status events in a hidden tab and catches up when it is shown", async () => {
+    render(<CodebasesPage />);
+    await screen.findByText("Studio Mac");
+    const overviewCalls = () =>
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query CodebaseOverview"),
+      ).length;
+    const before = overviewCalls();
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    try {
+      act(() => subscriptionNext?.());
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(overviewCalls()).toBe(before);
+
+      visibility.mockReturnValue("visible");
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await waitFor(() => expect(overviewCalls()).toBe(before + 1));
+    } finally {
+      visibility.mockRestore();
+    }
+  });
+
   test("browses, inspects, and confirms a new codebase", async () => {
     const configuredAgent = {
       ...agent,

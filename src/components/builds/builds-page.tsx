@@ -62,6 +62,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { readCursorWindow } from "@/lib/read-cursor-window";
 import { dayKey, formatDateValue } from "@/lib/date-format";
@@ -95,6 +96,10 @@ import {
 import { RunBuildControls } from "./run-build-controls";
 import { useBuildTimeTicker } from "./use-build-time-ticker";
 
+/** The largest page the server returns. */
+const HISTORY_RECONCILE_PAGE_SIZE = 200;
+/** This is where people watch their own builds, so stay close to live. */
+const HISTORY_EVENT_REFRESH_INTERVAL_MS = 1_000;
 const SCRIPT_FIELDS = `
   id name iconKey repositories { id name } preBuildScript postBuildScript enabledByDefault timeoutSeconds failureBehavior lockScope createdAt updatedAt
 `;
@@ -173,6 +178,7 @@ export function BuildsPage({
   const [deleting, setDeleting] = useState(false);
 
   const loadedCount = useRef(0);
+  const listedBuildIds = useRef(new Set<string>());
   const pageRequest = useRef<AbortController | null>(null);
   const generation = useRef(0);
   const refreshing = useRef(false);
@@ -254,7 +260,8 @@ export function BuildsPage({
   }, [appId, configurationId, repositoryId]);
   useEffect(() => {
     loadedCount.current = builds.length;
-  }, [builds.length]);
+    listedBuildIds.current = new Set(builds.map(({ id }) => id));
+  }, [builds]);
   const readPage = useCallback(
     async (after: string | null, first: number, signal: AbortSignal) => {
       const data = await controlPlaneRequest<{
@@ -318,10 +325,12 @@ export function BuildsPage({
       pageRequest.current = null;
       setLoadingMore(false);
       try {
+        // Rereading a long history in the server's largest pages keeps a
+        // refresh to one request for most lists.
         const page = await readCursorWindow(
           (after, first) => readPage(after, first, signal),
           Math.max(50, loadedCount.current),
-          50,
+          HISTORY_RECONCILE_PAGE_SIZE,
           (item: BuildRecord) => item.id,
         );
         if (signal.aborted || version !== generation.current) return;
@@ -337,29 +346,45 @@ export function BuildsPage({
       }
     });
     historyOwner.current = owner;
+    // A running build reports every step. A burst costs one reread, and a
+    // hidden tab reads nothing until it is shown again.
+    const live = createLiveRefresh(() => owner.refresh(), {
+      minIntervalMs: HISTORY_EVENT_REFRESH_INTERVAL_MS,
+    });
+    const branchesLive = createLiveRefresh(
+      () => branchesOwner.current?.refresh(),
+      { minIntervalMs: HISTORY_EVENT_REFRESH_INTERVAL_MS },
+    );
     const timer = window.setTimeout(() => void owner.refresh(), 0);
-    const dispose = controlPlaneSubscriptions().subscribe(
+    const dispose = controlPlaneSubscriptions().subscribe<{
+      buildsChanged: { id: string } | null;
+    }>(
       {
         query: `subscription BuildsChanged($appId: ID) { buildsChanged(appId: $appId) { id } }`,
         variables: { appId: appId ?? null },
       },
       {
-        next: () => {
-          void owner.refresh();
-          void branchesOwner.current?.refresh();
+        next: (value) => {
+          live.invalidate();
+          // A build keeps its branch, so only one this list has not shown
+          // yet can add to the branch filter.
+          const id = value.data?.buildsChanged?.id;
+          if (!id || !listedBuildIds.current.has(id)) branchesLive.invalidate();
         },
         error: () => undefined,
         complete: () => undefined,
       },
     );
     const recover = onControlPlaneRecovery(() => {
-      void owner.refresh();
-      void branchesOwner.current?.refresh();
+      live.invalidate();
+      branchesLive.invalidate();
     });
     return () => {
       window.clearTimeout(timer);
       dispose();
       recover();
+      live.dispose();
+      branchesLive.dispose();
       owner.dispose();
       pageRequest.current?.abort();
       pageRequest.current = null;

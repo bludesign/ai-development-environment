@@ -52,6 +52,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 
 import {
   createRefreshCoalescer,
@@ -64,6 +65,7 @@ import { RepositoryPreparations } from "./repository-preparations";
 
 type BuildAgentState = Pick<Agent, "id" | "capabilities" | "connectionStatus">;
 
+const BUILD_AGENT_RECONCILE_INTERVAL_MS = 30_000;
 const REPOSITORY_FIELDS = `
   id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt
   preparations @include(if: $includePreparations) { id kind path contentSha256 byteCount contentBase64 definitionHash }
@@ -254,8 +256,11 @@ export function RepositoryDetailPage({
 
   useEffect(() => {
     if (tab !== "android-app") return;
-    // An expired heartbeat changes connection status without emitting an event.
-    const poll = window.setInterval(() => void load(), 30_000);
+    // An expired heartbeat changes connection status without emitting an
+    // event, so reconcile while someone is looking.
+    const reconcile = createLiveRefresh(() => load(), {
+      pollMs: BUILD_AGENT_RECONCILE_INTERVAL_MS,
+    });
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       agentChanged: BuildAgentState;
     }>(
@@ -274,7 +279,7 @@ export function RepositoryDetailPage({
       },
     );
     return () => {
-      window.clearInterval(poll);
+      reconcile.dispose();
       unsubscribe();
     };
   }, [load, repositoryId, tab]);

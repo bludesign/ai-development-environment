@@ -15,6 +15,7 @@ import {
   controlPlaneSubscriptions,
 } from "@/lib/control-plane-client";
 import { formatDateValue } from "@/lib/date-format";
+import { updateBrowserWebSocketStatus } from "@/lib/websocket-status";
 
 import { BuildDetailPage } from "./build-detail-page";
 
@@ -1025,42 +1026,88 @@ describe("BuildDetailPage", () => {
     expect(request.mock.calls).toHaveLength(requestCount);
   });
 
-  test("polls while a build or deployment is still active", async () => {
-    const interval = vi.spyOn(window, "setInterval");
+  test("reconciles an active build often only while the socket is down, and never while hidden", async () => {
+    let tick: (() => void) | undefined;
+    const nativeSetInterval = window.setInterval.bind(window);
+    const interval = vi.spyOn(window, "setInterval").mockImplementation(((
+      handler: () => void,
+      delay?: number,
+    ) => {
+      if (delay !== 2_000) return nativeSetInterval(handler, delay);
+      tick = handler;
+      return nativeSetInterval(() => undefined, 60_000);
+    }) as typeof window.setInterval);
+    const active = {
+      ...build,
+      deployments: [
+        {
+          id: "deployment-1",
+          batchId: "batch-1",
+          destination: build.destination,
+          status: "QUEUED",
+          commandSummary: "open Simulator and install",
+          outputRelativePath: null,
+          error: null,
+          createdAt: now,
+          startedAt: null,
+          finishedAt: null,
+        },
+      ],
+    };
     request.mockImplementation(async (query) => {
       if (String(query).includes("query BuildLogChunks")) {
         return { buildLogChunks: [] } as never;
       }
       if (String(query).includes("query BuildDetail")) {
-        return {
-          build: {
-            ...build,
-            deployments: [
-              {
-                id: "deployment-1",
-                batchId: "batch-1",
-                destination: build.destination,
-                status: "QUEUED",
-                commandSummary: "open Simulator and install",
-                outputRelativePath: null,
-                error: null,
-                createdAt: now,
-                startedAt: null,
-                finishedAt: null,
-              },
-            ],
-          },
-        } as never;
+        return { build: active } as never;
+      }
+      if (String(query).includes("query BuildReconcile")) {
+        return { build: active, buildLogChunks: [] } as never;
       }
       throw new Error(`Unexpected request: ${query}`);
     });
+    const reconciles = () =>
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("query BuildReconcile"),
+      ).length;
+    const started = Date.now();
+    /** Runs the timer as if this long had passed since the page opened. */
+    const tickAt = (elapsedMs: number) => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(started + elapsedMs);
+      try {
+        act(() => tick!());
+      } finally {
+        clock.mockRestore();
+      }
+    };
 
-    render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
-    expect(await screen.findByText("Development")).toBeDefined();
-    await waitFor(() =>
-      expect(interval).toHaveBeenCalledWith(expect.any(Function), 2_000),
-    );
-    interval.mockRestore();
+    try {
+      render(<BuildDetailPage buildId="build-1" publicOrigin={null} />);
+      expect(await screen.findByText("Development")).toBeDefined();
+      await waitFor(() => expect(tick).toBeDefined());
+
+      // With no socket the subscriptions deliver nothing, so read every tick.
+      tickAt(3_000);
+      await waitFor(() => expect(reconciles()).toBe(1));
+
+      // While the socket streams the build, this is only a slow safety net.
+      updateBrowserWebSocketStatus("CONNECTED");
+      tickAt(6_000);
+      tickAt(12_000);
+      expect(reconciles()).toBe(1);
+      tickAt(19_000);
+      await waitFor(() => expect(reconciles()).toBe(2));
+
+      const visibility = vi
+        .spyOn(document, "visibilityState", "get")
+        .mockReturnValue("hidden");
+      tickAt(60_000);
+      visibility.mockRestore();
+      expect(reconciles()).toBe(2);
+    } finally {
+      updateBrowserWebSocketStatus("DISCONNECTED");
+      interval.mockRestore();
+    }
   });
 
   test("streams logs, runs a captured app on multiple destinations, and exports an archive after configuration deletion", async () => {

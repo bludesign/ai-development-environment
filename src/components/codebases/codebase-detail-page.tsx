@@ -80,6 +80,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { createLiveRefresh } from "@/lib/live-refresh";
 import {
   createRefreshCoalescer,
   type RefreshCoalescer,
@@ -94,6 +95,8 @@ import type {
   CodebaseStashDiff,
 } from "./types";
 
+const DETAIL_EVENT_REFRESH_INTERVAL_MS = 1_000;
+const DETAIL_RECONCILE_INTERVAL_MS = 30_000;
 const CODEBASE_DETAIL_FIELDS = `
   id folder observedOrigin branch headSha upstream ahead behind syncState availability
   statusError defaultBranch localBranches remoteBranches lastCheckedAt lastFetchedAt lastFetchAttemptAt lastFetchError
@@ -284,7 +287,14 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
     ownerRef.current = owner;
     const recovery = onControlPlaneRecovery(() => void load());
     const initial = window.setTimeout(() => void load(), 0);
-    const refresh = window.setInterval(() => void load(false), 30_000);
+    // Agents report this codebase on every scan. A burst costs one reread and
+    // a hidden tab reads nothing; the poll only covers a dropped event.
+    const live = createLiveRefresh(() => load("changed"), {
+      minIntervalMs: DETAIL_EVENT_REFRESH_INTERVAL_MS,
+    });
+    const reconcile = createLiveRefresh(() => load(false), {
+      pollMs: DETAIL_RECONCILE_INTERVAL_MS,
+    });
     const unsubscribe = controlPlaneSubscriptions().subscribe<{
       codebaseOverviewChanged: {
         codebaseId: string | null;
@@ -304,7 +314,7 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
             changed.codebaseId === null ||
             changed.codebaseId === codebaseId
           ) {
-            void load("changed");
+            live.invalidate();
           }
         },
         error: () => undefined,
@@ -313,7 +323,8 @@ export function CodebaseDetailPage({ codebaseId }: { codebaseId: string }) {
     );
     return () => {
       window.clearTimeout(initial);
-      window.clearInterval(refresh);
+      live.dispose();
+      reconcile.dispose();
       unsubscribe();
       recovery();
       owner.dispose();

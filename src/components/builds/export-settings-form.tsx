@@ -261,26 +261,27 @@ export function ExportSettingsForm({
       ),
     );
     const reconcile = async () => {
-      await Promise.all(
-        ids.map(async (id) => {
-          try {
-            const data = await controlPlaneRequest<{
-              agentJob: RefreshJob | null;
-            }>(
-              `query ExportSigningInventoryJob($id: ID!) {
-                agentJob(id: $id) { id agentId status error }
+      // One read for every job, however many agents are refreshing.
+      try {
+        for (let offset = 0; offset < ids.length; offset += 200) {
+          const data = await controlPlaneRequest<{
+            agentJobsByIds: RefreshJob[];
+          }>(
+            `query ExportSigningInventoryJobs($ids: [ID!]!) {
+                agentJobsByIds(ids: $ids) { id agentId status error }
               }`,
-              { id },
-            );
-            if (data.agentJob) applyRefreshJob(data.agentJob);
-          } catch {
-            // The subscription remains the primary progress channel.
-          }
-        }),
-      );
+            { ids: ids.slice(offset, offset + 200) },
+          );
+          data.agentJobsByIds.forEach(applyRefreshJob);
+        }
+      } catch {
+        // The subscription remains the primary progress channel.
+      }
     };
     void reconcile();
-    const timer = window.setInterval(() => void reconcile(), 2_000);
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== "hidden") void reconcile();
+    }, 2_000);
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
       window.clearInterval(timer);

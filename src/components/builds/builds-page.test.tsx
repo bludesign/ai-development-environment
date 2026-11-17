@@ -415,6 +415,48 @@ describe("BuildsPage", () => {
     );
   });
 
+  test("rereads the branch filter only for a build the history has not shown, and nothing while hidden", async () => {
+    let emit!: (id: string) => void;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn((operation: { query: string }, sink) => {
+        if (operation.query.includes("subscription BuildsChanged"))
+          emit = (id) =>
+            sink.next({ data: { buildsChanged: { id } } } as never);
+        return vi.fn();
+      }),
+    } as never);
+    const reads = (operation: string) =>
+      request.mock.calls.filter(([query]) => String(query).includes(operation))
+        .length;
+    render(<BuildsPage />);
+    expect(await screen.findByText("Example App")).toBeDefined();
+    await waitFor(() => expect(reads("query BuildHistoryBranches")).toBe(1));
+    const historyReads = reads("query BuildsPage");
+
+    // A step of a listed build changes its row, not the branches on offer.
+    await act(async () => emit("build-1"));
+    await waitFor(() =>
+      expect(reads("query BuildsPage")).toBe(historyReads + 1),
+    );
+    expect(reads("query BuildHistoryBranches")).toBe(1);
+
+    // A build the list has not shown may be on a branch it has not offered.
+    await act(async () => emit("build-new"));
+    await waitFor(() => expect(reads("query BuildHistoryBranches")).toBe(2));
+
+    const visibility = vi
+      .spyOn(document, "visibilityState", "get")
+      .mockReturnValue("hidden");
+    const branchReads = reads("query BuildHistoryBranches");
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const settled = reads("query BuildsPage");
+    await act(async () => emit("build-newer"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads("query BuildsPage")).toBe(settled);
+    expect(reads("query BuildHistoryBranches")).toBe(branchReads);
+    visibility.mockRestore();
+  });
+
   test("selects a complete day for deletion and shows hook context templates", async () => {
     render(<BuildsPage />);
 

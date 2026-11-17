@@ -77,6 +77,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import { cn } from "@/lib/utils";
 import {
   worktreeHighlightAccentClasses,
@@ -379,8 +380,8 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
     const recover = () => {
       if (document.visibilityState !== "hidden") void owner.refresh();
     };
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     const timer = window.setTimeout(() => void owner.refresh(), 0);
     return () => {
       window.clearTimeout(timer);
@@ -388,8 +389,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
       owner.dispose();
       olderRequest.current?.abort();
       olderRequest.current = null;
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
+      offVisible();
       if (ownerRef.current === owner) ownerRef.current = null;
     };
   }, [mergeEvents, notFoundMessage, runId]);

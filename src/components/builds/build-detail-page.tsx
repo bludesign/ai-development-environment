@@ -64,6 +64,8 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
+import { getBrowserWebSocketSnapshot } from "@/lib/websocket-status";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { buildLogRanges } from "@/lib/build-log-ranges";
 import type { PublicOrigin } from "@/lib/public-origin";
@@ -91,6 +93,8 @@ import {
   type BuildReport,
 } from "./types";
 
+const OFFLINE_RECONCILE_INTERVAL_MS = 2_000;
+const STREAMING_RECONCILE_INTERVAL_MS = 15_000;
 const BUILD_DETAIL_FIELDS = `
   id requestId jobId status action platform destinationType destination snapshot commandSummary artifactDirectory errorCode error warnings outOfDate blockedReason
   createdAt startedAt finishedAt durationMs updatedAt
@@ -409,17 +413,13 @@ export function BuildDetailPage({
         );
     };
     const offRecovery = onControlPlaneRecovery(recover);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") recover();
-    };
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", onVisible);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     return () => {
       offRecovery();
       updates.dispose();
       reconcileOwner.current = null;
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", onVisible);
+      offVisible();
     };
   }, [reconcile]);
 
@@ -529,13 +529,25 @@ export function BuildDetailPage({
       ));
   useEffect(() => {
     if (!activeOperation) return;
+    // The snapshot and log subscriptions already stream an active build. This
+    // read only covers what they cannot deliver: an event lost while the
+    // socket was down, or a queue that moved because of another build. It is
+    // frequent only while the socket is down, and a hidden tab skips it.
+    let lastReconcileAt = Date.now();
     const timer = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      const interval =
+        getBrowserWebSocketSnapshot().status === "CONNECTED"
+          ? STREAMING_RECONCILE_INTERVAL_MS
+          : OFFLINE_RECONCILE_INTERVAL_MS;
+      if (Date.now() - lastReconcileAt < interval) return;
+      lastReconcileAt = Date.now();
       void reconcileOwner.current
         ?.refresh()
         .catch((value) =>
           setError(value instanceof Error ? value.message : String(value)),
         );
-    }, 2_000);
+    }, OFFLINE_RECONCILE_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [activeOperation]);
 

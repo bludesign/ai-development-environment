@@ -50,6 +50,7 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
+import { onPageVisible } from "@/lib/live-refresh";
 import { createRefreshCoalescer } from "@/lib/refresh-coalescer";
 import { formatDateValue } from "@/lib/date-format";
 
@@ -367,8 +368,8 @@ export function UsagePage() {
       if (document.visibilityState !== "hidden") void owner.refresh();
     };
     const recovery = onControlPlaneRecovery(recover);
-    window.addEventListener("focus", recover);
-    document.addEventListener("visibilitychange", recover);
+    // Returning to a tab fires both focus and visibilitychange; read once.
+    const offVisible = onPageVisible(recover);
     if (!completed) {
       reconcileTimer = window.setInterval(
         () => void owner.refresh(),
@@ -382,8 +383,7 @@ export function UsagePage() {
       owner.dispose();
       if (applyCollectionRef.current === applyCollection)
         applyCollectionRef.current = null;
-      window.removeEventListener("focus", recover);
-      document.removeEventListener("visibilitychange", recover);
+      offVisible();
       if (reconcileTimer !== undefined) window.clearInterval(reconcileTimer);
     };
   }, [
