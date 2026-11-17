@@ -35,6 +35,7 @@ import { SigningAssetsService } from "@/services/signing-assets";
 import { PushNotificationsService } from "@/services/push-notifications";
 import { CredentialService } from "@/services/credentials";
 import { NotificationsService } from "@/services/notifications";
+import { IosStatusService } from "@/services/ios-status/ios-status.service";
 import { PollingService } from "@/services/polling";
 import { ModelCostsService } from "@/services/model-costs";
 import { RunsService } from "@/services/runs";
@@ -85,6 +86,7 @@ export type ServerServices = {
   signingAssetsService: SigningAssetsService;
   pushNotificationsService: PushNotificationsService;
   notificationsService: NotificationsService;
+  iosStatusService: IosStatusService;
   pollingService: PollingService;
   modelCostsService: ModelCostsService;
   runsService: RunsService;
@@ -238,6 +240,11 @@ function createServerServices(): ServerServices {
     ),
   );
   const actionCenterService = new ActionCenterService(actionCenterRequests);
+  const iosStatusService = new IosStatusService(
+    systemStatusService,
+    actionCenterService,
+    credentialService,
+  );
   const appsService = new AppsService();
   const repositoryCloneService = new RepositoryCloneService(
     agentControlService,
@@ -385,6 +392,7 @@ function createServerServices(): ServerServices {
   );
   worktreeMergeService.startRuntime();
   systemStatusService.startRuntime();
+  iosStatusService.startRuntime();
   actionCenterRequests.start();
   return {
     prismaService,
@@ -413,6 +421,7 @@ function createServerServices(): ServerServices {
     signingAssetsService,
     pushNotificationsService,
     notificationsService,
+    iosStatusService,
     pollingService,
     modelCostsService,
     runsService,

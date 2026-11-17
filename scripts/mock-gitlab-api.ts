@@ -57,6 +57,32 @@ export function mockGitLabApi(path: string, search: URLSearchParams) {
     const sha = decodeURIComponent(commitRequests[1]!);
     return paged(data.mergeRequests.filter((request) => request.sha === sha));
   }
+  const commitStatuses = path.match(
+    new RegExp(`^${project}/repository/commits/([^/]+)/statuses$`),
+  );
+  if (commitStatuses) {
+    const sha = decodeURIComponent(commitStatuses[1]!);
+    return paged(
+      data.pipelines
+        .filter(
+          (pipeline) =>
+            pipeline.sha === sha &&
+            (!search.get("pipeline_id") ||
+              String(pipeline.id) === search.get("pipeline_id")),
+        )
+        .map((pipeline) => ({
+          id: pipeline.id * 100,
+          pipeline_id: pipeline.id,
+          name: "ci/external-tests",
+          status: pipeline.status,
+          ref: pipeline.ref,
+          target_url: "https://ci.example.com/runs/123",
+          author: data.user,
+          created_at: pipeline.created_at,
+          finished_at: pipeline.finished_at,
+        })),
+    );
+  }
   const mrMatch = path.match(
     new RegExp(
       `^${project}/merge_requests/(\\d+)(?:/(approvals|commits|discussions|pipelines))?$`,

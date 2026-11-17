@@ -17,6 +17,7 @@ datasource db {
 }
 
 model User {
+  iosStatusSubscriptions IosStatusSubscription[]
   mcpAuthorizations McpAuthorization[]
 
   oauthClient_userId       OauthClient[]       @relation("OauthClient_userId")
@@ -43,6 +44,7 @@ model User {
 }
 
 model Session {
+  iosStatusSubscriptions IosStatusSubscription[]
   oauthRefreshToken_sessionId OauthRefreshToken[] @relation("OauthRefreshToken_sessionId")
   oauthAccessToken_sessionId  OauthAccessToken[]  @relation("OauthAccessToken_sessionId")
 
@@ -1397,6 +1399,34 @@ model NotificationDevice {
   updatedAt            DateTime  @updatedAt
 
   @@index([status, lastRegisteredAt])
+}
+
+// WidgetKit refresh tokens and ActivityKit update tokens for the control plane's iOS app.
+// Session ownership stops delivery automatically when the session expires or is revoked.
+model IosStatusSubscription {
+  id                   String    @id
+  userId               String
+  sessionId            String
+  clientRegistrationId String
+  kind                 String
+  token                String
+  topic                String
+  environment          String
+  status               String    @default("ACTIVE")
+  lastPayloadHash      String?
+  lastAttemptAt        DateTime?
+  lastDeliveredAt      DateTime?
+  lastFailureReason    String?
+  lastRegisteredAt     DateTime  @default(now())
+  expiresAt            DateTime
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  session              Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientRegistrationId])
+  @@index([status, expiresAt])
+  @@index([sessionId])
 }
 
 model WebPushSettings {

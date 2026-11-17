@@ -220,6 +220,16 @@ export async function stubReviewerCapture(
           },
         },
       });
+    } else if (query.includes("query WorktreeEnrichment")) {
+      // These captures supply reviewer access below. Optional provider refreshes must not
+      // overwrite it with the mock repository's deliberately unconfigured reviewer pools.
+      await route.fulfill({
+        json: {
+          data: {
+            worktreeEnrichment: { updates: [], warnings: [], durationMs: 10 },
+          },
+        },
+      });
     } else if (query.includes("query WorktreeDetailOverview")) {
       const response = await route.fetch();
       const result = await response.json();

@@ -94,6 +94,29 @@ describe("screenshot provider API fixtures", () => {
     ).toEqual([]);
   });
 
+  test("answers historical and current external statuses used by pipeline capabilities", () => {
+    const pipeline = gitlabMockData.pipelines[0]!;
+    const path = `/projects/${ids.gitlab.projectId}/repository/commits/${pipeline.sha}/statuses`;
+    for (const all of ["true", "false"]) {
+      const result = mockGitLabApi(
+        path,
+        new URLSearchParams({ all, pipeline_id: String(pipeline.id) }),
+      );
+      expect(result.status).toBe(200);
+      expect(result.payload).toMatchObject([
+        {
+          id: pipeline.id * 100,
+          pipeline_id: pipeline.id,
+          name: "ci/external-tests",
+          status: pipeline.status,
+        },
+      ]);
+    }
+    expect(
+      mockGitLabApi(path, new URLSearchParams("pipeline_id=unknown")).payload,
+    ).toEqual([]);
+  });
+
   test("redirects only the fixture GitLab API while preserving request credentials and options", async () => {
     const fetch = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
