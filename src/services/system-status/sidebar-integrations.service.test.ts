@@ -135,6 +135,7 @@ describe("sidebar integration request counts", () => {
       mergeRequests: 4,
       actions: null,
       pipelines: null,
+      activeRunsKnown: false,
     });
     // Reading status never scans providers.
     await service.counts();
@@ -176,6 +177,7 @@ describe("sidebar integration request counts", () => {
       actions: null,
       mergeRequests: 0,
       pipelines: null,
+      activeRunsKnown: false,
     });
   });
 
@@ -189,6 +191,7 @@ describe("sidebar integration request counts", () => {
       actions: null,
       mergeRequests: null,
       pipelines: null,
+      activeRunsKnown: true,
     });
     expect(github.getSettings).not.toHaveBeenCalled();
     expect(gitlab.getSettings).not.toHaveBeenCalled();
@@ -300,6 +303,7 @@ describe("sidebar CI refresh lifecycle", () => {
       actions: null,
       mergeRequests: null,
       pipelines: null,
+      activeRunsKnown: true,
     });
   });
 
@@ -317,6 +321,34 @@ describe("sidebar CI refresh lifecycle", () => {
       "Sidebar integration refresh failed:",
       expect.stringContaining("rate limited"),
     );
+  });
+
+  test("distinguishes a cold configured provider from a confirmed zero and a disconnected provider", async () => {
+    const { service, github, gitlab } = current;
+    let finish!: (count: number) => void;
+    github.activeActionsCount.mockReturnValueOnce(
+      new Promise<number>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    gitlab.getSettings.mockResolvedValue({ configured: false });
+    service.start();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(await service.counts()).toMatchObject({
+      actions: null,
+      pipelines: null,
+      activeRunsKnown: false,
+    });
+
+    finish(0);
+    await service.refresh();
+    expect(await service.counts()).toMatchObject({
+      actions: 0,
+      pipelines: null,
+      activeRunsKnown: true,
+    });
+    expect(gitlab.activePipelinesCount).not.toHaveBeenCalled();
   });
 
   test("pipeline observations never scan CI and request invalidations only publish local counts", async () => {
@@ -439,9 +471,15 @@ describe("sidebar CI refresh lifecycle", () => {
     await vi.advanceTimersByTimeAsync(0);
     finish(99);
     await service.refresh();
-    expect((await service.counts()).actions).toBeNull();
+    expect(await service.counts()).toMatchObject({
+      actions: null,
+      activeRunsKnown: false,
+    });
     await vi.advanceTimersByTimeAsync(30_000);
-    expect((await service.counts()).actions).toBe(4);
+    expect(await service.counts()).toMatchObject({
+      actions: 4,
+      activeRunsKnown: true,
+    });
     github.getSettings.mockResolvedValue({
       tokenConfigured: false,
       updatedAt: "github-3",

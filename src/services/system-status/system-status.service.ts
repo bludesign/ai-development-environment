@@ -18,6 +18,7 @@ import {
   aggregateUsage,
 } from "@/components/usage/aggregate-usage";
 import { getPrismaClient } from "@/data/prisma-client";
+import type { PrismaClient } from "@/generated/prisma/client";
 import {
   agentEventBus,
   SIDEBAR_STATUS_CHANGED_TOPIC,
@@ -268,7 +269,56 @@ export class SystemStatusService {
     await prisma.ccusageCollection.deleteMany({ where: { id: { in: ids } } });
   }
 
-  async status(includeDiskSpace = true) {
+  private async unfinishedLocalWork(prisma: PrismaClient) {
+    const [agentRuns, builds, workflows, commands] = await Promise.all([
+      prisma.agentRun.groupBy({
+        by: ["kind"],
+        where: {
+          kind: { in: ["PLAN", "SESSION"] },
+          archivedAt: null,
+          status: { in: ["QUEUED", "IN_PROGRESS", "PAUSED"] },
+        },
+        _count: { _all: true },
+      }),
+      prisma.build.count({
+        where: { status: { in: ["QUEUED", "PREPARING", "RUNNING"] } },
+      }),
+      prisma.workflowRun.count({
+        where: {
+          archivedAt: null,
+          status: {
+            in: [
+              "QUEUED",
+              "RUNNING",
+              "PAUSING",
+              "PAUSED",
+              "WAITING",
+              "BLOCKED",
+            ],
+          },
+        },
+      }),
+      prisma.commandRun.count({
+        where: {
+          archivedAt: null,
+          status: { in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"] },
+        },
+      }),
+    ]);
+    return {
+      plans: agentRuns.find(({ kind }) => kind === "PLAN")?._count._all ?? 0,
+      sessions:
+        agentRuns.find(({ kind }) => kind === "SESSION")?._count._all ?? 0,
+      builds,
+      workflows,
+      commands,
+    };
+  }
+
+  async status(
+    includeDiskSpace = true,
+    { includeUnfinishedWork = false }: { includeUnfinishedWork?: boolean } = {},
+  ) {
     const prisma = await getPrismaClient();
     const settings = await actionCenterSettings();
     const period = localDay();
@@ -280,8 +330,9 @@ export class SystemStatusService {
       workflows,
       commands,
       diskSpace,
-      integrations,
+      { activeRunsKnown, ...integrations },
       worktrees,
+      unfinishedLocalWork,
     ] = await Promise.all([
       prisma.sidebarUsageSummary.findUnique({ where: { id: "default" } }),
       prisma.agentRun.count({
@@ -341,6 +392,7 @@ export class SystemStatusService {
             GROUP BY w.branch, c.defaultBranch, r.defaultBranchPatternsJson
           `
         : Promise.resolve(null),
+      includeUnfinishedWork ? this.unfinishedLocalWork(prisma) : undefined,
     ]);
     const worktreeCounts = worktrees?.reduce(
       (counts, group) => ({
@@ -393,6 +445,14 @@ export class SystemStatusService {
       },
       settings,
       diskSpace,
+      ...(unfinishedLocalWork && {
+        unfinishedWork: {
+          ...unfinishedLocalWork,
+          actions: integrations.actions,
+          pipelines: integrations.pipelines,
+          integrationsKnown: activeRunsKnown,
+        },
+      }),
     };
   }
 

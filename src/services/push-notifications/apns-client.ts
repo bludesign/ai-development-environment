@@ -64,12 +64,29 @@ async function pause(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function signProviderJwt(
+  authentication: Extract<ApnsAuthentication, { kind: "TOKEN" }>,
+): Promise<string> {
+  let key: Awaited<ReturnType<typeof importPKCS8>>;
+  try {
+    key = await importPKCS8(authentication.privateKey, "ES256");
+  } catch {
+    throw new Error("The APNs .p8 key must be an ES256 PKCS#8 private key");
+  }
+  return new SignJWT({})
+    .setProtectedHeader({ alg: "ES256", kid: authentication.keyId })
+    .setIssuer(authentication.teamId)
+    .setIssuedAt()
+    .sign(key);
+}
+
 export class ApnsClient {
   private readonly sessions = new Map<string, ClientHttp2Session>();
   private readonly jwtCache = new Map<
     string,
     { token: string; createdAt: number }
   >();
+  private readonly pendingJwt = new Map<string, Promise<string>>();
 
   constructor(private readonly sessionFactory: SessionFactory = connect) {}
 
@@ -118,19 +135,20 @@ export class ApnsClient {
     if (cached && Date.now() - cached.createdAt < JWT_REUSE_MS) {
       return `bearer ${cached.token}`;
     }
-    let key: Awaited<ReturnType<typeof importPKCS8>>;
+
+    // APNs limits provider-token rotations on a connection, including concurrent sends.
+    const pending = this.pendingJwt.get(cacheKey);
+    if (pending) return `bearer ${await pending}`;
+
+    const signing = signProviderJwt(authentication);
+    this.pendingJwt.set(cacheKey, signing);
     try {
-      key = await importPKCS8(authentication.privateKey, "ES256");
-    } catch {
-      throw new Error("The APNs .p8 key must be an ES256 PKCS#8 private key");
+      const token = await signing;
+      this.jwtCache.set(cacheKey, { token, createdAt: Date.now() });
+      return `bearer ${token}`;
+    } finally {
+      this.pendingJwt.delete(cacheKey);
     }
-    const token = await new SignJWT({})
-      .setProtectedHeader({ alg: "ES256", kid: authentication.keyId })
-      .setIssuer(authentication.teamId)
-      .setIssuedAt()
-      .sign(key);
-    this.jwtCache.set(cacheKey, { token, createdAt: Date.now() });
-    return `bearer ${token}`;
   }
 
   private async requestOnce(input: {
