@@ -1539,6 +1539,12 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
   CUSTOM_COMMAND: {
     fields: [
       multiline("script", "Script", { required: true }),
+      num("port", "Local port", {
+        minimum: 1,
+        maximum: 65_535,
+        integer: true,
+        help: "Optional port used by this command on the target agent.",
+      }),
       enumField(
         "completionMode",
         "Completion",

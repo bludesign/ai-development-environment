@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -47,15 +53,19 @@ const serve = {
  * Routes each call by the operation in its query so a test can describe the
  * eligible commands and the runs those commands currently have.
  */
-function respondWith(runs: Array<Record<string, unknown>>) {
+function respondWith(
+  runs: Array<Record<string, unknown>>,
+  command: Record<string, unknown> = serve,
+  kind = "AGENT",
+) {
   request.mockImplementation((query: string) => {
     if (query.includes("commandTargetSummaries(")) {
       return Promise.resolve({
         commandTargetSummaries: [
           {
-            resourceKind: "AGENT",
-            resourceId: "agent-1",
-            commands: [serve],
+            resourceKind: kind,
+            resourceId: kind === "AGENT" ? "agent-1" : "worktree-1",
+            commands: [command],
             activeRuns: runs,
             recentRuns: [],
           },
@@ -66,9 +76,9 @@ function respondWith(runs: Array<Record<string, unknown>>) {
   });
 }
 
-const openRunMenu = async () => {
+const openRunMenu = async (name = "Manage running Serve") => {
   const trigger = await screen.findByRole("button", {
-    name: "Manage running Serve",
+    name,
   });
   fireEvent.pointerDown(
     trigger,
@@ -172,8 +182,107 @@ describe("CommandQuickActions", () => {
     const query = request.mock.calls.find(([operation]) =>
       operation.includes("commandTargetSummaries("),
     )?.[0];
-    expect(query).toContain("activeRuns { id commandId displayNumber status }");
+    expect(query).toContain(
+      "activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { kind url } }",
+    );
     expect(query).not.toMatch(/\bscript\b|\bsnapshot\b|first: 50/);
+  });
+
+  test("opens a worktree command's Tailscale address before its first run", async () => {
+    const url = "https://studio.acme-tailnet.ts.net/dashboard";
+    respondWith(
+      [],
+      { ...serve, port: 3000, tailscaleAddresses: [{ kind: "DNS", url }] },
+      "WORKTREE",
+    );
+    render(
+      <CommandQuickActions
+        agentCapabilities={["command.run"]}
+        worktreeId="worktree-1"
+      />,
+    );
+    await openRunMenu("Open Tailscale addresses for Serve");
+    const address = screen.getByRole("menuitem", { name: `DNS · ${url}` });
+    expect(address.getAttribute("href")).toBe(url);
+    expect(address.getAttribute("target")).toBe("_blank");
+  });
+
+  test("asks for consent again when another run takes the same port", async () => {
+    respondWith([], { ...serve, port: 3000 });
+    const original = request.getMockImplementation()!;
+    const start = vi.fn();
+    const run = {
+      id: "blocker",
+      displayNumber: 8,
+      name: "Dev site",
+      status: "RUNNING",
+    };
+    const conflict = (runs: (typeof run)[]) =>
+      Object.assign(new Error("Port conflict"), {
+        code: "COMMAND_PORT_CONFLICT",
+        extensions: {
+          portConflict: {
+            agentId: "agent-1",
+            agentName: "Studio",
+            port: 3000,
+            runs,
+          },
+        },
+      });
+    start.mockRejectedValueOnce(conflict([run]));
+    start.mockRejectedValueOnce(
+      conflict([run, { ...run, id: "new-blocker", displayNumber: 9 }]),
+    );
+    start.mockResolvedValueOnce({ startCommandRun: { id: "successor" } });
+    request.mockImplementation((query, variables, options) =>
+      query.includes("startCommandRun")
+        ? start(variables?.input)
+        : original(query, variables, options),
+    );
+
+    render(
+      <CommandQuickActions
+        agentCapabilities={["command.run"]}
+        agentId="agent-1"
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Serve" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Port 3000 is in use",
+    });
+    expect(
+      within(dialog)
+        .getByRole("link", { name: "#8 Dev site" })
+        .getAttribute("href"),
+    ).toBe("/dashboard/commands/runs/blocker");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
+    await within(dialog).findByRole("link", { name: "#9 Dev site" });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Terminate and run" }),
+    );
+    await vi.waitFor(() =>
+      expect(screen.queryByRole("alertdialog")).toBeNull(),
+    );
+    const initial = start.mock.calls[0][0];
+    expect(initial.idempotencyKey).toEqual(expect.any(String));
+    expect(start.mock.calls[1][0]).toEqual({
+      ...initial,
+      portConflictResolution: {
+        action: "CONTINUE",
+        agentId: "agent-1",
+        port: 3000,
+        runIds: ["blocker"],
+      },
+    });
+    expect(start.mock.calls[2][0]).toEqual({
+      ...initial,
+      portConflictResolution: {
+        action: "TERMINATE_AND_RUN",
+        agentId: "agent-1",
+        port: 3000,
+        runIds: ["blocker", "new-blocker"],
+      },
+    });
   });
 
   test("terminates the run the menu was opened for", async () => {

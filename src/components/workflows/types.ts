@@ -1,3 +1,5 @@
+import type { CommandPortConflict } from "@/components/commands/command-port-conflict";
+
 export type WorkflowPosition = { x: number; y: number };
 
 /**
@@ -200,6 +202,7 @@ export type WorkflowWait = {
   id: string;
   attemptId: string;
   kind: string;
+  commandPortConflict?: CommandPortConflict | null;
   status: string;
   predicate: Record<string, unknown> | null;
   externalKey: string | null;

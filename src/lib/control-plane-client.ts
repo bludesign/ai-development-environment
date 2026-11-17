@@ -11,7 +11,7 @@ import { updateBrowserWebSocketStatus } from "./websocket-status";
 
 type GraphQLResponse<T> = {
   data?: T;
-  errors?: Array<{ message: string; extensions?: { code?: string } }>;
+  errors?: Array<{ message: string; extensions?: Record<string, unknown> }>;
 };
 
 const MAX_CONCURRENT_REQUESTS = 6;
@@ -139,11 +139,15 @@ async function executeRequest<T>(
       const error = new Error(
         !body && raw ? `${detail}: ${raw.slice(0, 500)}` : detail,
       );
-      const code =
-        body?.errors?.length === 1
-          ? body.errors[0]?.extensions?.code
-          : undefined;
-      throw typeof code === "string" ? Object.assign(error, { code }) : error;
+      const extensions =
+        body?.errors?.length === 1 ? body.errors[0]?.extensions : undefined;
+      const code = extensions?.code;
+      throw extensions
+        ? Object.assign(error, {
+            extensions,
+            ...(typeof code === "string" ? { code } : {}),
+          })
+        : error;
     }
     return body.data;
   } catch (error) {

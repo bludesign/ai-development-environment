@@ -8,6 +8,7 @@ import {
 } from "@ai-development-environment/agent-contract/commands";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { Prisma } from "@/generated/prisma/client";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
@@ -105,6 +106,7 @@ export type CommandDefinitionInput = {
   name: string;
   description?: string | null;
   script: string;
+  port?: number | null;
   targetKind: string;
   targetAgentId?: string | null;
   targetRepositoryIds?: string[] | null;
@@ -127,16 +129,65 @@ export type StartCommandRunInput = {
   origin?: string | null;
   idempotencyKey?: string | null;
   blocksGitOperations?: boolean | null;
+  portConflictResolution?: CommandPortConflictResolutionInput | null;
 };
 
 export type StartCustomCommandRunInput = {
   script: string;
+  port?: number | null;
   agentId?: string | null;
   worktreeId?: string | null;
   origin?: string | null;
   idempotencyKey?: string | null;
   blocksGitOperations?: boolean | null;
+  portConflictResolution?: CommandPortConflictResolutionInput | null;
 };
+
+export type CommandPortConflictResolutionInput = {
+  action: "CONTINUE" | "TERMINATE_AND_RUN";
+  agentId: string;
+  port: number;
+  runIds: string[];
+};
+
+export type CommandPortConflictResolution = CommandPortConflictResolutionInput;
+
+export type CommandPortConflict = {
+  agentId: string;
+  agentName: string;
+  port: number;
+  runs: Array<{
+    id: string;
+    displayNumber: number;
+    name: string;
+    status: string;
+  }>;
+};
+
+export class CommandPortConflictError extends Error {
+  constructor(readonly conflict: CommandPortConflict) {
+    const runs = conflict.runs
+      .map(({ displayNumber, name }) => `#${displayNumber} ${name}`)
+      .join(", ");
+    super(
+      `Port ${conflict.port} on ${conflict.agentName} is in use by ${runs}`,
+    );
+    this.name = "CommandPortConflictError";
+  }
+}
+
+function commandPort(port: unknown): number | null {
+  if (port === null || port === undefined) return null;
+  if (
+    typeof port !== "number" ||
+    !Number.isInteger(port) ||
+    port < 1 ||
+    port > 65_535
+  ) {
+    throw new Error("Port must be an integer from 1 to 65535");
+  }
+  return port;
+}
 
 type RunResult = {
   exitCode?: number | null;
@@ -244,6 +295,7 @@ export type CommandRunQueueReason =
   | "WAITING_FOR_AGENT"
   | "AGENT_OFFLINE"
   | "WAITING_FOR_PREDECESSOR"
+  | "WAITING_FOR_PORT"
   | "RESTART_DELAY"
   | "TARGET_BUSY"
   | "QUEUED_BEHIND"
@@ -283,6 +335,7 @@ const byQueueOrder = (left: CommandQueueMember, right: CommandQueueMember) =>
 export function evaluateCommandRunQueue(input: {
   candidate: CommandQueueMember & { stopRequested: boolean };
   peers: CommandQueueMember[];
+  portBlockers?: CommandQueueMember[];
   agentOnline: boolean;
   predecessorPending: boolean;
   restartPending: boolean;
@@ -309,6 +362,7 @@ export function evaluateCommandRunQueue(input: {
     (candidate.concurrency === "EXCLUSIVE" || peer.concurrency === "EXCLUSIVE");
   const blockingHolders = heldByPeers.filter(blocks);
   const blockingAhead = ahead.filter(blocks);
+  const portBlockers = input.portBlockers ?? [];
   const reason = ((): CommandRunQueueReason => {
     if (
       candidate.stopRequested ||
@@ -319,22 +373,32 @@ export function evaluateCommandRunQueue(input: {
     if (candidate.holdingTarget)
       return input.agentOnline ? "WAITING_FOR_AGENT" : "AGENT_OFFLINE";
     if (input.predecessorPending) return "WAITING_FOR_PREDECESSOR";
+    if (portBlockers.length) return "WAITING_FOR_PORT";
     if (input.restartPending) return "RESTART_DELAY";
     if (blockingHolders.length) return "TARGET_BUSY";
     if (blockingAhead.length) return "QUEUED_BEHIND";
     if (!input.agentOnline) return "AGENT_OFFLINE";
     return "READY";
   })();
-  const blocking = new Set(
-    reason === "TARGET_BUSY" || reason === "QUEUED_BEHIND"
-      ? [...blockingHolders, ...blockingAhead].map((peer) => peer.id)
-      : [],
+  const blockers =
+    reason === "WAITING_FOR_PORT"
+      ? portBlockers
+      : reason === "TARGET_BUSY" || reason === "QUEUED_BEHIND"
+        ? [...blockingHolders, ...blockingAhead]
+        : [];
+  const blocking = new Set(blockers.map((peer) => peer.id));
+  const entries = new Map(
+    [
+      ...(reason === "WAITING_FOR_PORT" ? portBlockers : []),
+      ...holders,
+      ...line,
+    ].map((peer) => [peer.id, peer]),
   );
   return {
     reason,
     position: index < 0 ? 0 : index + 1,
     waitingCount: line.length,
-    entries: [...holders, ...line].map((peer) => ({
+    entries: [...entries.values()].map((peer) => ({
       ...peer,
       blocking: blocking.has(peer.id),
       currentRun: peer.id === candidate.id,
@@ -529,6 +593,7 @@ export class CommandsService {
       name: text(input.name, "Name", 120),
       description: (input.description ?? "").trim().slice(0, 2_000),
       script: text(input.script, "Script", 1_000_000),
+      port: commandPort(input.port),
       targetKind,
       targetAgentId: input.targetAgentId ?? null,
       targetRepositoryIds,
@@ -586,12 +651,14 @@ export class CommandsService {
 
   async updateDefinition(id: string, input: CommandDefinitionInput) {
     const prisma = await getPrismaClient();
-    const { targetRepositoryIds, ...data } = this.normalizeDefinition(input);
+    const { targetRepositoryIds, port, ...data } =
+      this.normalizeDefinition(input);
     await this.assertRepositoriesExist(targetRepositoryIds);
     const definition = await prisma.commandDefinition.update({
       where: { id },
       data: {
         ...data,
+        ...(input.port !== undefined && { port }),
         repositories: {
           deleteMany: {},
           create: targetRepositoryIds.map((repositoryId) => ({ repositoryId })),
@@ -631,6 +698,7 @@ export class CommandsService {
         name: definition.name,
         description: definition.description,
         script: definition.script,
+        port: definition.port ?? null,
         targetKind: definition.targetKind,
         // Identifiers are per-install, so a scoped target travels by name and
         // is resolved again on import.
@@ -809,6 +877,7 @@ export class CommandsService {
       description:
         typeof command.description === "string" ? command.description : "",
       script,
+      port: commandPort(command.port),
       ...target,
       restartPolicy: importedText(command.restartPolicy) ?? "NEVER",
       restartLimit:
@@ -997,6 +1066,10 @@ export class CommandsService {
       };
     }
     const attempt = run.attempts[0];
+    const portBlockers =
+      !run.stopRequested && QUEUEABLE_RUN_STATUSES.includes(run.status)
+        ? await this.portBlockers(run)
+        : [];
     const agentOnline = Boolean(
       run.agent?.lastSeenAt &&
       !run.agent.disconnectedAt &&
@@ -1020,6 +1093,7 @@ export class CommandsService {
         run.snapshotConcurrency === "EXCLUDED"
           ? []
           : await this.targetPeers(run),
+      portBlockers,
       agentOnline,
       predecessorPending: Boolean(
         run.predecessor &&
@@ -1122,6 +1196,56 @@ export class CommandsService {
     }
   }
 
+  private async confirmPortUse(
+    transaction: Prisma.TransactionClient,
+    target: {
+      agentId: string | null;
+      agentName: string;
+      port: number | null;
+      predecessorId?: string;
+    },
+    resolution?: CommandPortConflictResolutionInput | null,
+  ): Promise<string[]> {
+    const { agentId, agentName, port, predecessorId } = target;
+    if (!agentId || port == null) return [];
+    const conflicts = await transaction.commandRun.findMany({
+      where: {
+        agentId,
+        snapshotPort: port,
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+        ...(predecessorId && { id: { not: predecessorId } }),
+      },
+      select: {
+        id: true,
+        displayNumber: true,
+        snapshotName: true,
+        status: true,
+      },
+      orderBy: { displayNumber: "asc" },
+    });
+    if (!conflicts.length) return [];
+    const confirmed = new Set(resolution?.runIds);
+    if (
+      !resolution ||
+      resolution.agentId !== agentId ||
+      resolution.port !== port ||
+      !conflicts.every(({ id }) => confirmed.has(id))
+    ) {
+      throw new CommandPortConflictError({
+        agentId,
+        agentName,
+        port,
+        runs: conflicts.map(({ snapshotName, ...run }) => ({
+          ...run,
+          name: snapshotName,
+        })),
+      });
+    }
+    return resolution.action === "TERMINATE_AND_RUN"
+      ? conflicts.map(({ id }) => id)
+      : [];
+  }
+
   async startRun(input: StartCommandRunInput) {
     const prisma = await getPrismaClient();
     const idempotencyKey = input.idempotencyKey?.trim() || randomUUID();
@@ -1136,6 +1260,7 @@ export class CommandsService {
     if (!definition || definition.archivedAt)
       throw new Error("Command not found");
     const { agent, worktree } = await this.resolveTarget(definition, input);
+    const port = definition.port ?? null;
     let run: Awaited<ReturnType<typeof prisma.commandRun.create>>;
     try {
       run = await prisma.$transaction(async (transaction) => {
@@ -1144,6 +1269,13 @@ export class CommandsService {
           create: { id: "default", nextValue: 1 },
           update: { nextValue: { increment: 1 } },
         });
+        // The sequence write acquires the SQLite writer lock before reading
+        // reservations, so simultaneous starts cannot both claim a free port.
+        const blockers = await this.confirmPortUse(
+          transaction,
+          { agentId: agent.id, agentName: agent.name, port },
+          input.portConflictResolution,
+        );
         return transaction.commandRun.create({
           data: {
             id: randomUUID(),
@@ -1154,6 +1286,8 @@ export class CommandsService {
             snapshotName: definition.name,
             snapshotDescription: definition.description,
             snapshotScript: definition.script,
+            snapshotPort: port,
+            portBlockerRunIdsJson: JSON.stringify(blockers),
             snapshotTargetKind: definition.targetKind,
             snapshotRestartPolicy: definition.restartPolicy,
             snapshotRestartLimit: definition.restartLimit,
@@ -1192,6 +1326,7 @@ export class CommandsService {
     });
     if (existing) return this.getRun(existing.id);
     const script = text(input.script, "Script", 1_000_000);
+    const port = commandPort(input.port);
     const targetKind =
       input.agentId && !input.worktreeId
         ? "ANY_AGENT_HOME"
@@ -1215,6 +1350,7 @@ export class CommandsService {
       name: "Custom command",
       description: "",
       script,
+      port,
       targetKind,
       restartPolicy: "NEVER",
       restartLimit: null,
@@ -1233,6 +1369,11 @@ export class CommandsService {
           create: { id: "default", nextValue: 1 },
           update: { nextValue: { increment: 1 } },
         });
+        const blockers = await this.confirmPortUse(
+          transaction,
+          { agentId: agent.id, agentName: agent.name, port },
+          input.portConflictResolution,
+        );
         return transaction.commandRun.create({
           data: {
             id: randomUUID(),
@@ -1244,6 +1385,8 @@ export class CommandsService {
             snapshotName: snapshot.name,
             snapshotDescription: snapshot.description,
             snapshotScript: snapshot.script,
+            snapshotPort: port,
+            portBlockerRunIdsJson: JSON.stringify(blockers),
             snapshotTargetKind: snapshot.targetKind,
             snapshotRestartPolicy: snapshot.restartPolicy,
             snapshotRestartLimit: snapshot.restartLimit,
@@ -1278,6 +1421,55 @@ export class CommandsService {
       throw error;
     }
     return this.getRun(run.id);
+  }
+
+  private async portBlockers(run: {
+    agentId: string | null;
+    snapshotPort: number | null;
+    portBlockerRunIdsJson: string;
+  }): Promise<Array<CommandQueueMember & { stopRequested: boolean }>> {
+    if (!run.agentId || run.snapshotPort == null) return [];
+    const ids = JSON.parse(run.portBlockerRunIdsJson) as string[];
+    if (!ids.length) return [];
+    const prisma = await getPrismaClient();
+    const blockers = await prisma.commandRun.findMany({
+      where: {
+        id: { in: ids },
+        agentId: run.agentId,
+        snapshotPort: run.snapshotPort,
+        status: { in: [...ACTIVE_RUN_STATUSES] },
+      },
+      select: {
+        id: true,
+        displayNumber: true,
+        snapshotName: true,
+        status: true,
+        snapshotConcurrency: true,
+        queuedAt: true,
+        stopRequested: true,
+        attempts: {
+          select: { agentJobId: true, completionProcessedAt: true },
+          orderBy: { attempt: "desc" },
+          take: 1,
+        },
+      },
+      orderBy: { displayNumber: "asc" },
+    });
+    return blockers.map((blocker) => {
+      const attempt = blocker.attempts[0];
+      return {
+        id: blocker.id,
+        displayNumber: blocker.displayNumber,
+        name: blocker.snapshotName,
+        status: blocker.status,
+        concurrency: blocker.snapshotConcurrency,
+        queuedAt: blocker.queuedAt,
+        stopRequested: blocker.stopRequested,
+        holdingTarget: Boolean(
+          attempt?.agentJobId && !attempt.completionProcessedAt,
+        ),
+      };
+    });
   }
 
   /**
@@ -1366,10 +1558,11 @@ export class CommandsService {
    * target and both start, so dispatches are serialized against each other.
    */
   private dispatch(runId: string): Promise<void> {
-    const next = this.dispatchChain.then(
-      () => this.dispatchRun(runId),
-      () => this.dispatchRun(runId),
-    );
+    return this.withDispatchLock(() => this.dispatchRun(runId));
+  }
+
+  private withDispatchLock<T>(operation: () => Promise<T>): Promise<T> {
+    const next = this.dispatchChain.then(operation);
     this.dispatchChain = next.catch(() => undefined);
     return next;
   }
@@ -1384,7 +1577,12 @@ export class CommandsService {
         attempts: true,
       },
     });
-    if (!run || run.stopRequested) return;
+    if (
+      !run ||
+      run.stopRequested ||
+      !QUEUEABLE_RUN_STATUSES.includes(run.status)
+    )
+      return;
     if (!run.agentId || !run.agent) {
       await this.failDispatch(
         run.id,
@@ -1395,13 +1593,18 @@ export class CommandsService {
     if (run.predecessorRunId) {
       const predecessor = await prisma.commandRun.findUnique({
         where: { id: run.predecessorRunId },
-        select: { status: true },
+        select: { status: true, stopRequested: true },
       });
       if (
         predecessor &&
         !FINAL_RUN_STATUSES.includes(predecessor.status as never)
-      )
+      ) {
+        // A rerun may have been saved before the server could stop its prior run.
+        if (!predecessor.stopRequested && run.snapshotPort != null) {
+          await this.requestRunTermination(run.predecessorRunId);
+        }
         return;
+      }
     }
     const worktreeTarget = new Set(["ANY_WORKTREE", "REPOSITORY_WORKTREE"]).has(
       run.snapshotTargetKind,
@@ -1430,6 +1633,22 @@ export class CommandsService {
         run.id,
         error instanceof Error ? error.message : String(error),
       );
+      return;
+    }
+    const portBlockers = await this.portBlockers(run);
+    if (portBlockers.length) {
+      // This intention is durable. Reconciliation will repeat it and wait for
+      // the agent's acknowledgement even if a process exits during replacement.
+      for (const blocker of portBlockers) {
+        if (blocker.stopRequested) continue;
+        try {
+          await this.requestRunTermination(blocker.id);
+        } catch (error) {
+          if (process.env.NODE_ENV !== "test") {
+            console.error("Command port blocker termination failed:", error);
+          }
+        }
+      }
       return;
     }
     const latestAttempt = run.attempts.reduce<
@@ -1537,29 +1756,42 @@ export class CommandsService {
   }
 
   async terminateRun(id: string) {
+    // Prevent a queued run from acquiring its job in between reading its
+    // latest attempt and marking the run as stopped.
+    const successorId = await this.withDispatchLock(() =>
+      this.requestRunTermination(id),
+    );
+    if (successorId) await this.dispatch(successorId);
+    return this.getRun(id);
+  }
+
+  private async requestRunTermination(id: string): Promise<string | null> {
     const prisma = await getPrismaClient();
     const run = await prisma.commandRun.findUnique({
       where: { id },
       include: { attempts: { orderBy: { attempt: "desc" }, take: 1 } },
     });
     if (!run) throw new Error("Command run not found");
-    if (FINAL_RUN_STATUSES.includes(run.status as never)) return run;
-    const updated = await prisma.commandRun.update({
-      where: { id },
+    if (FINAL_RUN_STATUSES.includes(run.status as never)) return null;
+    const [updated] = await prisma.commandRun.updateManyAndReturn({
+      where: { id, status: { in: [...ACTIVE_RUN_STATUSES] } },
       data: { stopRequested: true, status: "CANCELLING", nextRestartAt: null },
     });
+    if (!updated) return null;
+    publishRun(updated);
     // Between attempts — a run waiting to restart, or one still queued for its
     // target — the newest attempt is already finished or has no job at all, so
     // asking the agent to cancel it does nothing and the run has to be closed
     // out here.
     const jobId = run.attempts[0]?.agentJobId;
     const job = jobId ? await this.agentControl.cancelJob(jobId) : null;
-    if (!cancellableJob(job)) await this.finishCancelled(id);
-    publishRun(updated);
-    return this.getRun(id);
+    return cancellableJob(job) ? null : this.finishCancelled(id, false);
   }
 
-  async rerun(id: string) {
+  async rerun(
+    id: string,
+    resolution?: CommandPortConflictResolutionInput | null,
+  ) {
     const prisma = await getPrismaClient();
     const original = await prisma.commandRun.findUnique({ where: { id } });
     if (!original) throw new Error("Command run not found");
@@ -1567,39 +1799,60 @@ export class CommandsService {
       where: { predecessorRunId: original.id },
     });
     if (existingSuccessor) return this.getRun(existingSuccessor.id);
-    const successor = await prisma.$transaction(async (transaction) => {
-      const sequence = await transaction.commandRunNumberSequence.upsert({
-        where: { id: "default" },
-        create: { id: "default", nextValue: 1 },
-        update: { nextValue: { increment: 1 } },
+    let successor: Awaited<ReturnType<typeof prisma.commandRun.create>>;
+    try {
+      successor = await prisma.$transaction(async (transaction) => {
+        const sequence = await transaction.commandRunNumberSequence.upsert({
+          where: { id: "default" },
+          create: { id: "default", nextValue: 1 },
+          update: { nextValue: { increment: 1 } },
+        });
+        const blockers = await this.confirmPortUse(
+          transaction,
+          {
+            agentId: original.agentId,
+            agentName: original.agentName,
+            port: original.snapshotPort ?? null,
+            predecessorId: original.id,
+          },
+          resolution,
+        );
+        return transaction.commandRun.create({
+          data: {
+            id: randomUUID(),
+            displayNumber: sequence.nextValue,
+            commandId: original.commandId,
+            idempotencyKey: `rerun:${original.id}:${randomUUID()}`,
+            origin: "RERUN",
+            snapshotName: original.snapshotName,
+            snapshotDescription: original.snapshotDescription,
+            snapshotScript: original.snapshotScript,
+            snapshotPort: original.snapshotPort ?? null,
+            portBlockerRunIdsJson: JSON.stringify(blockers),
+            snapshotTargetKind: original.snapshotTargetKind,
+            snapshotRestartPolicy: original.snapshotRestartPolicy,
+            snapshotRestartLimit: original.snapshotRestartLimit,
+            snapshotConcurrency: original.snapshotConcurrency,
+            snapshotBlocksGitOperations: original.snapshotBlocksGitOperations,
+            snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
+            snapshotJson: original.snapshotJson,
+            agentId: original.agentId,
+            worktreeId: original.worktreeId,
+            agentName: original.agentName,
+            agentHostname: original.agentHostname,
+            worktreePath: original.worktreePath,
+            worktreeBranch: original.worktreeBranch,
+            predecessorRunId: original.id,
+          },
+        });
       });
-      return transaction.commandRun.create({
-        data: {
-          id: randomUUID(),
-          displayNumber: sequence.nextValue,
-          commandId: original.commandId,
-          idempotencyKey: `rerun:${original.id}:${randomUUID()}`,
-          origin: "RERUN",
-          snapshotName: original.snapshotName,
-          snapshotDescription: original.snapshotDescription,
-          snapshotScript: original.snapshotScript,
-          snapshotTargetKind: original.snapshotTargetKind,
-          snapshotRestartPolicy: original.snapshotRestartPolicy,
-          snapshotRestartLimit: original.snapshotRestartLimit,
-          snapshotConcurrency: original.snapshotConcurrency,
-          snapshotBlocksGitOperations: original.snapshotBlocksGitOperations,
-          snapshotNotificationsEnabled: original.snapshotNotificationsEnabled,
-          snapshotJson: original.snapshotJson,
-          agentId: original.agentId,
-          worktreeId: original.worktreeId,
-          agentName: original.agentName,
-          agentHostname: original.agentHostname,
-          worktreePath: original.worktreePath,
-          worktreeBranch: original.worktreeBranch,
-          predecessorRunId: original.id,
-        },
+    } catch (error) {
+      const concurrent = await prisma.commandRun.findUnique({
+        where: { predecessorRunId: original.id },
       });
-    });
+      if (!concurrent) throw error;
+      return this.getRun(concurrent.id);
+    }
     publishRun(successor);
     if (FINAL_RUN_STATUSES.includes(original.status as never)) {
       await this.dispatch(successor.id);
@@ -1709,7 +1962,10 @@ export class CommandsService {
     return persisted;
   }
 
-  private async finishCancelled(runId: string): Promise<void> {
+  private async finishCancelled(
+    runId: string,
+    dispatchSuccessor = true,
+  ): Promise<string | null> {
     const prisma = await getPrismaClient();
     const updated = await prisma.commandRun.update({
       where: { id: runId },
@@ -1723,7 +1979,8 @@ export class CommandsService {
     const successor = await prisma.commandRun.findUnique({
       where: { predecessorRunId: runId },
     });
-    if (successor) await this.dispatch(successor.id);
+    if (successor && dispatchSuccessor) await this.dispatch(successor.id);
+    return successor?.id ?? null;
   }
 
   private async notifyFinishedRun(run: {

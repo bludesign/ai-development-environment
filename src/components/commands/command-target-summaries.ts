@@ -8,17 +8,19 @@ import {
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import type { CommandDefinition } from "./types";
+import type { TailscaleAddress } from "@/lib/tailscale-addresses";
 
 export type CommandActionDefinition = Pick<
   CommandDefinition,
   | "id"
   | "name"
   | "description"
+  | "port"
   | "targetKind"
   | "quickActionEnabled"
   | "quickActionIconKey"
   | "quickActionButtonVariant"
->;
+> & { tailscaleAddresses: TailscaleAddress[] };
 export type CommandTarget = {
   resourceKind: "AGENT" | "WORKTREE";
   resourceId: string;
@@ -31,6 +33,8 @@ export type CommandTargetSummary = CommandTarget & {
     commandId: string;
     displayNumber: number;
     status: string;
+    snapshotPort: number | null;
+    tailscaleAddresses: TailscaleAddress[];
   }>;
   recentRuns: Array<{
     id: string;
@@ -56,8 +60,8 @@ const keyFor = (target: CommandTarget) =>
 const QUERY = `query CommandTargetSummaries($targets: [CommandTargetSummaryInput!]!) {
   commandTargetSummaries(targets: $targets) {
     resourceKind resourceId
-    commands { id name description targetKind quickActionEnabled quickActionIconKey quickActionButtonVariant }
-    activeRuns { id commandId displayNumber status }
+    commands { id name description port targetKind quickActionEnabled quickActionIconKey quickActionButtonVariant tailscaleAddresses { kind url } }
+    activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { kind url } }
     recentRuns { id displayNumber status snapshotName createdAt }
   }
 }`;
@@ -77,6 +81,7 @@ export function createCommandTargetSummaryStore() {
   const batches = new Set<Batch>();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let disposeDefinitions: (() => void) | undefined;
+  let disposeTailscale: (() => void) | undefined;
   let disposeRecovery: (() => void) | undefined;
   const optionsFor = (entry: Entry): Options => ({
     includeAllCommands: [...entry.consumers.values()].some(
@@ -131,6 +136,30 @@ export function createCommandTargetSummaryStore() {
         },
       );
   };
+  const hasPorts = (entry: Entry) =>
+    entry.snapshot.commands.some(({ port }) => port != null) ||
+    entry.snapshot.activeRuns.some(({ snapshotPort }) => snapshotPort != null);
+  const watchTailscale = () => {
+    if ([...entries.values()].some(hasPorts)) {
+      disposeTailscale ??= controlPlaneSubscriptions().subscribe(
+        {
+          query:
+            "subscription CommandTargetTailscale { tailscaleServeOverviewChanged { updatedAt } }",
+        },
+        {
+          next: () => {
+            for (const entry of entries.values())
+              if (hasPorts(entry)) invalidate(entry);
+          },
+          error: () => undefined,
+          complete: () => undefined,
+        },
+      );
+    } else {
+      disposeTailscale?.();
+      disposeTailscale = undefined;
+    }
+  };
   const fetchBatch = async (selected: Entry[]) => {
     const batch = { entries: selected, controller: new AbortController() };
     batches.add(batch);
@@ -161,6 +190,7 @@ export function createCommandTargetSummaryStore() {
         watchRuns(entry);
         notify(entry);
       }
+      watchTailscale();
     } catch (error) {
       if (!batch.controller.signal.aborted)
         for (const entry of selected) {
@@ -251,6 +281,7 @@ export function createCommandTargetSummaryStore() {
         else {
           subscribed.disposeRuns?.();
           entries.delete(key);
+          watchTailscale();
           for (const batch of batches)
             if (!batch.entries.some(current)) batch.controller.abort();
         }

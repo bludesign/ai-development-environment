@@ -305,6 +305,7 @@
     "waitHeldDescription": "Die benötigte Codebasis ist belegt. Der Schritt wird bei jedem Durchlauf erneut versucht, bis sie frei wird.",
     "waitingOnKind": "Wartet auf {kind}",
     "waitKinds": {
+      "COMMAND_PORT_CONFLICT": "Portkonflikt bei Befehl",
       "AGENT_JOB": "Agent-Job",
       "AGENT_JOBS": "Agent-Jobs",
       "AGENT_RUN": "Agent-Lauf",
@@ -5897,6 +5898,18 @@
     "timed_out": "Zeitüberschreitung"
   },
   "commands": {
+    "optionalPort": "Lokaler Port (optional)",
+    "configuredPort": "Port",
+    "portHelp": "Gib den lokalen Port des Skripts ein, um Konflikte zu prüfen und passende Tailscale-Serve-Routen zu finden.",
+    "portInvalid": "Gib eine ganze Zahl von 1 bis 65535 ein.",
+    "tailscaleAddresses": "Tailscale-Adressen",
+    "openPortAddressesNamed": "Tailscale-Adressen für {name} öffnen",
+    "portConflictTitle": "Port {port} wird bereits verwendet",
+    "portConflictDescription": "Die folgenden Befehlsausführungen verwenden diesen Port auf {agent} oder warten darauf. Wenn du fortfährst, kann der Befehl fehlschlagen.",
+    "portConflictContinue": "Fortfahren",
+    "portConflictTerminate": "Beenden und ausführen",
+    "portConflictCancelStep": "Befehl abbrechen",
+    "queuedWaitingForPort": "Wartet darauf, dass die anderen Befehle den Port freigeben.",
     "repoBranch": "Repository / Branch",
     "title": "Befehle",
     "description": "Wiederverwendbare Shell-Befehle erstellen und dauerhafte Ausführungen prüfen.",

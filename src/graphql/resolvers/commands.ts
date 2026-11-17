@@ -1,3 +1,5 @@
+import { GraphQLError } from "graphql";
+
 import type { GraphQLContext } from "@/services/graphql-server/graphql-server.service";
 import {
   COMMAND_RUNS_CHANGED_TOPIC,
@@ -6,12 +8,15 @@ import {
   commandRunChangedTopic,
   commandRunOutputTopic,
 } from "@/services/agent-control";
-import type {
-  CommandDefinitionInput,
-  CommandsService,
-  StartCustomCommandRunInput,
-  StartCommandRunInput,
+import {
+  CommandPortConflictError,
+  type CommandDefinitionInput,
+  type CommandPortConflictResolutionInput,
+  type CommandsService,
+  type StartCustomCommandRunInput,
+  type StartCommandRunInput,
 } from "@/services/commands";
+import { loadCommandTailscaleAddresses } from "@/services/tailscale/command-addresses";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId)
@@ -30,9 +35,29 @@ const dates = {
   updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
 };
 
+async function resolvePortConflict<T>(submit: () => Promise<T>): Promise<T> {
+  try {
+    return await submit();
+  } catch (error) {
+    if (error instanceof CommandPortConflictError) {
+      throw new GraphQLError(error.message, {
+        extensions: {
+          code: "COMMAND_PORT_CONFLICT",
+          portConflict: error.conflict,
+        },
+      });
+    }
+    throw error;
+  }
+}
+
 export const createCommandResolvers = (service: CommandsService) => ({
   CommandDefinition: dates,
   CommandRun: {
+    tailscaleAddresses: (value: {
+      agentId: string | null;
+      snapshotPort: number | null;
+    }) => loadCommandTailscaleAddresses(value.agentId, value.snapshotPort),
     repositoryName: (value: {
       worktree?: {
         codebase: { repository: { name: string } | null };
@@ -199,7 +224,7 @@ export const createCommandResolvers = (service: CommandsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startRun(input);
+      return resolvePortConflict(() => service.startRun(input));
     },
     startCustomCommandRun: (
       _root: unknown,
@@ -207,7 +232,7 @@ export const createCommandResolvers = (service: CommandsService) => ({
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.startCustomRun(input);
+      return resolvePortConflict(() => service.startCustomRun(input));
     },
     terminateCommandRun: (
       _root: unknown,
@@ -219,11 +244,19 @@ export const createCommandResolvers = (service: CommandsService) => ({
     },
     rerunCommandRun: (
       _root: unknown,
-      { id }: { id: string },
+      {
+        id,
+        portConflictResolution,
+      }: {
+        id: string;
+        portConflictResolution?: CommandPortConflictResolutionInput | null;
+      },
       context: GraphQLContext,
     ) => {
       requireControlPlane(context);
-      return service.rerun(id);
+      return resolvePortConflict(() =>
+        service.rerun(id, portConflictResolution),
+      );
     },
     archiveCommandRuns: (
       _root: unknown,

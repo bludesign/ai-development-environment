@@ -305,6 +305,7 @@
     "waitHeldDescription": "La base de code requise est occupée. L'étape est relancée à chaque cycle jusqu'à ce qu'elle se libère.",
     "waitingOnKind": "En attente de {kind}",
     "waitKinds": {
+      "COMMAND_PORT_CONFLICT": "Conflit de port de commande",
       "AGENT_JOB": "Tâche d'agent",
       "AGENT_JOBS": "Tâches d'agent",
       "AGENT_RUN": "Exécution d'agent",
@@ -5897,6 +5898,18 @@
     "timed_out": "Délai dépassé"
   },
   "commands": {
+    "optionalPort": "Port local (facultatif)",
+    "configuredPort": "Port",
+    "portHelp": "Saisissez le port local utilisé par le script pour détecter les conflits et trouver les routes Tailscale Serve correspondantes.",
+    "portInvalid": "Saisissez un entier compris entre 1 et 65535.",
+    "tailscaleAddresses": "Adresses Tailscale",
+    "openPortAddressesNamed": "Ouvrir les adresses Tailscale de {name}",
+    "portConflictTitle": "Le port {port} est utilisé",
+    "portConflictDescription": "Les exécutions suivantes utilisent ce port sur {agent} ou attendent de l’utiliser. Si vous continuez, la commande risque d’échouer.",
+    "portConflictContinue": "Continuer",
+    "portConflictTerminate": "Arrêter et exécuter",
+    "portConflictCancelStep": "Annuler la commande",
+    "queuedWaitingForPort": "En attente de la libération du port par les autres exécutions.",
     "repoBranch": "Dépôt / branche",
     "title": "Commands",
     "description": "Create reusable shell commands and inspect their durable runs.",

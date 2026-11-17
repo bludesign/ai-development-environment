@@ -1,6 +1,8 @@
 import "server-only";
 
 import { getPrismaClient } from "@/data/prisma-client";
+import type { TailscaleAddress } from "@/lib/tailscale-addresses";
+import { loadCommandTailscaleAddressesByAgent } from "@/services/tailscale/command-addresses";
 
 export type CommandResourceKind = "AGENT" | "WORKTREE";
 export type CommandTargetSummaryInput = {
@@ -50,11 +52,17 @@ export async function loadCommandTargetSummaries(
   const worktrees = worktreeIds.length
     ? await prisma.worktree.findMany({
         where: { id: { in: worktreeIds } },
-        select: { id: true, codebase: { select: { repositoryId: true } } },
+        select: {
+          id: true,
+          codebase: { select: { repositoryId: true, agentId: true } },
+        },
       })
     : [];
   const repositories = new Map(
     worktrees.map((worktree) => [worktree.id, worktree.codebase.repositoryId]),
+  );
+  const worktreeAgents = new Map(
+    worktrees.map((worktree) => [worktree.id, worktree.codebase.agentId]),
   );
   const definitions = await prisma.commandDefinition.findMany({
     where: {
@@ -91,6 +99,7 @@ export async function loadCommandTargetSummaries(
       id: true,
       name: true,
       description: true,
+      port: true,
       targetKind: true,
       targetAgentId: true,
       quickActionEnabled: true,
@@ -128,13 +137,16 @@ export async function loadCommandTargetSummaries(
           targetAgentId: _agent,
           repositories: _repositories,
           ...definition
-        }) => definition,
+        }) => ({ ...definition, tailscaleAddresses: [] as TailscaleAddress[] }),
       ),
       activeRuns: [] as Array<{
         id: string;
         commandId: string;
         displayNumber: number;
         status: string;
+        agentId: string | null;
+        snapshotPort: number | null;
+        tailscaleAddresses: TailscaleAddress[];
       }>,
       recentRuns: [] as Array<{
         id: string;
@@ -170,6 +182,7 @@ export async function loadCommandTargetSummaries(
         worktreeId: true,
         displayNumber: true,
         status: true,
+        snapshotPort: true,
       },
       orderBy: { displayNumber: "asc" },
     });
@@ -193,7 +206,41 @@ export async function loadCommandTargetSummaries(
           commandId: run.commandId!,
           displayNumber: run.displayNumber,
           status: run.status,
+          agentId: run.agentId,
+          snapshotPort: run.snapshotPort,
+          tailscaleAddresses: [],
         }));
+    }
+  }
+  const addressAgentIds = summaries.flatMap((summary) => {
+    const agentId =
+      summary.resourceKind === "AGENT"
+        ? summary.resourceId
+        : worktreeAgents.get(summary.resourceId);
+    return [
+      ...(agentId && summary.commands.some(({ port }) => port != null)
+        ? [agentId]
+        : []),
+      ...summary.activeRuns.flatMap((run) =>
+        run.agentId && run.snapshotPort != null ? [run.agentId] : [],
+      ),
+    ];
+  });
+  const addresses = await loadCommandTailscaleAddressesByAgent(addressAgentIds);
+  for (const summary of summaries) {
+    const agentId =
+      summary.resourceKind === "AGENT"
+        ? summary.resourceId
+        : worktreeAgents.get(summary.resourceId);
+    for (const command of summary.commands) {
+      if (agentId && command.port != null)
+        command.tailscaleAddresses =
+          addresses.get(agentId)?.get(command.port) ?? [];
+    }
+    for (const run of summary.activeRuns) {
+      if (run.agentId && run.snapshotPort != null)
+        run.tailscaleAddresses =
+          addresses.get(run.agentId)?.get(run.snapshotPort) ?? [];
     }
   }
   const recentTargets = targets.filter((target) => target.includeRecentRuns);

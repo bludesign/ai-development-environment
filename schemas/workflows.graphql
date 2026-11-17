@@ -429,6 +429,16 @@ type WorkflowStepAttempt {
   checkpoints: [RunCheckpoint!]!
 }
 
+"Operator choices for a workflow step waiting on a command port."
+enum WorkflowCommandPortConflictAction {
+  "Starts the command with the displayed port conflicts acknowledged."
+  CONTINUE
+  "Skips the command and follows the step failure path."
+  CANCEL
+  "Requests termination of the conflicting runs and waits for them to stop."
+  TERMINATE_AND_RUN
+}
+
 "Represents a workflow wait in the GraphQL API."
 type WorkflowWait {
   "Stable identifier for this workflow wait."
@@ -443,6 +453,8 @@ type WorkflowWait {
   status: String!
   "The predicate associated with this workflow wait. May be null when unavailable or not applicable."
   predicate: JSON
+  "The conflicting command runs when this step is waiting for a port decision."
+  commandPortConflict: CommandPortConflict
   "The external key associated with this workflow wait. May be null when unavailable or not applicable."
   externalKey: String
   "The resume after associated with this workflow wait. May be null when unavailable or not applicable."
@@ -894,6 +906,13 @@ extend type Mutation {
     batchId: ID!
     "The answers used to filter or perform the operation."
     answers: JSON!
+  ): WorkflowRun!
+  "Resolves a pending workflow command port conflict."
+  resolveWorkflowCommandPortConflict(
+    "Identifier of the wait containing the conflicts shown to the operator."
+    waitId: ID!
+    "The operator's decision for those conflicts."
+    action: WorkflowCommandPortConflictAction!
   ): WorkflowRun!
   "Replays a workflow run and returns a workflow run."
   replayWorkflowRun(

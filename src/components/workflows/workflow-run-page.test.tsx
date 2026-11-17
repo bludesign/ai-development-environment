@@ -469,6 +469,75 @@ describe("workflow question answers", () => {
     expect(screen.queryByText("Codebase is busy")).toBeNull();
   });
 
+  test("resolves a command port conflict from the workflow run", async () => {
+    const workflowRun = {
+      ...pendingRun,
+      waits: [
+        {
+          id: "port-wait",
+          attemptId: pendingRun.attempts[0].id,
+          kind: "COMMAND_PORT_CONFLICT",
+          status: "PENDING",
+          commandPortConflict: {
+            agentId: "agent-1",
+            agentName: "Studio",
+            port: 3000,
+            runs: [
+              {
+                id: "blocker",
+                displayNumber: 9,
+                name: "Dev site",
+                status: "RUNNING",
+              },
+            ],
+          },
+          predicate: null,
+          externalKey: null,
+          resumeAfter: null,
+          timeoutAt: null,
+          result: null,
+          createdAt: pendingRun.createdAt,
+          resolvedAt: null,
+          updatedAt: pendingRun.createdAt,
+        },
+      ],
+    };
+    let resolved = false;
+    request.mockImplementation(async (query) => {
+      if (query.includes("resolveWorkflowCommandPortConflict")) {
+        resolved = true;
+        return {
+          resolveWorkflowCommandPortConflict: { id: workflowRun.id },
+        } as never;
+      }
+      return {
+        workflowRun: resolved ? { ...workflowRun, waits: [] } : workflowRun,
+        workflowRunEvents: pendingRun.events,
+      } as never;
+    });
+    render(
+      <TooltipProvider>
+        <WorkflowRunPage runId="run-1" />
+      </TooltipProvider>,
+    );
+
+    const blocker = await screen.findByRole("link", { name: "#9 Dev site" });
+    expect(blocker.getAttribute("href")).toBe(
+      "/dashboard/commands/runs/blocker",
+    );
+    expect(
+      screen.getByRole("button", { name: "Cancel command" }),
+    ).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Terminate and run" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Port 3000 is in use")).toBeNull(),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("resolveWorkflowCommandPortConflict"),
+      { waitId: "port-wait", action: "TERMINATE_AND_RUN" },
+    );
+  });
+
   test("shows the linked worktree branch instead of its resource ID", async () => {
     request.mockResolvedValue({
       workflowRunEvents: pendingRun.events,

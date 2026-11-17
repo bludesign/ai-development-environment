@@ -84,6 +84,7 @@ const commandFields = [
   "name",
   "description",
   "script",
+  "port",
   "targetKind",
   "restartPolicy",
   "restartLimit",
@@ -1916,7 +1917,12 @@ export class RepositoryTransferService {
         };
       }
       case "COMMAND":
-        return this.commands.normalizeDefinition(commandServiceInput(f));
+        return this.commands.normalizeDefinition(
+          commandServiceInput({
+            ...f,
+            port: Object.hasOwn(f, "port") ? f.port : existing?.port,
+          }),
+        );
       case "WORKFLOW": {
         const definition = parseWorkflowDefinition(f.draftDefinition);
         if (Buffer.byteLength(JSON.stringify(definition)) > 2 * 1024 * 1024)

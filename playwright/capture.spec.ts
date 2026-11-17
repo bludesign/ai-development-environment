@@ -14,6 +14,7 @@ import {
   stubJiraProjectSettings,
 } from "./jira-settings";
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
+import { displayNumbers, ids } from "../scripts/mock-data/ids";
 
 async function waitForVisualSettle(page: Page): Promise<void> {
   await page.evaluate(async () => {
@@ -84,6 +85,38 @@ test.describe("app screenshots", () => {
         await stubReviewerCapture(page, route.reviewerCapture);
       if (route.jiraProjectSettings) await stubJiraProjectSettings(page);
       if (route.stubJiraCacheTicket) await stubJiraCacheTicket(page);
+      if (route.commandPortCapture === "conflict") {
+        await page.route("**/api/graphql", (request) => {
+          if (!request.request().postData()?.includes("startCommandRun("))
+            return request.fallback();
+          return request.fulfill({
+            json: {
+              data: null,
+              errors: [
+                {
+                  message: "Port 3000 is in use on Studio Mac.",
+                  extensions: {
+                    code: "COMMAND_PORT_CONFLICT",
+                    portConflict: {
+                      agentId: ids.agents.studio,
+                      agentName: "Studio Mac",
+                      port: 3000,
+                      runs: [
+                        {
+                          id: ids.commandRuns.devServer,
+                          displayNumber: displayNumbers.commandRuns.devServer,
+                          name: "Start Dev Server",
+                          status: "RUNNING",
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+          });
+        });
+      }
       const readyResponse = route.readyGraphqlOperation
         ? page.waitForResponse(
             (candidate) =>
@@ -182,6 +215,24 @@ test.describe("app screenshots", () => {
       if (route.clickButton) {
         await page.getByRole("button", { name: route.clickButton }).click();
         await page.getByRole("dialog").waitFor({ state: "visible" });
+      }
+      if (route.commandPortCapture === "addresses") {
+        await page
+          .getByRole("button", { name: /addresses.*Start Dev Server/i })
+          .first()
+          .click();
+        await expect(
+          page.getByRole("menuitem", { name: /studio\.acme-tailnet\.ts\.net/ }),
+        ).toBeVisible();
+      }
+      if (route.commandPortCapture === "conflict") {
+        await page
+          .getByRole("button", { name: "Start Dev Server", exact: true })
+          .first()
+          .click();
+        await expect(
+          page.getByRole("button", { name: /^Terminate and run$/i }),
+        ).toBeVisible();
       }
       if (route.simulatorAutomation === "tools") {
         await page

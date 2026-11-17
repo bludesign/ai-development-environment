@@ -67,7 +67,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Link, useRouter } from "@/i18n/navigation";
-import { downloadJsonFiles, exportFileStem } from "@/lib/browser-utils";
+import {
+  createClientId,
+  downloadJsonFiles,
+  exportFileStem,
+} from "@/lib/browser-utils";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
@@ -85,6 +89,7 @@ import { cn } from "@/lib/utils";
 import { worktreeHighlightBackgroundClasses } from "@/lib/worktree-highlight";
 
 import { CommandTargetDialog } from "./command-target-dialog";
+import { useCommandPortConflict } from "./command-port-conflict";
 import { CustomCommandDialog } from "./custom-command-dialog";
 import {
   COMMAND_DEFINITION_FIELDS,
@@ -111,6 +116,7 @@ const statusVariant = (status: string) =>
 
 export function CommandsPage() {
   const t = useTranslations("commands");
+  const conflict = useCommandPortConflict();
   const globalAgent = useActiveAgent();
   const [selectedAgentId, setSelectedAgentId] = usePageAgentFilter(
     "commands",
@@ -483,18 +489,38 @@ export function CommandsPage() {
     command: CommandDefinition,
     target: { agentId?: string; worktreeId?: string },
   ) => {
-    try {
+    setTargetCommand(null);
+    setError(null);
+    const idempotencyKey = command.port == null ? undefined : createClientId();
+    await conflict.submit(async (portConflictResolution) => {
       const data = await controlPlaneRequest<{
         startCommandRun: { id: string };
       }>(
         "mutation StartCommand($input: StartCommandRunInput!) { startCommandRun(input: $input) { id } }",
-        { input: { commandId: command.id, origin: "MANUAL", ...target } },
+        {
+          input: {
+            commandId: command.id,
+            origin: "MANUAL",
+            ...target,
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            ...(portConflictResolution ? { portConflictResolution } : {}),
+          },
+        },
       );
-      setTargetCommand(null);
       router.push(`/dashboard/commands/runs/${data.startCommandRun.id}`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    }
+    }, setError);
+  };
+  const rerun = async (id: string) => {
+    setError(null);
+    await conflict.submit(async (portConflictResolution) => {
+      const data = await controlPlaneRequest<{
+        rerunCommandRun: { id: string };
+      }>(
+        "mutation Rerun($id: ID!, $portConflictResolution: CommandPortConflictResolutionInput) { rerunCommandRun(id: $id, portConflictResolution: $portConflictResolution) { id } }",
+        { id, ...(portConflictResolution ? { portConflictResolution } : {}) },
+      );
+      router.push(`/dashboard/commands/runs/${data.rerunCommandRun.id}`);
+    }, setError);
   };
   return (
     <div className="space-y-5">
@@ -902,17 +928,7 @@ export function CommandsPage() {
                               </DropdownMenuItem>
                             ) : (
                               <DropdownMenuItem
-                                onClick={async () => {
-                                  const data = await controlPlaneRequest<{
-                                    rerunCommandRun: { id: string };
-                                  }>(
-                                    "mutation Rerun($id: ID!) { rerunCommandRun(id: $id) { id } }",
-                                    { id: run.id },
-                                  );
-                                  router.push(
-                                    `/dashboard/commands/runs/${data.rerunCommandRun.id}`,
-                                  );
-                                }}
+                                onSelect={() => void rerun(run.id)}
                               >
                                 <RotateCcw />
                                 {t("rerun")}
@@ -1022,6 +1038,7 @@ export function CommandsPage() {
         </div>
       )}
 
+      {conflict.dialog}
       <CommandTargetDialog
         command={targetCommand}
         agents={agents}

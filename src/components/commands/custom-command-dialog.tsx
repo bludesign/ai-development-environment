@@ -23,6 +23,8 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
 import type { CommandAgent, CommandWorktree } from "./types";
+import { useCommandPortConflict } from "./command-port-conflict";
+import { CommandPortField, parseCommandPort } from "./command-port-field";
 
 type CustomCommandTarget =
   | { agentId: string; worktreeId?: never }
@@ -30,6 +32,7 @@ type CustomCommandTarget =
 
 type CustomCommandSubmission = CustomCommandTarget & {
   script: string;
+  port: number | null;
   idempotencyKey: string;
 };
 
@@ -50,10 +53,13 @@ export function CustomCommandDialog({
   const router = useRouter();
   const scriptId = useId();
   const [script, setScript] = useState("");
+  const [portValue, setPortValue] = useState("");
+  const port = parseCommandPort(portValue);
   const [targetKey, setTargetKey] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const submission = useRef<CustomCommandSubmission | null>(null);
+  const conflict = useCommandPortConflict();
   const targets = useMemo(() => {
     if (!agents || !worktrees) return [];
     return [
@@ -85,35 +91,53 @@ export function CustomCommandDialog({
       ? selected.input
       : null;
   const launch = async () => {
-    if (!target || !script.trim() || submitting) return;
+    if (
+      !target ||
+      !script.trim() ||
+      port === undefined ||
+      submitting ||
+      conflict.pending
+    )
+      return;
     const previous = submission.current;
     const input =
       previous?.script === script &&
+      previous.port === port &&
       previous.agentId === target.agentId &&
       previous.worktreeId === target.worktreeId
         ? previous
-        : { script, ...target, idempotencyKey: createClientId() };
+        : { script, port, ...target, idempotencyKey: createClientId() };
     submission.current = input;
     setSubmitting(true);
     setError(null);
-    try {
+    await conflict.submit(async (portConflictResolution) => {
+      const { port, ...submissionInput } = input;
       const data = await controlPlaneRequest<{
         startCustomCommandRun: { id: string };
       }>(
         "mutation StartCustomCommand($input: StartCustomCommandRunInput!) { startCustomCommandRun(input: $input) { id } }",
-        { input: { ...input, origin: "MANUAL" } },
+        {
+          input: {
+            ...submissionInput,
+            origin: "MANUAL",
+            ...(port != null ? { port } : {}),
+            ...(portConflictResolution ? { portConflictResolution } : {}),
+          },
+        },
       );
       onClose();
       router.push(`/dashboard/commands/runs/${data.startCustomCommandRun.id}`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setSubmitting(false);
-    }
+    }, setError);
+    setSubmitting(false);
   };
 
   return (
-    <Dialog onOpenChange={(open) => !open && !submitting && onClose()} open>
+    <Dialog
+      onOpenChange={(open) =>
+        !open && !submitting && !conflict.pending && onClose()
+      }
+      open
+    >
       <DialogContent
         className="max-h-[85vh] overflow-y-auto sm:max-w-2xl"
         onCloseAutoFocus={onCloseAutoFocus}
@@ -137,6 +161,7 @@ export function CustomCommandDialog({
               {t("customCommandWarning")}
             </p>
           </div>
+          <CommandPortField value={portValue} onChange={setPortValue} />
           {!worktreeId && (
             <fieldset className="space-y-2">
               <legend className="text-sm font-medium">{t("runIn")}</legend>
@@ -190,7 +215,13 @@ export function CustomCommandDialog({
             {t("cancel")}
           </Button>
           <Button
-            disabled={!script.trim() || !target || submitting}
+            disabled={
+              !script.trim() ||
+              !target ||
+              port === undefined ||
+              submitting ||
+              conflict.pending
+            }
             onClick={() => void launch()}
             type="button"
           >
@@ -199,6 +230,7 @@ export function CustomCommandDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      {conflict.dialog}
     </Dialog>
   );
 }

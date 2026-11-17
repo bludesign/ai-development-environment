@@ -1,4 +1,5 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
+import { CommandPortConflictError } from "@/services/commands";
 import { mcpScopeMetadata, type McpSecurityScheme } from "./mcp-permissions";
 import type { McpToolSnapshot, McpToolSnapshotEntry } from "./types";
 
@@ -82,6 +83,17 @@ export function createScopedMcpServer(
             type: "text",
             text: error instanceof Error ? error.message : "Tool call failed",
           },
+          ...(error instanceof CommandPortConflictError
+            ? [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({
+                    code: "COMMAND_PORT_CONFLICT",
+                    portConflict: error.conflict,
+                  }),
+                },
+              ]
+            : []),
         ],
       };
     }

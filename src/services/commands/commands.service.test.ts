@@ -4,6 +4,7 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 import {
+  CommandPortConflictError,
   CommandsService,
   admitCommandRun,
   evaluateCommandRestart,
@@ -187,6 +188,9 @@ describe("CommandsService.terminateRun", () => {
           })
           .mockResolvedValue(null),
         update,
+        updateManyAndReturn: vi
+          .fn()
+          .mockResolvedValue([{ id: "run-1", status: "CANCELLING" }]),
       },
     });
     const cancelJob = vi.fn().mockResolvedValue(job);
@@ -221,6 +225,124 @@ describe("CommandsService.terminateRun", () => {
       ),
     ).toBe(false);
   });
+});
+
+describe("command port admission", () => {
+  const conflictingRun = {
+    id: "other-worktree-run",
+    displayNumber: 18,
+    snapshotName: "Preview server",
+    status: "RUNNING",
+  };
+
+  function setup() {
+    const findMany = vi.fn().mockResolvedValue([conflictingRun]);
+    const create = vi.fn().mockImplementation(({ data }) => data);
+    const transaction = {
+      commandRunNumberSequence: {
+        upsert: vi.fn().mockResolvedValue({ nextValue: 19 }),
+      },
+      commandRun: { findMany, create },
+    };
+    getPrismaClient.mockResolvedValue({
+      commandRun: { findUnique: vi.fn().mockResolvedValue(null) },
+      worktree: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "new-worktree",
+          codebase: {
+            agent: {
+              id: "agent-1",
+              name: "Builder",
+              hostname: "builder.local",
+              capabilitiesJson: '["command.run"]',
+            },
+          },
+        }),
+      },
+      $transaction: (callback: (value: typeof transaction) => unknown) =>
+        callback(transaction),
+    });
+    const service = new CommandsService(agentControl());
+    const dispatch = vi.fn().mockResolvedValue(undefined);
+    (service as unknown as { dispatch: typeof dispatch }).dispatch = dispatch;
+    return { service, findMany, create, dispatch };
+  }
+
+  const start = {
+    script: "npm run dev",
+    worktreeId: "new-worktree",
+    port: 3000,
+  };
+
+  test("rejects an unconfirmed conflict on the resolved agent before creating a run", async () => {
+    const { service, findMany, create, dispatch } = setup();
+    await expect(service.startCustomRun(start)).rejects.toMatchObject({
+      name: CommandPortConflictError.name,
+      conflict: {
+        agentId: "agent-1",
+        agentName: "Builder",
+        port: 3000,
+        runs: [
+          {
+            id: conflictingRun.id,
+            name: conflictingRun.snapshotName,
+            displayNumber: 18,
+          },
+        ],
+      },
+    });
+    expect(findMany.mock.calls[0][0].where).toEqual({
+      agentId: "agent-1",
+      snapshotPort: 3000,
+      status: { in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"] },
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  test("requires a new confirmation when another run enters the port", async () => {
+    const { service, findMany, create } = setup();
+    findMany.mockResolvedValue([
+      conflictingRun,
+      { ...conflictingRun, id: "new-run", displayNumber: 19 },
+    ]);
+    await expect(
+      service.startCustomRun({
+        ...start,
+        portConflictResolution: {
+          action: "TERMINATE_AND_RUN",
+          agentId: "agent-1",
+          port: 3000,
+          runIds: [conflictingRun.id],
+        },
+      }),
+    ).rejects.toBeInstanceOf(CommandPortConflictError);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ["CONTINUE", []],
+    ["TERMINATE_AND_RUN", [conflictingRun.id]],
+  ] as const)(
+    "stores the port and selected blockers for %s",
+    async (action, blockers) => {
+      const { service, create } = setup();
+      await service.startCustomRun({
+        ...start,
+        portConflictResolution: {
+          action,
+          agentId: "agent-1",
+          port: 3000,
+          runIds: [conflictingRun.id, "already-finished"],
+        },
+      });
+      const { snapshotPort, portBlockerRunIdsJson, snapshotJson } =
+        create.mock.calls[0][0].data;
+      expect(snapshotPort).toBe(3000);
+      expect(JSON.parse(snapshotJson).port).toBe(3000);
+      expect(JSON.parse(portBlockerRunIdsJson)).toEqual(blockers);
+    },
+  );
 });
 
 describe("command concurrency admission", () => {
@@ -550,6 +672,82 @@ describe("command concurrency dispatch", () => {
     snapshotConcurrency: concurrency,
     queuedAt: new Date("2026-08-02T10:00:00Z"),
     attempts: [{ agentJobId: "job-held", completionProcessedAt: null }],
+  });
+
+  test("cancels a confirmed port blocker and waits for its agent acknowledgement", async () => {
+    const replacement = {
+      id: "replacement",
+      status: "QUEUED",
+      stopRequested: false,
+      predecessorRunId: null,
+      snapshotTargetKind: "ANY_AGENT_HOME",
+      snapshotScript: "npm run dev",
+      snapshotPort: 3000,
+      portBlockerRunIdsJson: '["blocker"]',
+      snapshotConcurrency: "EXCLUDED",
+      agentId: "agent-1",
+      agent: { capabilitiesJson: '["command.run"]' },
+      attempts: [],
+    };
+    const blocker = {
+      ...holder("blocker", "NON_EXCLUSIVE"),
+      displayNumber: 2,
+      status: "RUNNING",
+      snapshotName: "Other server",
+      stopRequested: false,
+    };
+    const createJob = vi
+      .fn()
+      .mockResolvedValue({ id: "job-2", status: "QUEUED" });
+    const cancelJob = vi
+      .fn()
+      .mockResolvedValue({ id: "job-held", status: "CANCELLING" });
+    const createAttempt = vi
+      .fn()
+      .mockResolvedValue({ id: "attempt-1", agentJobId: null });
+    getPrismaClient.mockResolvedValue({
+      commandRun: {
+        findUnique: vi.fn(({ where }) =>
+          where.id === blocker.id ? blocker : replacement,
+        ),
+        findMany: vi.fn(() =>
+          blocker.status === "CANCELLED" ? [] : [blocker],
+        ),
+        updateManyAndReturn: vi.fn(() => {
+          blocker.status = "CANCELLING";
+          blocker.stopRequested = true;
+          return [blocker];
+        }),
+        update: vi.fn().mockResolvedValue(replacement),
+      },
+      commandRunAttempt: {
+        findUnique: vi.fn(),
+        create: createAttempt,
+        update: vi
+          .fn()
+          .mockResolvedValue({ id: "attempt-1", status: "QUEUED" }),
+      },
+    });
+    const service = new CommandsService({
+      registerCompletionHandler: vi.fn(),
+      registerConnectionHandler: vi.fn(),
+      createJob,
+      cancelJob,
+    } as never);
+    const dispatcher = service as unknown as {
+      dispatch: (runId: string) => Promise<void>;
+    };
+
+    await dispatcher.dispatch(replacement.id);
+    await dispatcher.dispatch(replacement.id);
+    expect(cancelJob).toHaveBeenCalledTimes(1);
+    expect(cancelJob).toHaveBeenCalledWith("job-held");
+    expect(createAttempt).not.toHaveBeenCalled();
+    expect(createJob).not.toHaveBeenCalled();
+
+    blocker.status = "CANCELLED";
+    await dispatcher.dispatch(replacement.id);
+    expect(createJob).toHaveBeenCalledTimes(1);
   });
 
   test("queues an exclusive run rather than failing it when the target is busy", async () => {

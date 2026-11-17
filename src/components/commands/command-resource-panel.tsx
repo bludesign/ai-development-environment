@@ -16,9 +16,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link, useRouter } from "@/i18n/navigation";
+import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { commandStatusKey, commandTargetKey } from "./types";
+import { useCommandPortConflict } from "./command-port-conflict";
 import {
   useCommandTargetSummary,
   type CommandActionDefinition,
@@ -46,10 +48,13 @@ export function CommandResourcePanel({
   const runs = summary.recentRuns;
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const conflict = useCommandPortConflict();
   const upgraded = agentCapabilities.includes("command.run");
   const run = async (command: CommandActionDefinition) => {
     setBusy(command.id);
-    try {
+    setError(null);
+    const idempotencyKey = command.port == null ? undefined : createClientId();
+    await conflict.submit(async (portConflictResolution) => {
       const data = await controlPlaneRequest<{
         startCommandRun: { id: string };
       }>(
@@ -58,16 +63,15 @@ export function CommandResourcePanel({
           input: {
             commandId: command.id,
             origin: "MANUAL",
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            ...(portConflictResolution ? { portConflictResolution } : {}),
             ...(agentId ? { agentId } : { worktreeId }),
           },
         },
       );
       router.push(`/dashboard/commands/runs/${data.startCommandRun.id}`);
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setBusy(null);
-    }
+    }, setError);
+    setBusy(null);
   };
   const displayedError = error ?? summary.error;
   return (
@@ -104,7 +108,7 @@ export function CommandResourcePanel({
           {commands.map((command) => (
             <Button
               className="h-auto justify-start py-3 text-left"
-              disabled={!upgraded || busy !== null}
+              disabled={!upgraded || busy !== null || conflict.pending}
               key={command.id}
               onClick={() => void run(command)}
               variant="outline"
@@ -152,6 +156,7 @@ export function CommandResourcePanel({
           </div>
         )}
       </CardContent>
+      {conflict.dialog}
     </Card>
   );
 }

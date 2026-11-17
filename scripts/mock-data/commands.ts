@@ -65,8 +65,7 @@ const DEFINITIONS = {
 
 /**
  * History behind the #3001 run the `command-run` screenshot route opens. Ages are minutes
- * before `NOW` so the list spans several day groups, and `displayNumber` counts down from
- * 3000 to keep #3001 the newest run and the number sequence (3002) untouched.
+ * before `NOW` so the list spans several day groups, and `displayNumber` counts down from 3000.
  *
  * Every run is terminal on purpose. A seeded QUEUED or RUNNING run gets reconciled the moment
  * the server starts — no agent is connected to claim it, so the command service fails it and
@@ -305,8 +304,68 @@ export async function seedCommands(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  const devServer = await prisma.commandDefinition.create({
+    data: {
+      id: ids.commands.devServer,
+      name: "Start Dev Server",
+      description: "Starts the web app on local port 3000.",
+      script: "npm run dev -- --port 3000",
+      targetKind: "REPOSITORY_WORKTREE",
+      repositories: { create: { repositoryId: ids.repositories.web } },
+      port: 3000,
+      quickActionEnabled: true,
+      quickActionIconKey: "terminal",
+      createdAt: daysAgo(12),
+    },
+  });
+
   await prisma.commandRunNumberSequence.create({
-    data: { id: "default", nextValue: displayNumbers.commandRuns.latest + 1 },
+    data: {
+      id: "default",
+      nextValue: displayNumbers.commandRuns.devServer + 1,
+    },
+  });
+
+  const serverOutput =
+    "Starting the web app\r\nListening on http://localhost:3000\r\n";
+  await prisma.commandRun.create({
+    data: {
+      id: ids.commandRuns.devServer,
+      displayNumber: displayNumbers.commandRuns.devServer,
+      commandId: devServer.id,
+      idempotencyKey: "command-run-dev-server-key",
+      origin: "QUICK_ACTION",
+      status: "CANCELLED",
+      snapshotName: devServer.name,
+      snapshotDescription: devServer.description,
+      snapshotScript: devServer.script,
+      snapshotTargetKind: devServer.targetKind,
+      snapshotPort: devServer.port,
+      ...AGENTS.studio,
+      ...TARGETS.webFeature,
+      queuedAt: minutesAgo(8),
+      startedAt: minutesAgo(8),
+      finishedAt: minutesAgo(3),
+      createdAt: minutesAgo(8),
+      attempts: {
+        create: {
+          id: "command-run-dev-server-attempt",
+          attempt: 1,
+          status: "CANCELLED",
+          startedAt: minutesAgo(8),
+          finishedAt: minutesAgo(3),
+          outputChunks: {
+            create: {
+              id: "command-run-dev-server-output",
+              sequence: 1,
+              stream: "STDOUT",
+              dataBase64: Buffer.from(serverOutput).toString("base64"),
+              byteLength: Buffer.byteLength(serverOutput),
+            },
+          },
+        },
+      },
+    },
   });
 
   await prisma.commandRun.create({

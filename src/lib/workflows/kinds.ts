@@ -322,6 +322,8 @@ export const WORKFLOW_RESOURCE_KINDS = [
 
 export type WorkflowResourceKind = (typeof WORKFLOW_RESOURCE_KINDS)[number];
 
+export const COMMAND_PORT_CONFLICT_WAIT = "COMMAND_PORT_CONFLICT";
+
 export const WORKFLOW_QUICK_ACTION_KINDS = [
   "STANDARD",
   "MERGE_CONFLICT",

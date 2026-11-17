@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { CodebaseBusyError } from "@/lib/codebase-busy";
+import { CommandPortConflictError } from "@/services/commands";
 import {
   emptyWorkflowDefinition,
   type WorkflowDefinition,
@@ -1526,6 +1527,191 @@ describe("workflow runtime lifecycle guards", () => {
     expect(
       JSON.parse(attemptUpdate.data.outputJson).sessionPatch,
     ).toBeUndefined();
+  });
+
+  const commandPortConflict = {
+    agentId: "agent-1",
+    agentName: "Studio Mac",
+    port: 3000,
+    runs: [
+      {
+        id: "existing",
+        displayNumber: 12,
+        name: "Dev server",
+        status: "RUNNING",
+      },
+    ],
+  };
+
+  function commandPortAttempt() {
+    const definition = emptyWorkflowDefinition("Dev server workflow");
+    definition.nodes = [
+      {
+        id: "command",
+        name: "Dev server",
+        kind: "CUSTOM_COMMAND",
+        config: { script: "npm run dev", port: 3000 },
+        position: { x: 0, y: 0 },
+        requiredPaths: [],
+        providedPaths: [],
+        retry: { maxAttempts: 3, strategy: "EXPONENTIAL", delaySeconds: 5 },
+        failurePolicy: "FAIL",
+      },
+    ];
+    const run = {
+      id: "run-1",
+      status: "RUNNING",
+      sessionDataJson: "{}",
+      version: { definitionJson: JSON.stringify(definition) },
+    };
+    const attempt = {
+      id: "attempt-1",
+      runId: run.id,
+      nodeId: "command",
+      status: "RUNNING",
+      iterationKey: "",
+      attempt: 0,
+      idempotencyKey: "workflow-command-1",
+      supersededAt: null,
+      run,
+    };
+    prisma.workflowStepAttempt.findUnique.mockResolvedValue(attempt);
+    prisma.workflowRun.findUnique.mockResolvedValue(run);
+    return { run, attempt };
+  }
+
+  test("restores a port decision for the same attempt and parks on a new conflict", async () => {
+    commandPortAttempt();
+    prisma.workflowWait.findFirst.mockResolvedValue(null);
+    const newerConflict = {
+      ...commandPortConflict,
+      runs: [
+        ...commandPortConflict.runs,
+        {
+          id: "newer",
+          displayNumber: 13,
+          name: "Another server",
+          status: "RUNNING",
+        },
+      ],
+    };
+    const execute = vi
+      .fn()
+      .mockRejectedValueOnce(new CommandPortConflictError(commandPortConflict))
+      .mockRejectedValueOnce(new CommandPortConflictError(newerConflict));
+    const service = new WorkflowsService(new WorkflowEventsService(), {
+      execute,
+    } as never);
+
+    await internals(service).executeAttempt(
+      "attempt-1",
+      new AbortController().signal,
+    );
+
+    expect(prisma.workflowWait.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        attemptId: "attempt-1",
+        kind: "COMMAND_PORT_CONFLICT",
+        predicateJson: JSON.stringify(commandPortConflict),
+      }),
+    });
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "WAITING" }),
+      }),
+    );
+    const decision = {
+      action: "CONTINUE",
+      agentId: "agent-1",
+      port: 3000,
+      runIds: ["existing"],
+    };
+    prisma.workflowWait.findFirst.mockResolvedValue({
+      resultJson: JSON.stringify(decision),
+    });
+
+    const restartedService = new WorkflowsService(new WorkflowEventsService(), {
+      execute,
+    } as never);
+    await internals(restartedService).executeAttempt(
+      "attempt-1",
+      new AbortController().signal,
+    );
+
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      attempt: { id: "attempt-1", idempotencyKey: "workflow-command-1" },
+      commandPortConflictResolution: decision,
+    });
+    const [firstWait, secondWait] = prisma.workflowWait.create.mock.calls.map(
+      ([{ data }]) => data,
+    );
+    expect(secondWait.id).not.toBe(firstWait.id);
+    expect(JSON.parse(secondWait.predicateJson)).toEqual(newerConflict);
+  });
+
+  test("records a decision only for the pending conflict it was shown for", async () => {
+    const { run, attempt } = commandPortAttempt();
+    const pending = {
+      id: "wait-1",
+      status: "PENDING",
+      runId: run.id,
+      attemptId: attempt.id,
+      predicateJson: JSON.stringify(commandPortConflict),
+      run: { ...run, status: "WAITING" },
+      attempt: {
+        ...attempt,
+        status: "WAITING",
+        phase: "COMMAND_PORT_CONFLICT",
+      },
+    };
+    prisma.workflowWait.findFirst
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce({ ...pending, status: "RESOLVED" });
+    prisma.workflowWait.updateMany.mockResolvedValue({ count: 1 });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await service.resolveCommandPortConflict("wait-1", "TERMINATE_AND_RUN");
+    await expect(
+      service.resolveCommandPortConflict("wait-1", "CONTINUE"),
+    ).rejects.toThrow("no longer pending");
+
+    expect(prisma.workflowWait.updateMany).toHaveBeenCalledOnce();
+    const resolved = prisma.workflowWait.updateMany.mock.calls[0]?.[0];
+    expect(JSON.parse(resolved.data.resultJson)).toEqual({
+      action: "TERMINATE_AND_RUN",
+      agentId: "agent-1",
+      port: 3000,
+      runIds: ["existing"],
+    });
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: { status: "PENDING", phase: "PENDING" },
+      }),
+    );
+  });
+
+  test("cancels the command step without launching or creating a retry wait", async () => {
+    commandPortAttempt();
+    prisma.workflowWait.findFirst.mockResolvedValue({
+      resultJson: '{"action":"CANCEL"}',
+    });
+    const execute = vi.fn();
+    const service = new WorkflowsService(new WorkflowEventsService(), {
+      execute,
+    } as never);
+
+    await internals(service).executeAttempt(
+      "attempt-1",
+      new AbortController().signal,
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(prisma.workflowWait.create).not.toHaveBeenCalled();
+    expect(prisma.workflowStepAttempt.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED", phase: "FAILED" }),
+      }),
+    );
   });
 
   test("reports how long a wait lasted and what freed it", async () => {

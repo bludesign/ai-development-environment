@@ -3631,6 +3631,7 @@ model CommandDefinition {
   name                     String
   description              String                        @default("")
   script                   String
+  port                     Int?
   targetKind               String
   targetAgentId            String?
   restartPolicy            String                        @default("NEVER")
@@ -3673,6 +3674,8 @@ model CommandRun {
   snapshotName                 String
   snapshotDescription          String              @default("")
   snapshotScript               String
+  snapshotPort                 Int?
+  portBlockerRunIdsJson        String              @default("[]")
   snapshotTargetKind           String
   snapshotRestartPolicy        String              @default("NEVER")
   snapshotRestartLimit         Int?
@@ -3708,6 +3711,7 @@ model CommandRun {
 
   @@index([commandId, createdAt])
   @@index([agentId, status, createdAt])
+  @@index([agentId, snapshotPort, status])
   @@index([worktreeId, status, createdAt])
   @@index([archivedAt, createdAt])
   @@index([status, nextRestartAt])
