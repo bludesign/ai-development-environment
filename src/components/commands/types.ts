@@ -162,6 +162,8 @@ export const COMMAND_DEFINITION_FIELDS = `
   targetRepositories { id name displayOrigin }
 `;
 
+export const COMMAND_TAILSCALE_ADDRESS_FIELDS = "kind protocol endpoint url";
+
 export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
   snapshotScript snapshotPort snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit

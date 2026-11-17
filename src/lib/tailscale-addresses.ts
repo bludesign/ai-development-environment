@@ -2,7 +2,9 @@ import type { TailscaleServeRoute } from "@ai-development-environment/agent-cont
 
 export type TailscaleAddress = {
   kind: "DNS" | "IPv4" | "IPv6";
-  url: string;
+  protocol: TailscaleServeRoute["protocol"];
+  endpoint: string;
+  url: string | null;
 };
 
 type Listener = Pick<
@@ -14,19 +16,11 @@ export function tailscaleListenerAddresses(
   route: Listener,
   identity: { dnsHostname: string | null; ipv4: string[]; ipv6: string[] },
 ): Array<TailscaleAddress & { address: string }> {
-  const scheme =
-    route.protocol === "HTTP"
-      ? "http"
-      : route.protocol === "TCP"
-        ? "tcp"
-        : "https";
+  const { protocol, listenPort, mountPath } = route;
+  const isWeb = protocol === "HTTP" || protocol === "HTTPS";
   const defaultPort =
-    (scheme === "http" && route.listenPort === 80) ||
-    (scheme === "https" && route.listenPort === 443);
-  const path =
-    route.protocol === "HTTP" || route.protocol === "HTTPS"
-      ? route.mountPath
-      : "";
+    (protocol === "HTTP" && listenPort === 80) ||
+    (protocol === "HTTPS" && listenPort === 443);
   const addresses: Array<{ kind: TailscaleAddress["kind"]; address: string }> =
     [
       ...(identity.dnsHostname
@@ -40,7 +34,11 @@ export function tailscaleListenerAddresses(
     return {
       kind,
       address,
-      url: `${scheme}://${host}${defaultPort ? "" : `:${route.listenPort}`}${path}`,
+      protocol,
+      endpoint: `${host}:${listenPort}`,
+      url: isWeb
+        ? `${protocol.toLowerCase()}://${host}${defaultPort ? "" : `:${listenPort}`}${mountPath}`
+        : null,
     };
   });
 }

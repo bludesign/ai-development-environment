@@ -14,6 +14,8 @@ export type ToolInvocationContext = {
   runId?: string;
   runAgentId?: string;
   workflowRunId?: string;
+  /** Tool names selected by the server for a preset or run MCP scope. */
+  mcpAllowedToolNames?: ReadonlySet<string>;
   authentication?: "apiKey" | "oauth" | "session" | "agent";
   oauthPrincipal?: McpOAuthPrincipal;
   /** Server-authenticated caller identity, independent of request metadata. */

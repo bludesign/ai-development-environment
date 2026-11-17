@@ -58,8 +58,11 @@ export async function loadCommandTailscaleAddressesByAgent(agentIds: string[]) {
     const byPort = new Map<number, Map<string, TailscaleAddress>>();
     for (const route of parseArray(state.routesJson).flatMap(parseRoute)) {
       const links = byPort.get(route.destination.port) ?? new Map();
-      for (const { kind, url } of tailscaleListenerAddresses(route, identity)) {
-        links.set(url, { kind, url });
+      for (const { address: _host, ...address } of tailscaleListenerAddresses(
+        route,
+        identity,
+      )) {
+        links.set(address.url ?? address.endpoint, address);
       }
       byPort.set(route.destination.port, links);
     }

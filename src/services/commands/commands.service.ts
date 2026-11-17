@@ -1658,15 +1658,11 @@ export class CommandsService {
         !latest || candidate.attempt > latest.attempt ? candidate : latest,
       null,
     );
-    // A run already owns its target once an attempt has a job that has not
-    // reported back, so only work that is about to claim the target is
-    // admitted. Checking before the attempt row is written matters for a
-    // restart: its previous attempt is complete, so a blocked restart would
-    // otherwise mint a fresh attempt on every reconcile tick.
-    const holding = Boolean(
-      latestAttempt?.agentJobId && !latestAttempt.completionProcessedAt,
-    );
-    if (!holding && !(await this.admitRun(run))) return;
+    // A queued job already has an attempt. A second dispatch from an earlier
+    // reconciliation snapshot must leave that job in place.
+    if (latestAttempt?.agentJobId && !latestAttempt.completionProcessedAt)
+      return;
+    if (!(await this.admitRun(run))) return;
     const reuseLatestAttempt =
       latestAttempt &&
       !latestAttempt.agentJobId &&
@@ -1785,7 +1781,7 @@ export class CommandsService {
     // out here.
     const jobId = run.attempts[0]?.agentJobId;
     const job = jobId ? await this.agentControl.cancelJob(jobId) : null;
-    return cancellableJob(job) ? null : this.finishCancelled(id, false);
+    return cancellableJob(job) ? null : this.finishCancelled(id);
   }
 
   async rerun(
@@ -1962,24 +1958,21 @@ export class CommandsService {
     return persisted;
   }
 
-  private async finishCancelled(
-    runId: string,
-    dispatchSuccessor = true,
-  ): Promise<string | null> {
+  private async finishCancelled(runId: string): Promise<string | null> {
     const prisma = await getPrismaClient();
-    const updated = await prisma.commandRun.update({
-      where: { id: runId },
+    const [updated] = await prisma.commandRun.updateManyAndReturn({
+      where: { id: runId, status: { in: [...ACTIVE_RUN_STATUSES] } },
       data: {
         status: "CANCELLED",
         finishedAt: new Date(),
         nextRestartAt: null,
       },
     });
+    if (!updated) return null;
     publishRun(updated);
     const successor = await prisma.commandRun.findUnique({
       where: { predecessorRunId: runId },
     });
-    if (successor && dispatchSuccessor) await this.dispatch(successor.id);
     return successor?.id ?? null;
   }
 
@@ -2065,7 +2058,16 @@ export class CommandsService {
     });
     if (completed.count !== 1) return;
     if (attempt.run.stopRequested || job.status === "CANCELLED") {
-      await this.finishCancelled(attempt.runId);
+      const successorId = await this.finishCancelled(attempt.runId);
+      if (successorId) {
+        // Cancelling an unclaimed job can project completion inside the
+        // dispatch lock. Queue the successor without waiting for that lock.
+        void this.dispatch(successorId).catch((error) => {
+          if (process.env.NODE_ENV !== "test") {
+            console.error("Command successor dispatch failed:", error);
+          }
+        });
+      }
       return;
     }
     const clean = job.status === "SUCCEEDED" && result.exitCode === 0;
@@ -2142,8 +2144,11 @@ export class CommandsService {
         const job = attempt?.agentJob ?? null;
         if (job && cancellableJob(job)) {
           await this.agentControl.cancelJob(job.id);
+        } else if (job && !attempt?.completionProcessedAt) {
+          await this.handleAttemptCompletion(job);
         } else {
-          await this.finishCancelled(run.id);
+          const successorId = await this.finishCancelled(run.id);
+          if (successorId) await this.dispatch(successorId);
         }
         continue;
       }

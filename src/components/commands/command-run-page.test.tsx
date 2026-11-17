@@ -244,7 +244,14 @@ describe("CommandRunPage", () => {
             commandRun: {
               ...run,
               snapshotPort: 3000,
-              tailscaleAddresses: [{ kind: "IPv6", url }],
+              tailscaleAddresses: [
+                {
+                  kind: "IPv6",
+                  protocol: "HTTPS",
+                  endpoint: "[fd7a:115c:a1e0::12]:8443",
+                  url,
+                },
+              ],
             },
           } as never)
         : defaultRequest(query, variables, options),
@@ -255,6 +262,38 @@ describe("CommandRunPage", () => {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(screen.getByText("3000")).toBeDefined();
   });
+
+  test("copies a TLS-terminated TCP endpoint from run details", async () => {
+    const endpoint = "[fd7a:115c:a1e0::12]:6543";
+    const defaultRequest = request.getMockImplementation()!;
+    request.mockImplementation((query, variables, options) =>
+      query.includes("CommandRunDetail")
+        ? Promise.resolve({
+            commandRun: {
+              ...run,
+              snapshotPort: 5432,
+              tailscaleAddresses: [
+                {
+                  kind: "IPv6",
+                  protocol: "TLS_TERMINATED_TCP",
+                  endpoint,
+                  url: null,
+                },
+              ],
+            },
+          } as never)
+        : defaultRequest(query, variables, options),
+    );
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText(`IPv6 · ${endpoint} (TLS)`)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /6543/ })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: `Copy endpoint ${endpoint}` }),
+    );
+    await screen.findByText("Endpoint copied.");
+    expect(writeText).toHaveBeenCalledWith(endpoint);
+  });
+
   test("links to the localized raw command output", async () => {
     render(<CommandRunPage runId="run-1" />);
 

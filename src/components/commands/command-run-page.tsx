@@ -23,6 +23,7 @@ import {
   decodeTerminalBase64,
   TerminalOutputCard,
 } from "@/components/common/terminal-output-card";
+import { TailscaleEndpointCopy } from "@/components/tailscale/tailscale-endpoint-copy";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ import { useCommandPortConflict } from "./command-port-conflict";
 import {
   COMMAND_RUN_FIELDS,
   COMMAND_RUN_QUEUE_FIELDS,
+  COMMAND_TAILSCALE_ADDRESS_FIELDS,
   activeCommandRun,
   commandConcurrencyKey,
   commandOriginKey,
@@ -157,7 +159,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
   const loadRun = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{ commandRun: CommandRun | null }>(
-        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} ${COMMAND_RUN_QUEUE_FIELDS} tailscaleAddresses { kind url } predecessor { id displayNumber } successor { id displayNumber } } }`,
+        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} ${COMMAND_RUN_QUEUE_FIELDS} tailscaleAddresses { ${COMMAND_TAILSCALE_ADDRESS_FIELDS} } predecessor { id displayNumber } successor { id displayNumber } } }`,
         { id: runId },
       );
       setRun(data.commandRun);
@@ -524,19 +526,23 @@ export function CommandRunPage({ runId }: { runId: string }) {
                 label={t("tailscaleAddresses")}
               >
                 <ul className="space-y-1">
-                  {run.tailscaleAddresses?.map(({ kind, url }) => (
-                    <li key={url}>
-                      <a
-                        className="inline-flex items-start gap-2 text-primary hover:underline"
-                        href={url}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
-                        <span className="min-w-0 break-all">
-                          {kind} · {url}
-                        </span>
-                      </a>
+                  {run.tailscaleAddresses?.map((address) => (
+                    <li key={address.url ?? address.endpoint}>
+                      {address.url ? (
+                        <a
+                          className="inline-flex items-start gap-2 text-primary hover:underline"
+                          href={address.url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
+                          <span className="min-w-0 break-all">
+                            {address.kind} · {address.url}
+                          </span>
+                        </a>
+                      ) : (
+                        <TailscaleEndpointCopy address={address} />
+                      )}
                     </li>
                   ))}
                 </ul>

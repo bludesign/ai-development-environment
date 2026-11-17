@@ -1,15 +1,22 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
+import { CommandPortConflictError } from "@/services/commands";
+
 const authorizeToolRequest = vi.hoisted(() => vi.fn());
+const callTool = vi.hoisted(() => vi.fn());
 
 vi.mock("@/services/tools", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/tools")>()),
   authorizeToolRequest,
 }));
+vi.mock("@/services/server-services", () => ({
+  getServerServices: () => ({ toolsService: { callTool } }),
+}));
 
 import { POST } from "./route";
 
 beforeEach(() => {
+  callTool.mockReset();
   authorizeToolRequest.mockResolvedValue({
     context: {
       caller: "user:user-1@unknown",
@@ -42,5 +49,38 @@ describe("tool-call endpoint authentication", () => {
       new Request("https://control.example/api/tools/call", { method: "POST" }),
     );
     expect(response.status).toBe(401);
+  });
+
+  test("returns the command port conflict IDs in an HTTP conflict response", async () => {
+    const portConflict = {
+      agentId: "agent-1",
+      agentName: "Builder",
+      port: 3000,
+      runs: [
+        { id: "run-1", displayNumber: 1, name: "Preview", status: "RUNNING" },
+      ],
+    };
+    const failure = new CommandPortConflictError(portConflict);
+    callTool.mockRejectedValueOnce(failure);
+    const response = await POST(
+      new Request("https://control.example/api/tools/call", {
+        method: "POST",
+        body: JSON.stringify({
+          groupId: "builtin:commands",
+          name: "start_command",
+          arguments: { commandId: "preview", agentId: "agent-1" },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(response.headers.get("x-request-id")).toBe("request-1");
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "COMMAND_PORT_CONFLICT",
+        message: failure.message,
+        portConflict,
+      },
+    });
   });
 });

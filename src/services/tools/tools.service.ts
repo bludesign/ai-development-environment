@@ -72,6 +72,11 @@ const RUN_REPOSITORY_SCOPED_TOOLS = new Set([
   "get_codebase_repository_preparations",
   "save_codebase_repository_preparations",
 ]);
+const COMMAND_LAUNCH_TOOLS = new Set([
+  "start_command",
+  "start_custom_command",
+  "rerun_command",
+]);
 
 export type ServerWithSecrets = {
   id: string;
@@ -1248,6 +1253,26 @@ export class ToolsService {
     context?: ToolInvocationContext,
   ): ReturnType<BuiltInToolRegistry["callByName"]> {
     await assertMcpToolPermission(context, name);
+    if (
+      context?.mcpAllowedToolNames &&
+      !context.mcpAllowedToolNames.has("terminate_command_run") &&
+      COMMAND_LAUNCH_TOOLS.has(name) &&
+      args &&
+      typeof args === "object" &&
+      "portConflictResolution" in args
+    ) {
+      const resolution = args.portConflictResolution;
+      if (
+        resolution &&
+        typeof resolution === "object" &&
+        "action" in resolution &&
+        resolution.action === "TERMINATE_AND_RUN"
+      ) {
+        throw new Error(
+          "Terminating command port conflicts requires terminate_command_run in this MCP scope",
+        );
+      }
+    }
     const groupId = this.builtInTools.groupIdForName(name);
     if (!groupId) throw new Error(`Unknown built-in tool: ${name}`);
     await this.assertProviderToolConfigured(groupId);

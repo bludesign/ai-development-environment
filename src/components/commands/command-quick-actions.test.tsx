@@ -8,11 +8,16 @@ import {
 import type { AnchorHTMLAttributes, ReactNode } from "react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { copyText } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { CommandQuickActions } from "./command-quick-actions";
 import { CommandResourcePanel } from "./command-resource-panel";
 
+vi.mock("@/lib/browser-utils", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/browser-utils")>()),
+  copyText: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("@/lib/control-plane-client", () => ({
   controlPlaneRequest: vi.fn(),
   controlPlaneSubscriptions: () => ({ subscribe: () => () => undefined }),
@@ -183,7 +188,7 @@ describe("CommandQuickActions", () => {
       operation.includes("commandTargetSummaries("),
     )?.[0];
     expect(query).toContain(
-      "activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { kind url } }",
+      "activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { kind protocol endpoint url } }",
     );
     expect(query).not.toMatch(/\bscript\b|\bsnapshot\b|first: 50/);
   });
@@ -192,7 +197,18 @@ describe("CommandQuickActions", () => {
     const url = "https://studio.acme-tailnet.ts.net/dashboard";
     respondWith(
       [],
-      { ...serve, port: 3000, tailscaleAddresses: [{ kind: "DNS", url }] },
+      {
+        ...serve,
+        port: 3000,
+        tailscaleAddresses: [
+          {
+            kind: "DNS",
+            protocol: "HTTPS",
+            endpoint: "studio.acme-tailnet.ts.net:443",
+            url,
+          },
+        ],
+      },
       "WORKTREE",
     );
     render(
@@ -205,6 +221,31 @@ describe("CommandQuickActions", () => {
     const address = screen.getByRole("menuitem", { name: `DNS · ${url}` });
     expect(address.getAttribute("href")).toBe(url);
     expect(address.getAttribute("target")).toBe("_blank");
+  });
+
+  test("copies a raw TCP endpoint from quick actions", async () => {
+    const endpoint = "studio.acme-tailnet.ts.net:5432";
+    respondWith([], {
+      ...serve,
+      port: 5432,
+      tailscaleAddresses: [
+        { kind: "DNS", protocol: "TCP", endpoint, url: null },
+      ],
+    });
+    render(
+      <CommandQuickActions
+        agentCapabilities={["command.run"]}
+        agentId="agent-1"
+      />,
+    );
+    await openRunMenu("Open Tailscale addresses for Serve");
+    const item = screen.getByRole("menuitem", {
+      name: `Copy endpoint ${endpoint}`,
+    });
+    expect(item.getAttribute("href")).toBeNull();
+    fireEvent.click(item);
+    await screen.findByText("Endpoint copied.");
+    expect(copyText).toHaveBeenCalledWith(endpoint);
   });
 
   test("asks for consent again when another run takes the same port", async () => {

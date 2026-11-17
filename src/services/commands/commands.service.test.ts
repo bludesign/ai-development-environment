@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
+import { AgentControlService } from "@/services/agent-control";
+
 import {
   CommandPortConflictError,
   CommandsService,
@@ -174,9 +176,7 @@ describe("CommandsService.terminateRun", () => {
   beforeEach(() => vi.clearAllMocks());
 
   const terminateWith = async (job: { status: string } | null) => {
-    const update = vi
-      .fn()
-      .mockResolvedValue({ id: "run-1", status: "CANCELLING" });
+    const update = vi.fn(({ data }) => [{ id: "run-1", ...data }]);
     getPrismaClient.mockResolvedValue({
       commandRun: {
         findUnique: vi
@@ -187,10 +187,7 @@ describe("CommandsService.terminateRun", () => {
             attempts: [{ id: "attempt-3", agentJobId: job ? "job-3" : null }],
           })
           .mockResolvedValue(null),
-        update,
-        updateManyAndReturn: vi
-          .fn()
-          .mockResolvedValue([{ id: "run-1", status: "CANCELLING" }]),
+        updateManyAndReturn: update,
       },
     });
     const cancelJob = vi.fn().mockResolvedValue(job);
@@ -224,6 +221,107 @@ describe("CommandsService.terminateRun", () => {
           (call as { data: { status: string } }).data.status === "CANCELLED",
       ),
     ).toBe(false);
+  });
+
+  test("settles a queued job and dispatches its successor once even if reconciliation also sees it queued", async () => {
+    const job = {
+      id: "job-1",
+      kind: "command.run",
+      agentId: "agent-1",
+      status: "QUEUED",
+      executionToken: null,
+      startedAt: null,
+    };
+    const attempt = {
+      id: "attempt-1",
+      runId: "run-1",
+      agentJobId: job.id,
+      completionProcessedAt: null,
+    };
+    const run = {
+      id: "run-1",
+      status: "QUEUED",
+      stopRequested: false,
+      attempts: [attempt],
+    };
+    const successor = {
+      id: "run-2",
+      status: "QUEUED",
+      predecessorRunId: run.id,
+      snapshotTargetKind: "ANY_AGENT_HOME",
+      snapshotConcurrency: "EXCLUDED",
+      snapshotScript: "npm run dev",
+      snapshotPort: 3000,
+      portBlockerRunIdsJson: "[]",
+      agentId: "agent-1",
+      agent: { capabilitiesJson: '["command.run"]' },
+      attempts: [] as Array<{
+        id: string;
+        attempt: number;
+        agentJobId: string | null;
+        completionProcessedAt: Date | null;
+      }>,
+    };
+    const projectAttempt = vi.fn().mockResolvedValue({ count: 1 });
+    const updateRun = vi.fn(({ data, where }) =>
+      where.status.in.includes(run.status) ? [Object.assign(run, data)] : [],
+    );
+    const prisma = {
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue(job),
+        updateManyAndReturn: vi.fn(({ data }) => [Object.assign(job, data)]),
+      },
+      commandRun: {
+        findUnique: vi.fn(({ where }) =>
+          where.id === run.id ? run : successor,
+        ),
+        findMany: vi.fn().mockResolvedValue([{ ...successor, attempts: [] }]),
+        updateManyAndReturn: updateRun,
+        update: vi.fn().mockResolvedValue(successor),
+      },
+      commandRunAttempt: {
+        findUnique: vi.fn(({ where }) =>
+          where.agentJobId === job.id
+            ? { ...attempt, agentJob: job, run }
+            : null,
+        ),
+        updateMany: projectAttempt,
+        create: vi.fn(({ data }) => ({
+          ...data,
+          agentJobId: null,
+          completionProcessedAt: null,
+        })),
+        update: vi.fn(({ where, data }) => {
+          const dispatched = { id: where.id, attempt: 1, ...data };
+          successor.attempts.push(dispatched);
+          return dispatched;
+        }),
+      },
+      operationHolder: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: (callback: (transaction: unknown) => unknown) =>
+        callback(prisma),
+    };
+    getPrismaClient.mockResolvedValue(prisma);
+    const control = new AgentControlService();
+    const createJob = vi
+      .spyOn(control, "createJob")
+      .mockResolvedValue({ id: "job-2", status: "QUEUED" } as never);
+    const service = new CommandsService(control);
+
+    await expect(service.terminateRun(run.id)).resolves.toMatchObject({
+      status: "CANCELLED",
+    });
+    expect(job.status).toBe("CANCELLED");
+    expect(projectAttempt).toHaveBeenCalledWith({
+      where: { id: attempt.id, completionProcessedAt: null },
+      data: expect.objectContaining({ status: "CANCELLED" }),
+    });
+    await service.reconcile();
+    expect(createJob).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ commandRunId: successor.id }),
+      }),
+    );
   });
 });
 
@@ -1410,7 +1508,7 @@ describe("command reconciliation", () => {
       // requested between attempts left the run stuck in CANCELLING forever.
       const update = vi
         .fn()
-        .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+        .mockResolvedValue([{ id: "run-1", status: "CANCELLED" }]);
       const cancelJob = vi.fn();
       getPrismaClient.mockResolvedValue({
         commandRun: {
@@ -1432,7 +1530,7 @@ describe("command reconciliation", () => {
             },
           ]),
           findUnique: vi.fn().mockResolvedValue(null),
-          update,
+          updateManyAndReturn: update,
         },
       });
       const service = new CommandsService({
@@ -1446,7 +1544,7 @@ describe("command reconciliation", () => {
       expect(cancelJob).not.toHaveBeenCalled();
       expect(update).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: "run-1" },
+          where: expect.objectContaining({ id: "run-1" }),
           data: expect.objectContaining({ status: "CANCELLED" }),
         }),
       );
@@ -1476,7 +1574,7 @@ describe("command reconciliation", () => {
           },
         ]),
         findUnique: vi.fn().mockResolvedValue(null),
-        update,
+        updateManyAndReturn: update,
       },
     });
     const service = new CommandsService({
@@ -1496,7 +1594,7 @@ describe("command reconciliation", () => {
     // has to close it out directly.
     const update = vi
       .fn()
-      .mockResolvedValue({ id: "run-1", status: "CANCELLED" });
+      .mockResolvedValue([{ id: "run-1", status: "CANCELLED" }]);
     const cancelJob = vi.fn();
     getPrismaClient.mockResolvedValue({
       commandRun: {
@@ -1518,7 +1616,7 @@ describe("command reconciliation", () => {
           },
         ]),
         findUnique: vi.fn().mockResolvedValue(null),
-        update,
+        updateManyAndReturn: update,
       },
     });
     const service = new CommandsService({

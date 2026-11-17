@@ -139,6 +139,15 @@ describe("batched command target summaries", () => {
             appCapabilities: [],
             proxyProtocol: "NONE",
           },
+          {
+            protocol: "TLS_TERMINATED_TCP",
+            listenPort: 6543,
+            mountPath: "/",
+            destination: { protocol: "TCP", port: 5432, path: "" },
+            funnel: false,
+            appCapabilities: [],
+            proxyProtocol: "NONE",
+          },
           { invalid: true },
         ]),
       },
@@ -152,13 +161,39 @@ describe("batched command target summaries", () => {
       expect.objectContaining({ where: { agentId: { in: ["a", "b"] } } }),
     );
     expect(studio.commands[0].tailscaleAddresses).toEqual([
-      { kind: "DNS", url: "https://studio.example.ts.net:8443/dashboard" },
-      { kind: "IPv4", url: "https://100.91.0.12:8443/dashboard" },
-      { kind: "IPv6", url: "https://[fd7a:115c:a1e0::12]:8443/dashboard" },
+      {
+        kind: "DNS",
+        protocol: "HTTPS",
+        endpoint: "studio.example.ts.net:8443",
+        url: "https://studio.example.ts.net:8443/dashboard",
+      },
+      {
+        kind: "IPv4",
+        protocol: "HTTPS",
+        endpoint: "100.91.0.12:8443",
+        url: "https://100.91.0.12:8443/dashboard",
+      },
+      {
+        kind: "IPv6",
+        protocol: "HTTPS",
+        endpoint: "[fd7a:115c:a1e0::12]:8443",
+        url: "https://[fd7a:115c:a1e0::12]:8443/dashboard",
+      },
     ]);
-    expect(studio.activeRuns[0].tailscaleAddresses[0]).toEqual({
+    const endpoints = studio.activeRuns[0].tailscaleAddresses;
+    expect(endpoints).toHaveLength(6);
+    expect(endpoints.every(({ url }) => url === null)).toBe(true);
+    expect(endpoints).toContainEqual({
+      kind: "IPv6",
+      protocol: "TCP",
+      endpoint: "[fd7a:115c:a1e0::12]:5432",
+      url: null,
+    });
+    expect(endpoints).toContainEqual({
       kind: "DNS",
-      url: "tcp://studio.example.ts.net:5432",
+      protocol: "TLS_TERMINATED_TCP",
+      endpoint: "studio.example.ts.net:6543",
+      url: null,
     });
     expect(build.commands[0].tailscaleAddresses).toEqual([]);
   });

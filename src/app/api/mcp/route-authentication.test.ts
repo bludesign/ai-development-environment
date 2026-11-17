@@ -216,6 +216,11 @@ describe.each(["/api/mcp", "/api/mcp?preset=preset-1"])(
       expect(invoke.mock.calls[0][2]).toMatchObject({
         authentication: "apiKey",
       });
+      expect(invoke.mock.calls[0][2].mcpAllowedToolNames).toEqual(
+        path.includes("preset")
+          ? new Set(["get_codebases", "aide_ext_0123456789abcdef_search"])
+          : undefined,
+      );
     });
 
     test.each([undefined, "aide_invalid"])(

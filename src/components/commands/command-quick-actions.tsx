@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { ConfigurationIcon } from "@/components/builds/configuration-icon";
+import { TailscaleEndpointCopy } from "@/components/tailscale/tailscale-endpoint-copy";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -145,7 +146,7 @@ export function CommandQuickActions({
               [
                 ...(command.tailscaleAddresses ?? []),
                 ...runs.flatMap((run) => run.tailscaleAddresses ?? []),
-              ].map((address) => [address.url, address]),
+              ].map((address) => [address.url ?? address.endpoint, address]),
             ).values(),
           ];
           const hasMenu = runs.length > 0 || addresses.length > 0;
@@ -185,16 +186,28 @@ export function CommandQuickActions({
                         <DropdownMenuLabel>
                           {t("tailscaleAddresses")}
                         </DropdownMenuLabel>
-                        {addresses.map(({ kind, url }) => (
-                          <DropdownMenuItem asChild key={url}>
-                            <a href={url} rel="noreferrer" target="_blank">
-                              <ExternalLink />
-                              <span className="min-w-0 break-all">
-                                {kind} · {url}
-                              </span>
-                            </a>
-                          </DropdownMenuItem>
-                        ))}
+                        {addresses.map((address) =>
+                          address.url ? (
+                            <DropdownMenuItem asChild key={address.url}>
+                              <a
+                                href={address.url}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                <ExternalLink />
+                                <span className="min-w-0 break-all">
+                                  {address.kind} · {address.url}
+                                </span>
+                              </a>
+                            </DropdownMenuItem>
+                          ) : (
+                            <TailscaleEndpointCopy
+                              address={address}
+                              key={address.endpoint}
+                              menuItem
+                            />
+                          ),
+                        )}
                         {runs.length > 0 && <DropdownMenuSeparator />}
                       </>
                     )}

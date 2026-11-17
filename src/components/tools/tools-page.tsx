@@ -120,13 +120,20 @@ async function responseJson(response: Response): Promise<unknown> {
   if (!response.ok) {
     const error =
       body && typeof body === "object" && "error" in body
-        ? (body.error as { message?: unknown })
+        ? (body.error as {
+            code?: unknown;
+            message?: unknown;
+            portConflict?: unknown;
+          })
         : null;
-    throw new Error(
+    const failure = new Error(
       typeof error?.message === "string"
         ? error.message
         : `HTTP ${response.status}`,
     );
+    if (error?.code === "COMMAND_PORT_CONFLICT")
+      throw Object.assign(failure, { portConflict: error.portConflict });
+    throw failure;
   }
   return body;
 }
@@ -1189,7 +1196,11 @@ function ToolRunner({
       setResult(body.result);
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
-      setResult(undefined);
+      setResult(
+        value instanceof Error && "portConflict" in value
+          ? value.portConflict
+          : undefined,
+      );
     } finally {
       setBusy(false);
     }
@@ -1303,18 +1314,20 @@ function ToolRunner({
         {copyState === "FAILED" && (
           <p className="text-xs text-destructive">{t("copyFailed")}</p>
         )}
-        {error ? (
+        {error && (
           <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
           </Alert>
-        ) : result === undefined ? (
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            {t("noResponse")}
-          </div>
-        ) : (
+        )}
+        {result !== undefined && (
           <pre className="max-h-96 overflow-auto rounded-lg bg-muted p-3 font-mono text-xs whitespace-pre-wrap">
             {responseText}
           </pre>
+        )}
+        {!error && result === undefined && (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            {t("noResponse")}
+          </div>
         )}
       </div>
     </form>

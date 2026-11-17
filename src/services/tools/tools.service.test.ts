@@ -671,6 +671,76 @@ describe("MCP tool presets", () => {
     expect(repositoryPreparations).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    ["start_command", "startRun", { commandId: "command-1" }],
+    ["start_custom_command", "startCustomRun", { script: "echo hello" }],
+    ["rerun_command", "rerun", { id: "command-run-1" }],
+  ] as const)(
+    "%s requires the termination tool for terminating port conflicts within an MCP scope",
+    async (name, method, input) => {
+      const launch = vi.fn().mockResolvedValue({ id: "new-command-run" });
+      const service = new ToolsService(
+        {} as never,
+        undefined,
+        { commands: { [method]: launch } as never },
+        undefined,
+        {
+          execute: async (
+            _context: unknown,
+            operation: () => Promise<unknown>,
+          ) => operation(),
+        } as never,
+      );
+      const context = {
+        caller: "mcp:test",
+        correlationId: "call",
+        source: "MCP" as const,
+        mcpAllowedToolNames: new Set<string>([name]),
+      };
+      const resolution = {
+        agentId: "agent-1",
+        port: 3000,
+        runIds: ["blocking-run"],
+      };
+      const terminating = {
+        ...input,
+        portConflictResolution: { ...resolution, action: "TERMINATE_AND_RUN" },
+      };
+
+      await expect(
+        service.callBuiltInTool(name, terminating, context),
+      ).rejects.toThrow("requires terminate_command_run in this MCP scope");
+      expect(launch).not.toHaveBeenCalled();
+
+      await expect(
+        service.callBuiltInTool(
+          name,
+          {
+            ...input,
+            portConflictResolution: { ...resolution, action: "CONTINUE" },
+          },
+          context,
+        ),
+      ).resolves.toMatchObject({
+        structuredContent: { run: { id: "new-command-run" } },
+      });
+      await expect(
+        service.callBuiltInTool(name, terminating, {
+          ...context,
+          mcpAllowedToolNames: new Set([name, "terminate_command_run"]),
+        }),
+      ).resolves.toMatchObject({
+        structuredContent: { run: { id: "new-command-run" } },
+      });
+      await expect(
+        service.callBuiltInTool(name, terminating),
+      ).resolves.toMatchObject({
+        structuredContent: { run: { id: "new-command-run" } },
+      });
+      expect(launch).toHaveBeenCalledTimes(3);
+    },
+  );
+
   test.each(["legacy", "snapshot"])(
     "scopes %s run simulator tools to the authenticated agent",
     async (dispatch) => {

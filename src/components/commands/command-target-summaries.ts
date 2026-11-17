@@ -7,8 +7,12 @@ import {
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
-import type { CommandDefinition } from "./types";
 import type { TailscaleAddress } from "@/lib/tailscale-addresses";
+
+import {
+  COMMAND_TAILSCALE_ADDRESS_FIELDS,
+  type CommandDefinition,
+} from "./types";
 
 export type CommandActionDefinition = Pick<
   CommandDefinition,
@@ -60,8 +64,8 @@ const keyFor = (target: CommandTarget) =>
 const QUERY = `query CommandTargetSummaries($targets: [CommandTargetSummaryInput!]!) {
   commandTargetSummaries(targets: $targets) {
     resourceKind resourceId
-    commands { id name description port targetKind quickActionEnabled quickActionIconKey quickActionButtonVariant tailscaleAddresses { kind url } }
-    activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { kind url } }
+    commands { id name description port targetKind quickActionEnabled quickActionIconKey quickActionButtonVariant tailscaleAddresses { ${COMMAND_TAILSCALE_ADDRESS_FIELDS} } }
+    activeRuns { id commandId displayNumber status snapshotPort tailscaleAddresses { ${COMMAND_TAILSCALE_ADDRESS_FIELDS} } }
     recentRuns { id displayNumber status snapshotName createdAt }
   }
 }`;

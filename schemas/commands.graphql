@@ -56,12 +56,16 @@ type CommandActiveRunSummary {
   tailscaleAddresses: [CommandTailscaleAddress!]!
 }
 
-"A browser URL for a configured Tailscale Serve route."
+"An address for a configured Tailscale Serve route."
 type CommandTailscaleAddress {
   "Address kind, one of DNS, IPv4, or IPv6."
   kind: String!
-  "URL for the route on the agent."
-  url: String!
+  "Protocol of the Tailscale Serve listener."
+  protocol: TailscaleServeProtocol!
+  "Host and listening port, with IPv6 addresses enclosed in brackets."
+  endpoint: String!
+  "Browser URL for an HTTP or HTTPS listener."
+  url: String
 }
 
 "A compact recent run row."

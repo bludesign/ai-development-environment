@@ -35,7 +35,6 @@ async function handle(request: Request): Promise<Response> {
   const services = getServerServices();
   const tools = services.toolsService;
   let context: ToolInvocationContext;
-  let allowedToolNames: ReadonlySet<string> | undefined;
   let runRepositoryId: string | null | undefined;
   let toolSnapshot: McpToolSnapshot | undefined;
   if (runValues.length) {
@@ -74,8 +73,8 @@ async function handle(request: Request): Promise<Response> {
       runId,
       runAgentId: authorization.agentId,
       workflowRunId: snapshot.workflowRunId,
+      mcpAllowedToolNames: new Set(snapshot.toolNames),
     };
-    allowedToolNames = new Set(snapshot.toolNames);
     toolSnapshot = snapshot.snapshot;
     runRepositoryId = snapshot.repositoryId;
   } else if (presetValues.length) {
@@ -119,7 +118,10 @@ async function handle(request: Request): Promise<Response> {
         { status: 404 },
       );
     }
-    context = authorization.context;
+    context = {
+      ...authorization.context,
+      mcpAllowedToolNames: new Set(snapshot.tools.map(({ name }) => name)),
+    };
     toolSnapshot = snapshot;
   } else {
     const authorization = await authorizeToolRequest(request, "MCP");
@@ -180,7 +182,7 @@ async function handle(request: Request): Promise<Response> {
                       runRepositoryId,
                       context,
                     ),
-              allowedToolNames,
+              context.mcpAllowedToolNames,
               authentication,
             ),
       { legacy: "stateless" },

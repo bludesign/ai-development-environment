@@ -537,6 +537,40 @@ describe("AgentControlService.completeJob", () => {
 });
 
 describe("AgentControlService protected cancellation", () => {
+  test.each(["QUEUED", "CANCELLING"])(
+    "finalizes an unclaimed %s command without waiting for the agent",
+    async (status) => {
+      const job = {
+        ...persistedJob(status),
+        kind: "command.run",
+        codebaseId: "codebase-1",
+        executionToken: null,
+        startedAt: null,
+      };
+      const updateManyAndReturn = vi.fn(async ({ data }) => [
+        { ...job, ...data },
+      ]);
+      getPrismaClient.mockResolvedValue({
+        agentJob: {
+          findUnique: vi.fn().mockResolvedValue(job),
+          updateManyAndReturn,
+        },
+      });
+      const service = new AgentControlService();
+      const project = vi.fn();
+      service.registerCompletionHandler(job.kind, project);
+
+      const cancelled = await service.cancelJob(job.id);
+
+      expect(cancelled.status).toBe("CANCELLED");
+      expect(updateManyAndReturn).toHaveBeenCalledWith({
+        where: { id: job.id, status },
+        data: { status: "CANCELLED", finishedAt: expect.any(Date) },
+      });
+      expect(project).toHaveBeenCalledWith(cancelled);
+    },
+  );
+
   test("keeps an executing build in cancelling until its owner acknowledges cleanup", async () => {
     const job = {
       ...persistedJob("RUNNING"),
@@ -564,46 +598,49 @@ describe("AgentControlService protected cancellation", () => {
     expect(holderUpdate).not.toHaveBeenCalled();
   });
 
-  test("preserves the resource holder when a simulator job is claimed during cancellation", async () => {
-    const queued = {
-      ...persistedJob("QUEUED"),
-      kind: "simulators.reset",
-      operationResourcesJson: "{}",
-      executionToken: null,
-    };
-    const running = { ...queued, status: "RUNNING", executionToken: "owner" };
-    const updateManyAndReturn = vi
-      .fn()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ ...running, status: "CANCELLING" }]);
-    const holderUpdate = vi.fn();
-    getPrismaClient.mockResolvedValue({
-      agentJob: {
-        findUnique: vi
-          .fn()
-          .mockResolvedValueOnce(queued)
-          .mockResolvedValueOnce(running),
-        updateManyAndReturn,
-      },
-      operationHolder: { update: holderUpdate },
-    });
+  test.each(["simulators.reset", "command.run"])(
+    "preserves the resource holder when a %s job is claimed during cancellation",
+    async (kind) => {
+      const queued = {
+        ...persistedJob("QUEUED"),
+        kind,
+        operationResourcesJson: "{}",
+        executionToken: null,
+      };
+      const running = { ...queued, status: "RUNNING", executionToken: "owner" };
+      const updateManyAndReturn = vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([{ ...running, status: "CANCELLING" }]);
+      const holderUpdate = vi.fn();
+      getPrismaClient.mockResolvedValue({
+        agentJob: {
+          findUnique: vi
+            .fn()
+            .mockResolvedValueOnce(queued)
+            .mockResolvedValueOnce(running),
+          updateManyAndReturn,
+        },
+        operationHolder: { update: holderUpdate },
+      });
 
-    await expect(
-      new AgentControlService().cancelJob(queued.id),
-    ).resolves.toMatchObject({
-      status: "CANCELLING",
-      executionToken: "owner",
-    });
-    expect(updateManyAndReturn).toHaveBeenNthCalledWith(1, {
-      where: { id: queued.id, status: "QUEUED" },
-      data: { status: "CANCELLED", finishedAt: expect.any(Date) },
-    });
-    expect(updateManyAndReturn).toHaveBeenNthCalledWith(2, {
-      where: { id: queued.id, status: "RUNNING" },
-      data: { status: "CANCELLING" },
-    });
-    expect(holderUpdate).not.toHaveBeenCalled();
-  });
+      await expect(
+        new AgentControlService().cancelJob(queued.id),
+      ).resolves.toMatchObject({
+        status: "CANCELLING",
+        executionToken: "owner",
+      });
+      expect(updateManyAndReturn).toHaveBeenNthCalledWith(1, {
+        where: { id: queued.id, status: "QUEUED" },
+        data: { status: "CANCELLED", finishedAt: expect.any(Date) },
+      });
+      expect(updateManyAndReturn).toHaveBeenNthCalledWith(2, {
+        where: { id: queued.id, status: "RUNNING" },
+        data: { status: "CANCELLING" },
+      });
+      expect(holderUpdate).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe("AgentControlService.claimJob", () => {

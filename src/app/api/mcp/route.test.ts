@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
+import * as z from "zod/v4";
+import { defineTool } from "@/services/tools/builtin-tools";
 
 const mocks = vi.hoisted(() => ({
   callBuiltInTool: vi.fn(),
@@ -98,9 +100,66 @@ describe("MCP endpoint authentication", () => {
         runId: "run-1",
         runAgentId: "agent-1",
         workflowRunId: "workflow-1",
+        mcpAllowedToolNames: new Set([name]),
       }),
       null,
       expect.any(AbortSignal),
+    );
+  });
+
+  test("passes the selected tools to legacy run calls", async () => {
+    authorization.authorizeRunMcpRequest.mockResolvedValueOnce({
+      agentId: "agent-1",
+      context: {
+        caller: "agent:agent-1",
+        correlationId: "run-request",
+        source: "MCP",
+      },
+    });
+    const name = "start_command";
+    mocks.builtInTools.definitions.mockReturnValueOnce([
+      defineTool({
+        name,
+        title: "Start command",
+        description: "Start a saved command",
+        inputSchema: z.object({ commandId: z.string() }),
+        outputSchema: z.object({ run: z.object({ id: z.string() }) }),
+        handler: () => ({ run: { id: "command-run-1" } }),
+      }),
+    ]);
+    mocks.mcpRunToolNames.mockResolvedValueOnce({
+      status: "OK",
+      toolNames: [name],
+      repositoryId: "repository-1",
+    });
+    mocks.callRunBuiltInTool.mockResolvedValueOnce({
+      content: [],
+      structuredContent: { run: { id: "command-run-1" } },
+    });
+    const args = { commandId: "command-1" };
+    const response = await POST(
+      new Request("https://control.example/api/mcp?run=run-1", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          accept: "application/json, text/event-stream",
+          "mcp-protocol-version": "2025-11-25",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      }),
+    );
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(mocks.callRunBuiltInTool).toHaveBeenCalledExactlyOnceWith(
+      name,
+      args,
+      "repository-1",
+      expect.objectContaining({ mcpAllowedToolNames: new Set([name]) }),
     );
   });
 

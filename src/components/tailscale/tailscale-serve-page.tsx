@@ -62,6 +62,8 @@ import {
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
 
+import { TailscaleEndpointCopy } from "./tailscale-endpoint-copy";
+
 type Route = {
   protocol: "HTTP" | "HTTPS" | "TCP" | "TLS_TERMINATED_TCP";
   listenPort: number;
@@ -870,25 +872,36 @@ function AssignmentLinksMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-72">
-        <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
-        {links.map(({ address, label, url }) => (
-          <DropdownMenuItem asChild key={`${label}:${address}`}>
-            <a
-              aria-label={`${label}: ${address}`}
-              href={url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ExternalLink />
-              <span className="w-full min-w-0">
-                <span>{label}</span>
-                <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
-                  {address}
+        {links[0]?.url && (
+          <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
+        )}
+        {links.map((link) =>
+          link.url ? (
+            <DropdownMenuItem asChild key={link.endpoint}>
+              <a
+                aria-label={`${link.label}: ${link.address}`}
+                href={link.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink />
+                <span className="w-full min-w-0">
+                  <span>{link.label}</span>
+                  <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
+                    {link.address}
+                  </span>
                 </span>
-              </span>
-            </a>
-          </DropdownMenuItem>
-        ))}
+              </a>
+            </DropdownMenuItem>
+          ) : (
+            <TailscaleEndpointCopy
+              address={link}
+              key={link.endpoint}
+              kindLabel={link.label}
+              menuItem
+            />
+          ),
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );
