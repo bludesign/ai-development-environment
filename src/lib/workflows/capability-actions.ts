@@ -176,6 +176,7 @@ export const WORKFLOW_CAPABILITY_ACTIONS = [
     field("name", "text", true),
     field("description", "text"),
     field("script", "text", true),
+    field("port", "number"),
     choice(
       "targetKind",
       [

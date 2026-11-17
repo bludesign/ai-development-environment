@@ -1,3 +1,5 @@
+import type { TailscaleAddress } from "@/lib/tailscale-addresses";
+
 export type CommandAgent = {
   id: string;
   name: string;
@@ -30,6 +32,7 @@ export type CommandDefinition = {
   name: string;
   description: string;
   script: string;
+  port: number | null;
   targetKind:
     | "ANY_AGENT_HOME"
     | "SPECIFIC_AGENT_HOME"
@@ -76,6 +79,7 @@ export type CommandRunQueueReason =
   | "WAITING_FOR_AGENT"
   | "AGENT_OFFLINE"
   | "WAITING_FOR_PREDECESSOR"
+  | "WAITING_FOR_PORT"
   | "RESTART_DELAY"
   | "TARGET_BUSY"
   | "QUEUED_BEHIND"
@@ -110,6 +114,9 @@ export type CommandRun = {
   snapshotName: string;
   snapshotDescription: string;
   snapshotScript: string;
+  snapshotPort: number | null;
+  // Queried on run details, where external links are displayed.
+  tailscaleAddresses?: TailscaleAddress[];
   snapshotTargetKind: string;
   snapshotRestartPolicy: string;
   snapshotRestartLimit: number | null;
@@ -147,7 +154,7 @@ export type CommandRun = {
 };
 
 export const COMMAND_DEFINITION_FIELDS = `
-  id name description script targetKind targetAgentId targetRepositoryIds
+  id name description script port targetKind targetAgentId targetRepositoryIds
   restartPolicy restartLimit concurrency blocksGitOperations quickActionEnabled quickActionIconKey quickActionButtonVariant
   notificationsEnabled
   archivedAt createdAt updatedAt
@@ -155,9 +162,11 @@ export const COMMAND_DEFINITION_FIELDS = `
   targetRepositories { id name displayOrigin }
 `;
 
+export const COMMAND_TAILSCALE_ADDRESS_FIELDS = "kind protocol endpoint url";
+
 export const COMMAND_RUN_FIELDS = `
   id displayNumber commandId origin status snapshotName snapshotDescription
-  snapshotScript snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
+  snapshotScript snapshotPort snapshotTargetKind snapshotRestartPolicy snapshotRestartLimit
   snapshotConcurrency snapshotBlocksGitOperations snapshotNotificationsEnabled snapshot
   agentId worktreeId repositoryName agentName agentHostname worktreePath worktreeBranch
   restartCount stopRequested nextRestartAt predecessorRunId error exitCode signal
@@ -215,6 +224,8 @@ export const commandQueueReasonKey = (reason: CommandRunQueueReason) => {
       return "queuedAgentOffline" as const;
     case "WAITING_FOR_PREDECESSOR":
       return "queuedWaitingForPredecessor" as const;
+    case "WAITING_FOR_PORT":
+      return "queuedWaitingForPort" as const;
     case "RESTART_DELAY":
       return "queuedRestartDelay" as const;
     case "TARGET_BUSY":

@@ -1,5 +1,6 @@
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import { mcpScopeMetadata, type McpSecurityScheme } from "./mcp-permissions";
+import { commandPortConflictToolResult } from "./tool-call-errors";
 import type { McpToolSnapshot, McpToolSnapshotEntry } from "./types";
 
 /** JSON Schema is forwarded exactly; remote tools are not approximated as Zod. */
@@ -75,15 +76,17 @@ export function createScopedMcpServer(
         tool.outputSchema ?? undefined,
       );
     } catch (error) {
-      return {
-        isError: true,
-        content: [
-          {
-            type: "text",
-            text: error instanceof Error ? error.message : "Tool call failed",
-          },
-        ],
-      };
+      return (
+        commandPortConflictToolResult(error) ?? {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: error instanceof Error ? error.message : "Tool call failed",
+            },
+          ],
+        }
+      );
     }
   });
   return server;

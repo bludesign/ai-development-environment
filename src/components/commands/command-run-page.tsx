@@ -23,6 +23,7 @@ import {
   decodeTerminalBase64,
   TerminalOutputCard,
 } from "@/components/common/terminal-output-card";
+import { TailscaleEndpointCopy } from "@/components/tailscale/tailscale-endpoint-copy";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,9 +56,11 @@ import {
   worktreeHighlightBackgroundClasses,
 } from "@/lib/worktree-highlight";
 
+import { useCommandPortConflict } from "./command-port-conflict";
 import {
   COMMAND_RUN_FIELDS,
   COMMAND_RUN_QUEUE_FIELDS,
+  COMMAND_TAILSCALE_ADDRESS_FIELDS,
   activeCommandRun,
   commandConcurrencyKey,
   commandOriginKey,
@@ -150,12 +153,13 @@ export function CommandRunPage({ runId }: { runId: string }) {
     Boolean(error),
   );
   const [mutating, setMutating] = useState(false);
+  const conflict = useCommandPortConflict();
   const [snapshotCopied, setSnapshotCopied] = useState(false);
 
   const loadRun = useCallback(async () => {
     try {
       const data = await controlPlaneRequest<{ commandRun: CommandRun | null }>(
-        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} ${COMMAND_RUN_QUEUE_FIELDS} predecessor { id displayNumber } successor { id displayNumber } } }`,
+        `query CommandRunDetail($id: ID!) { commandRun(id: $id) { ${COMMAND_RUN_FIELDS} ${COMMAND_RUN_QUEUE_FIELDS} tailscaleAddresses { ${COMMAND_TAILSCALE_ADDRESS_FIELDS} } predecessor { id displayNumber } successor { id displayNumber } } }`,
         { id: runId },
       );
       setRun(data.commandRun);
@@ -262,6 +266,22 @@ export function CommandRunPage({ runId }: { runId: string }) {
     };
   }, [loadRun, runId]);
 
+  const hasPort = run?.snapshotPort != null;
+  useEffect(() => {
+    if (!hasPort) return;
+    return controlPlaneSubscriptions().subscribe(
+      {
+        query:
+          "subscription CommandRunTailscale { tailscaleServeOverviewChanged { updatedAt } }",
+      },
+      {
+        next: () => void loadRun(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+  }, [hasPort, loadRun]);
+
   const queue: CommandRunQueue | null =
     run?.queue && run.queue.reason !== "NOT_QUEUED" ? run.queue : null;
 
@@ -277,7 +297,8 @@ export function CommandRunPage({ runId }: { runId: string }) {
 
   const mutate = async (kind: "terminate" | "rerun") => {
     setMutating(true);
-    try {
+    setError(null);
+    await conflict.submit(async (portConflictResolution) => {
       if (kind === "terminate") {
         await controlPlaneRequest(
           "mutation TerminateCommandRun($id: ID!) { terminateCommandRun(id: $id) { id status } }",
@@ -288,16 +309,16 @@ export function CommandRunPage({ runId }: { runId: string }) {
         const data = await controlPlaneRequest<{
           rerunCommandRun: { id: string };
         }>(
-          "mutation RerunCommandRun($id: ID!) { rerunCommandRun(id: $id) { id } }",
-          { id: runId },
+          "mutation RerunCommandRun($id: ID!, $portConflictResolution: CommandPortConflictResolutionInput) { rerunCommandRun(id: $id, portConflictResolution: $portConflictResolution) { id } }",
+          {
+            id: runId,
+            ...(portConflictResolution ? { portConflictResolution } : {}),
+          },
         );
         router.push(`/dashboard/commands/runs/${data.rerunCommandRun.id}`);
       }
-    } catch (value) {
-      setError(value instanceof Error ? value.message : String(value));
-    } finally {
-      setMutating(false);
-    }
+    }, setError);
+    setMutating(false);
   };
 
   const copySnapshot = async (snapshotScript: string) => {
@@ -378,7 +399,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
           </Button>
         )}
         <Button
-          disabled={mutating}
+          disabled={mutating || conflict.pending}
           variant="outline"
           onClick={() => void mutate("rerun")}
         >
@@ -396,6 +417,7 @@ export function CommandRunPage({ runId }: { runId: string }) {
           </Button>
         )}
       </div>
+      {conflict.dialog}
       {error && (
         <Alert variant="destructive">
           <AlertDescription>{error}</AlertDescription>
@@ -493,6 +515,39 @@ export function CommandRunPage({ runId }: { runId: string }) {
                 startedAt={run.startedAt}
               />
             </DetailItem>
+            {hasPort && (
+              <DetailItem className="sm:col-span-2" label={t("configuredPort")}>
+                <span className="tabular-nums">{run.snapshotPort}</span>
+              </DetailItem>
+            )}
+            {Boolean(run.tailscaleAddresses?.length) && (
+              <DetailItem
+                className="sm:col-span-4"
+                label={t("tailscaleAddresses")}
+              >
+                <ul className="space-y-1">
+                  {run.tailscaleAddresses?.map((address) => (
+                    <li key={address.url ?? address.endpoint}>
+                      {address.url ? (
+                        <a
+                          className="inline-flex items-start gap-2 text-primary hover:underline"
+                          href={address.url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          <ExternalLink className="mt-0.5 size-3.5 shrink-0" />
+                          <span className="min-w-0 break-all">
+                            {address.kind} · {address.url}
+                          </span>
+                        </a>
+                      ) : (
+                        <TailscaleEndpointCopy address={address} />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </DetailItem>
+            )}
           </DetailList>
         </CardContent>
       </Card>

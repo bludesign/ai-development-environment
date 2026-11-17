@@ -70,6 +70,7 @@ export type RouteEntry = {
   simulatorSelection?: boolean;
   /** Show simulator automation entries in the tool catalog or workflow palette. */
   simulatorAutomation?: "tools" | "workflows";
+  commandPortCapture?: "addresses" | "conflict";
 };
 
 const simulatorInventoryCapture = {
@@ -531,11 +532,25 @@ export const routes: RouteEntry[] = [
   { name: "command-new", path: "/dashboard/commands/new" },
   {
     name: "command-edit",
-    path: `/dashboard/commands/${ids.commands.runTests}/edit`,
+    path: `/dashboard/commands/${ids.commands.devServer}/edit`,
+    readyTexts: ["Local port (optional)"],
   },
   {
     name: "command-run",
-    path: `/dashboard/commands/runs/${ids.commandRuns.latest}`,
+    path: `/dashboard/commands/runs/${ids.commandRuns.devServer}`,
+    readyTexts: ["Tailscale addresses"],
+  },
+  {
+    name: "worktree-command-addresses",
+    path: "/dashboard/worktrees",
+    desktopOnly: true,
+    commandPortCapture: "addresses",
+  },
+  {
+    name: "command-port-conflict",
+    path: "/dashboard/worktrees",
+    desktopOnly: true,
+    commandPortCapture: "conflict",
   },
 
   // Devices

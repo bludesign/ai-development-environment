@@ -54,12 +54,15 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { createClientId } from "@/lib/browser-utils";
+import { tailscaleListenerAddresses } from "@/lib/tailscale-addresses";
 import {
   controlPlaneRequest,
   controlPlaneSubscriptions,
   onControlPlaneRecovery,
 } from "@/lib/control-plane-client";
 import { cn } from "@/lib/utils";
+
+import { TailscaleEndpointCopy } from "./tailscale-endpoint-copy";
 
 type Route = {
   protocol: "HTTP" | "HTTPS" | "TCP" | "TLS_TERMINATED_TCP";
@@ -266,23 +269,6 @@ function capitalCase(value: string): string {
     .split("_")
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(" ");
-}
-
-function listenerUrl(route: Route, address: string): string {
-  const host = address.includes(":") ? `[${address}]` : address;
-  const scheme =
-    route.protocol === "HTTP"
-      ? "http"
-      : route.protocol === "TCP"
-        ? "tcp"
-        : "https";
-  const defaultPort =
-    (scheme === "http" && route.listenPort === 80) ||
-    (scheme === "https" && route.listenPort === 443);
-  const path = ["HTTP", "HTTPS"].includes(route.protocol)
-    ? route.mountPath
-    : "";
-  return `${scheme}://${host}${defaultPort ? "" : `:${route.listenPort}`}${path}`;
 }
 
 export function TailscaleServePage() {
@@ -864,18 +850,10 @@ function AssignmentLinksMenu({
   t: ReturnType<typeof useTranslations<"tailscale">>;
 }) {
   const links = state
-    ? [
-        ...(state.dnsHostname
-          ? [
-              {
-                address: state.dnsHostname,
-                label: t("dnsHostnameShort"),
-              },
-            ]
-          : []),
-        ...state.ipv4.map((address) => ({ address, label: "IPv4" })),
-        ...state.ipv6.map((address) => ({ address, label: "IPv6" })),
-      ]
+    ? tailscaleListenerAddresses(template.route, state).map((link) => ({
+        ...link,
+        label: link.kind === "DNS" ? t("dnsHostnameShort") : link.kind,
+      }))
     : [];
 
   return (
@@ -894,25 +872,36 @@ function AssignmentLinksMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-72">
-        <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
-        {links.map(({ address, label }) => (
-          <DropdownMenuItem asChild key={`${label}:${address}`}>
-            <a
-              aria-label={`${label}: ${address}`}
-              href={listenerUrl(template.route, address)}
-              rel="noreferrer"
-              target="_blank"
-            >
-              <ExternalLink />
-              <span className="w-full min-w-0">
-                <span>{label}</span>
-                <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
-                  {address}
+        {links[0]?.url && (
+          <DropdownMenuLabel>{t("openRouteUsing")}</DropdownMenuLabel>
+        )}
+        {links.map((link) =>
+          link.url ? (
+            <DropdownMenuItem asChild key={link.endpoint}>
+              <a
+                aria-label={`${link.label}: ${link.address}`}
+                href={link.url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                <ExternalLink />
+                <span className="w-full min-w-0">
+                  <span>{link.label}</span>
+                  <span className="ml-2 break-all font-mono text-xs text-muted-foreground">
+                    {link.address}
+                  </span>
                 </span>
-              </span>
-            </a>
-          </DropdownMenuItem>
-        ))}
+              </a>
+            </DropdownMenuItem>
+          ) : (
+            <TailscaleEndpointCopy
+              address={link}
+              key={link.endpoint}
+              kindLabel={link.label}
+              menuItem
+            />
+          ),
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

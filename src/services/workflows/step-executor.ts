@@ -9,6 +9,7 @@ import type {
   WorkflowStepKind,
 } from "@/lib/workflows/definition";
 import type { SessionData } from "@/lib/workflows/session";
+import type { CommandPortConflictResolution } from "@/services/commands";
 
 export type WorkflowResourceLinkInput = {
   kind: string;
@@ -40,6 +41,7 @@ export type WorkflowExecutionContext = {
   node: WorkflowNodeDefinition;
   sessionData: SessionData;
   signal: AbortSignal;
+  commandPortConflictResolution?: CommandPortConflictResolution;
 };
 
 export type WorkflowStepHandler = (

@@ -936,6 +936,49 @@ describe("workflow expansion adapters", () => {
     });
   });
 
+  test("passes the workflow operator's port decision to a built-in command tool", async () => {
+    const callTool = vi
+      .fn()
+      .mockResolvedValue({ structuredContent: { run: {} } });
+    const input = context("actual-worktree");
+    input.attempt = {
+      ...input.attempt,
+      idempotencyKey: "workflow-command-key",
+    };
+    input.node = {
+      ...input.node,
+      kind: "MCP_CALL",
+      config: {
+        groupId: "builtin:commands",
+        name: "start_custom_command",
+        arguments: {
+          script: "npm run dev",
+          worktreeId: "actual-worktree",
+          port: 3000,
+        },
+      },
+    };
+    input.commandPortConflictResolution = {
+      action: "TERMINATE_AND_RUN",
+      agentId: "agent-1",
+      port: 3000,
+      runIds: ["previous-command"],
+    };
+
+    await expansionExecutor(callTool).execute(input);
+
+    expect(callTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        arguments: expect.objectContaining({
+          port: 3000,
+          idempotencyKey: "workflow-command-key",
+          portConflictResolution: input.commandPortConflictResolution,
+        }),
+      }),
+      expect.objectContaining({ source: "WORKFLOW" }),
+    );
+  });
+
   test("saves a GitLab auto-retry rule through the provider tool", async () => {
     const callTool = vi.fn().mockResolvedValue({
       structuredContent: { rule: { id: "rule-1", maxAttempts: 3 } },
@@ -1644,10 +1687,17 @@ describe("custom command workflow adapter", () => {
       kind: "CUSTOM_COMMAND",
       config: {
         script: "printf fixed",
+        port: 3000,
         completionMode: "FIRE_AND_FORGET",
         targetMode: "FIXED_AGENT",
         agentId: "agent-fixed",
       },
+    };
+    input.commandPortConflictResolution = {
+      action: "CONTINUE",
+      agentId: "agent-fixed",
+      port: 3000,
+      runIds: ["previous-command"],
     };
 
     const result = await executor.execute(input);
@@ -1656,6 +1706,8 @@ describe("custom command workflow adapter", () => {
       expect.objectContaining({
         agentId: "agent-fixed",
         worktreeId: null,
+        port: 3000,
+        portConflictResolution: input.commandPortConflictResolution,
       }),
     );
     expect(result.wait).toBeUndefined();

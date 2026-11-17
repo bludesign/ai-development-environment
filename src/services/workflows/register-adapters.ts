@@ -458,7 +458,12 @@ function registerExpansionAdapters(
       context,
       "builtin:commands",
       "rerun_command",
-      { id },
+      {
+        id,
+        ...(context.commandPortConflictResolution && {
+          portConflictResolution: context.commandPortConflictResolution,
+        }),
+      },
       {
         sessionPatch: (output) => ({
           command: object(output.run, "Command run output"),
@@ -3377,6 +3382,9 @@ function registerMiscellaneousAdapters(
       origin: "WORKFLOW",
       idempotencyKey: context.attempt.idempotencyKey,
       blocksGitOperations: context.run.blocksGitOperations,
+      ...(context.commandPortConflictResolution && {
+        portConflictResolution: context.commandPortConflictResolution,
+      }),
     });
     if (!run) throw new Error("Command run could not be created");
     return {
@@ -3481,11 +3489,17 @@ function registerMiscellaneousAdapters(
     }
     const run = await services.commands.startCustomRun({
       script,
+      ...(context.node.config.port != null && {
+        port: context.node.config.port as number,
+      }),
       agentId,
       worktreeId,
       origin: "WORKFLOW",
       idempotencyKey: context.attempt.idempotencyKey,
       blocksGitOperations: context.run.blocksGitOperations,
+      ...(context.commandPortConflictResolution && {
+        portConflictResolution: context.commandPortConflictResolution,
+      }),
     });
     if (!run) throw new Error("Custom command run could not be created");
     return {
@@ -3765,12 +3779,24 @@ function registerMiscellaneousAdapters(
     }),
   );
   executor.register("MCP_CALL", async (context) => {
+    const groupId = text(context.node.config.groupId, "MCP tool group", 500);
+    const name = text(context.node.config.name, "MCP tool name", 500);
+    const args = {
+      ...object(context.node.config.arguments ?? {}, "MCP arguments"),
+    };
+    const startsCommand =
+      name === "start_command" || name === "start_custom_command";
+    if (
+      groupId === "builtin:commands" &&
+      (startsCommand || name === "rerun_command")
+    ) {
+      if (context.commandPortConflictResolution)
+        args.portConflictResolution = context.commandPortConflictResolution;
+      else delete args.portConflictResolution;
+      if (startsCommand) args.idempotencyKey ??= context.attempt.idempotencyKey;
+    }
     const result = await services.tools.callTool(
-      {
-        groupId: text(context.node.config.groupId, "MCP tool group", 500),
-        name: text(context.node.config.name, "MCP tool name", 500),
-        arguments: object(context.node.config.arguments ?? {}, "MCP arguments"),
-      },
+      { groupId, name, arguments: args },
       {
         caller: `workflow:${context.run.id}`,
         correlationId: context.attempt.id,

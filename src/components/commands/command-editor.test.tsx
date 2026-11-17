@@ -37,6 +37,21 @@ afterEach(() => {
 });
 
 describe("CommandEditor", () => {
+  test("validates and saves an optional local port", async () => {
+    render(<CommandEditor />);
+    const port = screen.getByRole("textbox", { name: "Local port (optional)" });
+    const save = screen.getByRole("button", { name: "Save" });
+    fireEvent.change(port, { target: { value: "65536" } });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(port, { target: { value: "3000" } });
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(request).toHaveBeenCalledWith(
+        expect.stringContaining("createCommandDefinition"),
+        { input: expect.objectContaining({ port: 3000 }) },
+      ),
+    );
+  });
   const chooseRepositoryScope = async () => {
     fireEvent.pointerDown(screen.getAllByRole("combobox")[0]!, {
       button: 0,

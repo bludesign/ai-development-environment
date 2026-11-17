@@ -112,9 +112,11 @@ export const ids = {
   commands: {
     runTests: "command-run-tests",
     deployStaging: "command-deploy-staging",
+    devServer: "command-start-dev-server",
   },
   commandRuns: {
     latest: "command-run-latest",
+    devServer: "command-run-dev-server",
   },
   signing: {
     profileAppStore: "signing-profile-app-store",
@@ -237,6 +239,7 @@ export const displayNumbers = {
   },
   commandRuns: {
     latest: 3001,
+    devServer: 3002,
   },
   workflowRuns: {
     latest: 4001,

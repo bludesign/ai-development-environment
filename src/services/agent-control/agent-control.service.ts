@@ -1830,11 +1830,21 @@ export class AgentControlService {
       const job = await prisma.agentJob.findUnique({ where: { id: jobId } });
       if (!job) throw new Error("Job not found");
       if (!ACTIVE_JOB_STATUSES.includes(job.status)) return job;
+      // Older servers moved even unclaimed command jobs to CANCELLING. They
+      // have no process to clean up and can be finalized here as queued jobs.
+      const stoppedBeforeClaim =
+        job.kind === COMMAND_RUN_JOB_KIND &&
+        job.status === "CANCELLING" &&
+        job.startedAt === null &&
+        job.executionToken === null;
       const needsAcknowledgement =
-        job.kind === COMMAND_RUN_JOB_KIND ||
+        job.status !== "QUEUED" &&
+        !stoppedBeforeClaim &&
         Boolean(
-          job.status !== "QUEUED" &&
-          (job.executionToken || job.codebaseId || job.operationResourcesJson),
+          job.kind === COMMAND_RUN_JOB_KIND ||
+          job.executionToken ||
+          job.codebaseId ||
+          job.operationResourcesJson,
         );
       const updated = await prisma.$transaction(async (transaction) => {
         const [cancelled] = await transaction.agentJob.updateManyAndReturn({

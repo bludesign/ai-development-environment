@@ -15,10 +15,22 @@ import {
   serviceTool,
 } from "./service-tool";
 
+const port = z.number().int().min(1).max(65535);
+const portConflictResolution = z
+  .object({
+    action: z.enum(["CONTINUE", "TERMINATE_AND_RUN"]),
+    agentId: z.string().min(1),
+    port,
+    runIds: z.array(z.string().min(1)),
+  })
+  .nullable()
+  .optional();
+
 const definitionInput = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   script: z.string().min(1),
+  port: port.nullable().optional(),
   targetKind: z.enum([
     "ANY_AGENT_HOME",
     "SPECIFIC_AGENT_HOME",
@@ -147,13 +159,15 @@ export function createCommandToolGroup(
       serviceTool({
         name: "start_command",
         title: "Start command",
-        description: "Start a saved command on an eligible agent or worktree.",
+        description:
+          "Start a saved command on an eligible agent or worktree. If a port conflict is reported, retry with a resolution for the reported runs.",
         inputSchema: z.object({
           commandId: z.string().min(1),
           agentId: z.string().nullable().optional(),
           worktreeId: z.string().nullable().optional(),
           origin: z.string().default("MANUAL"),
           idempotencyKey: z.string().nullable().optional(),
+          portConflictResolution,
         }),
         service,
         method: "startRun",
@@ -163,13 +177,16 @@ export function createCommandToolGroup(
       serviceTool({
         name: "start_custom_command",
         title: "Start custom command",
-        description: "Start an ad hoc shell command on an agent or worktree.",
+        description:
+          "Start an ad hoc shell command on an agent or worktree with an optional local port. If a port conflict is reported, retry with a resolution for the reported runs.",
         inputSchema: z.object({
           script: z.string().min(1),
+          port: port.nullable().optional(),
           agentId: z.string().nullable().optional(),
           worktreeId: z.string().nullable().optional(),
           origin: z.string().default("MANUAL"),
           idempotencyKey: z.string().nullable().optional(),
+          portConflictResolution,
         }),
         service,
         method: "startCustomRun",
@@ -190,11 +207,18 @@ export function createCommandToolGroup(
       serviceTool({
         name: "rerun_command",
         title: "Rerun command",
-        description: "Create a new run from a previous command snapshot.",
-        inputSchema: z.object({ id: z.string().min(1) }),
+        description:
+          "Create a new run from a previous command snapshot. If a port conflict is reported, retry with a resolution for the reported runs.",
+        inputSchema: z.object({
+          id: z.string().min(1),
+          portConflictResolution,
+        }),
         service,
         method: "rerun",
-        arguments: ({ id }) => [id],
+        arguments: ({ id, portConflictResolution }) => [
+          id,
+          portConflictResolution,
+        ],
         resultKey: "run",
         annotations: { ...WRITE_ANNOTATIONS, idempotentHint: false },
       }),

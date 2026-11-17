@@ -26,6 +26,10 @@ type CommandActionDefinition {
   name: String!
   "Human-readable description of the command."
   description: String!
+  "Local port configured for the command, when set."
+  port: Int
+  "Tailscale addresses for the configured port on this target's agent."
+  tailscaleAddresses: [CommandTailscaleAddress!]!
   "Kind of agent or worktree accepted by the command."
   targetKind: CommandTargetKind!
   "Whether the command is offered as a quick action."
@@ -46,6 +50,22 @@ type CommandActiveRunSummary {
   displayNumber: Int!
   "Current execution or health status."
   status: CommandRunStatus!
+  "Local port captured when this run was started."
+  snapshotPort: Int
+  "Tailscale addresses for this run's port on its agent."
+  tailscaleAddresses: [CommandTailscaleAddress!]!
+}
+
+"An address for a configured Tailscale Serve route."
+type CommandTailscaleAddress {
+  "Address kind, one of DNS, IPv4, or IPv6."
+  kind: String!
+  "Protocol of the Tailscale Serve listener."
+  protocol: TailscaleServeProtocol!
+  "Host and listening port, with IPv6 addresses enclosed in brackets."
+  endpoint: String!
+  "Browser URL for an HTTP or HTTPS listener."
+  url: String
 }
 
 "A compact recent run row."
@@ -126,6 +146,50 @@ enum CommandRunStatus {
   CANCELLED
 }
 
+"An active command run using the requested port."
+type CommandPortConflictRun {
+  "Identifier of the run."
+  id: ID!
+  "Human-readable sequential run number."
+  displayNumber: Int!
+  "Command name captured when the run started."
+  name: String!
+  "Current status of the run."
+  status: CommandRunStatus!
+}
+
+"Active commands using the requested port on the target agent."
+type CommandPortConflict {
+  "Identifier of the agent hosting the commands."
+  agentId: ID!
+  "Display name of the agent hosting the commands."
+  agentName: String!
+  "Local port in use."
+  port: Int!
+  "Active runs using the port."
+  runs: [CommandPortConflictRun!]!
+}
+
+"How to start a command after acknowledging a port conflict."
+enum CommandPortConflictAction {
+  "Start the new run with the existing conflicting runs still active."
+  CONTINUE
+  "Terminate the acknowledged conflicting runs and wait for them to finish before starting."
+  TERMINATE_AND_RUN
+}
+
+"A decision about the reported runs using a port."
+input CommandPortConflictResolutionInput {
+  "Action to apply when all current conflicts have been acknowledged."
+  action: CommandPortConflictAction!
+  "Identifier of the agent from the conflict."
+  agentId: ID!
+  "Local port from the conflict."
+  port: Int!
+  "Conflicting run identifiers acknowledged by the caller."
+  runIds: [ID!]!
+}
+
 "Values supported for command run origin."
 enum CommandRunOrigin {
   "Represents the manual option."
@@ -148,6 +212,8 @@ type CommandDefinition {
   description: String!
   "The script associated with this command definition."
   script: String!
+  "Optional local port used by the command, from 1 through 65535."
+  port: Int
   "The target kind associated with this command definition."
   targetKind: CommandTargetKind!
   "Identifier of the related target agent. May be null when unavailable or not applicable."
@@ -227,6 +293,8 @@ enum CommandRunQueueReason {
   AGENT_OFFLINE
   "Represents a run that replaces an earlier run which has not finished yet."
   WAITING_FOR_PREDECESSOR
+  "Represents a run waiting for conflicting commands on its agent to stop."
+  WAITING_FOR_PORT
   "Represents a run waiting for its restart delay to elapse."
   RESTART_DELAY
   "Represents a run whose target is held by another run."
@@ -311,6 +379,10 @@ type CommandRun {
   snapshotDescription: String!
   "The snapshot script associated with this command run."
   snapshotScript: String!
+  "Local port captured when this run was started."
+  snapshotPort: Int
+  "Tailscale addresses for this run's port on its agent."
+  tailscaleAddresses: [CommandTailscaleAddress!]!
   "The snapshot target kind associated with this command run."
   snapshotTargetKind: CommandTargetKind!
   "The snapshot restart policy associated with this command run."
@@ -405,6 +477,8 @@ input CommandDefinitionInput {
   description: String = ""
   "The script to use for the request."
   script: String!
+  "Optional local port used by the command, from 1 through 65535. Pass null to clear it on update."
+  port: Int
   "The target kind to use for the request."
   targetKind: CommandTargetKind!
   "Identifier of the target agent to use."
@@ -451,12 +525,16 @@ input StartCommandRunInput {
   origin: CommandRunOrigin = MANUAL
   "The idempotency key to use for the request."
   idempotencyKey: String
+  "Decision about the reported runs using the command's port."
+  portConflictResolution: CommandPortConflictResolutionInput
 }
 
 "Values used to start a custom command run."
 input StartCustomCommandRunInput {
   "The script to use for the request."
   script: String!
+  "Optional local port used by the command, from 1 through 65535."
+  port: Int
   "Identifier of the agent to use."
   agentId: ID
   "Identifier of the worktree to use."
@@ -465,6 +543,8 @@ input StartCustomCommandRunInput {
   origin: CommandRunOrigin = MANUAL
   "The idempotency key to use for the request."
   idempotencyKey: String
+  "Decision about the reported runs using the command's port."
+  portConflictResolution: CommandPortConflictResolutionInput
 }
 
 "Input values for command run output."
@@ -596,6 +676,8 @@ extend type Mutation {
   rerunCommandRun(
     "Identifier of the resource to return or affect."
     id: ID!
+    "Decision about the reported runs using the command's port."
+    portConflictResolution: CommandPortConflictResolutionInput
   ): CommandRun!
   "Archives command runs and reports whether the operation succeeded."
   archiveCommandRuns(

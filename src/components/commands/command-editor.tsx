@@ -45,6 +45,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useRouter } from "@/i18n/navigation";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 
+import { CommandPortField, parseCommandPort } from "./command-port-field";
 import {
   COMMAND_CONCURRENCY_MODES,
   COMMAND_DEFINITION_FIELDS,
@@ -58,6 +59,7 @@ type Form = {
   name: string;
   description: string;
   script: string;
+  port: string;
   targetKind: CommandDefinition["targetKind"];
   targetAgentId: string;
   targetRepositoryIds: string[];
@@ -76,6 +78,7 @@ const initial: Form = {
   name: "",
   description: "",
   script: "#!/bin/zsh\nset -e\n\n",
+  port: "",
   targetKind: "ANY_WORKTREE",
   targetAgentId: "",
   targetRepositoryIds: [],
@@ -140,6 +143,7 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             name: value.name,
             description: value.description,
             script: value.script,
+            port: value.port == null ? "" : String(value.port),
             targetKind: value.targetKind,
             targetAgentId: value.targetAgentId ?? "",
             targetRepositoryIds:
@@ -170,14 +174,16 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
       Boolean(form.targetAgentId)) &&
     (form.targetKind !== "REPOSITORY_WORKTREE" ||
       form.targetRepositoryIds.length > 0);
+  const port = parseCommandPort(form.port);
   const save = async () => {
-    if (!validTarget) return;
+    if (!validTarget || port === undefined) return;
     setSaving(true);
     try {
       const input = {
         name: form.name,
         description: form.description,
         script: form.script,
+        port,
         targetKind: form.targetKind,
         targetAgentId:
           form.targetKind === "SPECIFIC_AGENT_HOME" ? form.targetAgentId : null,
@@ -244,7 +250,10 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             {archived ? t("restore") : t("archive")}
           </Button>
         )}
-        <Button disabled={saving || !validTarget} onClick={() => void save()}>
+        <Button
+          disabled={saving || !validTarget || port === undefined}
+          onClick={() => void save()}
+        >
           <Save />
           {saving ? t("saving") : t("save")}
         </Button>
@@ -288,6 +297,10 @@ export function CommandEditor({ commandId }: { commandId?: string }) {
             />
             <p className="text-xs text-muted-foreground">{t("scriptHelp")}</p>
           </div>
+          <CommandPortField
+            value={form.port}
+            onChange={(value) => update("port", value)}
+          />
         </CardContent>
       </Card>
       <div className="grid gap-5 md:grid-cols-2">

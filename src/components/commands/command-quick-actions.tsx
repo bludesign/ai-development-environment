@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 
 import { ConfigurationIcon } from "@/components/builds/configuration-icon";
+import { TailscaleEndpointCopy } from "@/components/tailscale/tailscale-endpoint-copy";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,16 +25,24 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Spinner } from "@/components/ui/spinner";
 import { Link } from "@/i18n/navigation";
+import { createClientId } from "@/lib/browser-utils";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import type { TailscaleAddress } from "@/lib/tailscale-addresses";
 import { cn } from "@/lib/utils";
 
 import { activeCommandRun } from "./types";
+import { useCommandPortConflict } from "./command-port-conflict";
 import {
   useCommandTargetSummary,
   type CommandActionDefinition,
 } from "./command-target-summaries";
 
-type ActiveRun = { id: string; displayNumber: number; status: string };
+type ActiveRun = {
+  id: string;
+  displayNumber: number;
+  status: string;
+  tailscaleAddresses: TailscaleAddress[];
+};
 
 export function CommandQuickActions({
   agentId,
@@ -59,6 +68,7 @@ export function CommandQuickActions({
     (command) => command.quickActionEnabled,
   );
   const [starting, setStarting] = useState<string | null>(null);
+  const conflict = useCommandPortConflict();
   const active: Record<string, ActiveRun[]> = {};
   for (const run of summary.activeRuns) {
     if (activeCommandRun(run.status)) (active[run.commandId] ??= []).push(run);
@@ -77,24 +87,26 @@ export function CommandQuickActions({
     }
   };
 
-  // Every click starts its own run. Whether it begins immediately or waits for
-  // the target is decided by the command's concurrency mode on the server.
   const start = async (command: CommandActionDefinition) => {
     setStarting(command.id);
-    try {
-      await mutate(
+    setError(null);
+    const idempotencyKey = command.port == null ? undefined : createClientId();
+    await conflict.submit(async (portConflictResolution) => {
+      await controlPlaneRequest(
         "mutation RunCommandQuickAction($input: StartCommandRunInput!) { startCommandRun(input: $input) { id } }",
         {
           input: {
             commandId: command.id,
             origin: "QUICK_ACTION",
+            ...(idempotencyKey ? { idempotencyKey } : {}),
+            ...(portConflictResolution ? { portConflictResolution } : {}),
             ...(agentId ? { agentId } : { worktreeId }),
           },
         },
       );
-    } finally {
-      setStarting(null);
-    }
+      summary.refresh();
+    }, setError);
+    setStarting(null);
   };
 
   const terminate = (runId: string) =>
@@ -105,11 +117,19 @@ export function CommandQuickActions({
 
   // Rerun terminates a run that is still going and starts its successor once
   // the original stops, which is exactly the restart this menu offers.
-  const restart = (runId: string) =>
-    mutate(
-      "mutation RestartQuickActionRun($id: ID!) { rerunCommandRun(id: $id) { id } }",
-      { id: runId },
-    );
+  const restart = async (runId: string) => {
+    setError(null);
+    await conflict.submit(async (portConflictResolution) => {
+      await controlPlaneRequest(
+        "mutation RestartQuickActionRun($id: ID!, $portConflictResolution: CommandPortConflictResolutionInput) { rerunCommandRun(id: $id, portConflictResolution: $portConflictResolution) { id } }",
+        {
+          id: runId,
+          ...(portConflictResolution ? { portConflictResolution } : {}),
+        },
+      );
+      summary.refresh();
+    }, setError);
+  };
 
   const displayedError = error ?? summary.error;
   if (!commands.length && !displayedError) return null;
@@ -121,19 +141,31 @@ export function CommandQuickActions({
       <div className="flex flex-wrap gap-2">
         {commands.map((command) => {
           const runs = active[command.id] ?? [];
+          const addresses = [
+            ...new Map(
+              [
+                ...(command.tailscaleAddresses ?? []),
+                ...runs.flatMap((run) => run.tailscaleAddresses ?? []),
+              ].map((address) => [address.url ?? address.endpoint, address]),
+            ).values(),
+          ];
+          const hasMenu = runs.length > 0 || addresses.length > 0;
           const busy = runs.length > 0 || starting === command.id;
           return (
             <div className="flex" key={command.id}>
-              {runs.length > 0 && (
+              {hasMenu && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
-                      aria-label={t("manageRuns", { name: command.name })}
+                      aria-label={t(
+                        runs.length ? "manageRuns" : "openPortAddressesNamed",
+                        { name: command.name },
+                      )}
                       className="rounded-r-none"
                       size="sm"
                       variant="outline"
                     >
-                      <Spinner />
+                      {runs.length > 0 ? <Spinner /> : <ExternalLink />}
                       {runs.length > 1 && (
                         <span className="text-xs tabular-nums">
                           {runs.length}
@@ -141,7 +173,44 @@ export function CommandQuickActions({
                       )}
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="min-w-48">
+                  <DropdownMenuContent
+                    align="start"
+                    className={
+                      addresses.length > 0
+                        ? "w-max max-w-[min(26rem,calc(100vw_-_2rem))]"
+                        : "min-w-48"
+                    }
+                  >
+                    {addresses.length > 0 && (
+                      <>
+                        <DropdownMenuLabel>
+                          {t("tailscaleAddresses")}
+                        </DropdownMenuLabel>
+                        {addresses.map((address) =>
+                          address.url ? (
+                            <DropdownMenuItem asChild key={address.url}>
+                              <a
+                                href={address.url}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                <ExternalLink />
+                                <span className="min-w-0 break-all">
+                                  {address.kind} · {address.url}
+                                </span>
+                              </a>
+                            </DropdownMenuItem>
+                          ) : (
+                            <TailscaleEndpointCopy
+                              address={address}
+                              key={address.endpoint}
+                              menuItem
+                            />
+                          ),
+                        )}
+                        {runs.length > 0 && <DropdownMenuSeparator />}
+                      </>
+                    )}
                     {runs.map((run, index) => (
                       <div key={run.id}>
                         {index > 0 && <DropdownMenuSeparator />}
@@ -156,7 +225,10 @@ export function CommandQuickActions({
                           <CircleStop />
                           {t("terminate")}
                         </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => void restart(run.id)}>
+                        <DropdownMenuItem
+                          disabled={conflict.pending}
+                          onSelect={() => void restart(run.id)}
+                        >
                           <RotateCcw />
                           {t("restartRun")}
                         </DropdownMenuItem>
@@ -172,10 +244,8 @@ export function CommandQuickActions({
                 </DropdownMenu>
               )}
               <Button
-                className={
-                  runs.length > 0 ? "-ml-px rounded-l-none" : undefined
-                }
-                disabled={!upgraded || starting !== null}
+                className={hasMenu ? "-ml-px rounded-l-none" : undefined}
+                disabled={!upgraded || starting !== null || conflict.pending}
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
@@ -219,6 +289,7 @@ export function CommandQuickActions({
           <AlertDescription>{displayedError}</AlertDescription>
         </Alert>
       )}
+      {conflict.dialog}
     </div>
   );
   if (!title) return actions;

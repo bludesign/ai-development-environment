@@ -24,12 +24,13 @@ const setup = (
   const prisma = {
     worktree: {
       findMany: vi.fn().mockResolvedValue([
-        { id: "w1", codebase: { repositoryId: "r1" } },
-        { id: "w2", codebase: { repositoryId: "r2" } },
+        { id: "w1", codebase: { repositoryId: "r1", agentId: "a" } },
+        { id: "w2", codebase: { repositoryId: "r2", agentId: "b" } },
       ]),
     },
     commandDefinition: { findMany: vi.fn().mockResolvedValue(definitions) },
     commandRun: { findMany: vi.fn().mockResolvedValue(runs), count: vi.fn() },
+    tailscaleAgentState: { findMany: vi.fn().mockResolvedValue([]) },
     $queryRawUnsafe: vi.fn().mockResolvedValue([]),
   };
   getPrismaClient.mockResolvedValue(prisma);
@@ -83,6 +84,7 @@ describe("batched command target summaries", () => {
         worktreeId: true,
         displayNumber: true,
         status: true,
+        snapshotPort: true,
       },
       orderBy: { displayNumber: "asc" },
     });
@@ -95,6 +97,105 @@ describe("batched command target summaries", () => {
     expect(
       prisma.commandDefinition.findMany.mock.calls[0][0].select,
     ).not.toHaveProperty("script");
+  });
+
+  test("batches address lookup by host and uses the run's snapshot port", async () => {
+    const prisma = setup(
+      [definition("serve", "ANY_WORKTREE", { port: 3000 })],
+      [
+        {
+          id: "run-1",
+          commandId: "serve",
+          agentId: "a",
+          worktreeId: "w1",
+          displayNumber: 7,
+          status: "RUNNING",
+          snapshotPort: 5432,
+        },
+      ],
+    );
+    prisma.tailscaleAgentState.findMany.mockResolvedValue([
+      {
+        agentId: "a",
+        dnsHostname: "studio.example.ts.net",
+        ipv4Json: JSON.stringify(["100.91.0.12"]),
+        ipv6Json: JSON.stringify(["fd7a:115c:a1e0::12"]),
+        routesJson: JSON.stringify([
+          {
+            protocol: "HTTPS",
+            listenPort: 8443,
+            mountPath: "/dashboard",
+            destination: { protocol: "HTTP", port: 3000, path: "" },
+            funnel: false,
+            appCapabilities: [],
+            proxyProtocol: "NONE",
+          },
+          {
+            protocol: "TCP",
+            listenPort: 5432,
+            mountPath: "/",
+            destination: { protocol: "TCP", port: 5432, path: "" },
+            funnel: false,
+            appCapabilities: [],
+            proxyProtocol: "NONE",
+          },
+          {
+            protocol: "TLS_TERMINATED_TCP",
+            listenPort: 6543,
+            mountPath: "/",
+            destination: { protocol: "TCP", port: 5432, path: "" },
+            funnel: false,
+            appCapabilities: [],
+            proxyProtocol: "NONE",
+          },
+          { invalid: true },
+        ]),
+      },
+    ]);
+    const [studio, build] = await loadCommandTargetSummaries([
+      { resourceKind: "WORKTREE", resourceId: "w1" },
+      { resourceKind: "WORKTREE", resourceId: "w2" },
+    ]);
+    expect(prisma.tailscaleAgentState.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.tailscaleAgentState.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { agentId: { in: ["a", "b"] } } }),
+    );
+    expect(studio.commands[0].tailscaleAddresses).toEqual([
+      {
+        kind: "DNS",
+        protocol: "HTTPS",
+        endpoint: "studio.example.ts.net:8443",
+        url: "https://studio.example.ts.net:8443/dashboard",
+      },
+      {
+        kind: "IPv4",
+        protocol: "HTTPS",
+        endpoint: "100.91.0.12:8443",
+        url: "https://100.91.0.12:8443/dashboard",
+      },
+      {
+        kind: "IPv6",
+        protocol: "HTTPS",
+        endpoint: "[fd7a:115c:a1e0::12]:8443",
+        url: "https://[fd7a:115c:a1e0::12]:8443/dashboard",
+      },
+    ]);
+    const endpoints = studio.activeRuns[0].tailscaleAddresses;
+    expect(endpoints).toHaveLength(6);
+    expect(endpoints.every(({ url }) => url === null)).toBe(true);
+    expect(endpoints).toContainEqual({
+      kind: "IPv6",
+      protocol: "TCP",
+      endpoint: "[fd7a:115c:a1e0::12]:5432",
+      url: null,
+    });
+    expect(endpoints).toContainEqual({
+      kind: "DNS",
+      protocol: "TLS_TERMINATED_TCP",
+      endpoint: "studio.example.ts.net:6543",
+      url: null,
+    });
+    expect(build.commands[0].tailscaleAddresses).toEqual([]);
   });
 
   test("mixed targets preserve agent/repository eligibility and merge duplicate requirements", async () => {

@@ -124,7 +124,10 @@ const RUN_DETAIL_FIELDS = `
     }
     checkpoints { id kind headSha branch upstreamSha refName diffSummary stashRef createdAt }
   }
-  waits { id attemptId kind status predicate externalKey resumeAfter timeoutAt result createdAt resolvedAt updatedAt }
+  waits {
+    id attemptId kind status predicate externalKey resumeAfter timeoutAt result createdAt resolvedAt updatedAt
+    commandPortConflict { agentId agentName port runs { id displayNumber name status } }
+  }
   resourceLinks { id attemptId kind resourceId label url metadata createdAt }
 `;
 
@@ -654,7 +657,7 @@ export function WorkflowRunPage({ runId }: { runId: string }) {
         />
       )}
 
-      <WorkflowWaitCard run={run} />
+      <WorkflowWaitCard onPortConflictResolved={load} run={run} />
 
       <Card>
         <CardHeader>

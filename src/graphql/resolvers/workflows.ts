@@ -9,9 +9,13 @@ import type {
   ImportWorkflowInput,
   SaveWorkflowDraftInput,
   TriggerWorkflowInput,
+  WorkflowCommandPortConflictAction,
   WorkflowsService,
 } from "@/services/workflows";
-import type { WorkflowQuickActionKind } from "@/lib/workflows/kinds";
+import {
+  COMMAND_PORT_CONFLICT_WAIT,
+  type WorkflowQuickActionKind,
+} from "@/lib/workflows/kinds";
 
 function requireControlPlane(context: GraphQLContext): void {
   if (context.agentId)
@@ -133,6 +137,13 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
   WorkflowWait: {
     predicate: (value: { predicateJson?: string | null }) =>
       json(value.predicateJson),
+    commandPortConflict: (value: {
+      kind: string;
+      predicateJson?: string | null;
+    }) =>
+      value.kind === COMMAND_PORT_CONFLICT_WAIT
+        ? json(value.predicateJson)
+        : null,
     result: (value: { resultJson?: string | null }) => json(value.resultJson),
     resumeAfter: (value: { resumeAfter?: Date | null }) =>
       iso(value.resumeAfter),
@@ -444,6 +455,17 @@ export const createWorkflowResolvers = (service: WorkflowsService) => ({
     ) => {
       requireControlPlane(context);
       return service.answerQuestion(batchId, answers);
+    },
+    resolveWorkflowCommandPortConflict: (
+      _root: unknown,
+      {
+        waitId,
+        action,
+      }: { waitId: string; action: WorkflowCommandPortConflictAction },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.resolveCommandPortConflict(waitId, action);
     },
     replayWorkflowRun: (
       _root: unknown,

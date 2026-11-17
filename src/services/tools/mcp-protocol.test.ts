@@ -2,14 +2,84 @@ import {
   Client,
   StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { createMcpHandler } from "@modelcontextprotocol/server";
+import {
+  createMcpHandler,
+  InMemoryTransport,
+} from "@modelcontextprotocol/server";
 import { describe, expect, test, vi } from "vitest";
 import * as z from "zod/v4";
+import { CommandPortConflictError } from "@/services/commands";
 import { BuiltInToolRegistry, defineTool } from "./builtin-tools";
+import { createCommandToolGroup } from "./builtin-tools/commands";
 import { createBuiltInMcpServer } from "./codebases-mcp";
 import { createScopedMcpServer } from "./scoped-mcp";
 import type { McpToolSnapshot } from "./types";
 import { compileMcpJsonSchema } from "./mcp-json-schema";
+
+test.each(["default", "scoped"] as const)(
+  "returns command port conflicts with retry IDs over %s MCP",
+  async (scope) => {
+    const portConflict = {
+      agentId: "agent-1",
+      agentName: "Builder",
+      port: 3000,
+      runs: [
+        { id: "run-1", displayNumber: 1, name: "Preview", status: "RUNNING" },
+      ],
+    };
+    const failure = new CommandPortConflictError(portConflict);
+    const registry = new BuiltInToolRegistry([
+      createCommandToolGroup({
+        startRun: vi.fn().mockRejectedValue(failure),
+      } as never),
+    ]);
+    const tool = registry
+      .catalog()[0]
+      .tools.find(({ name }) => name === "start_command")!;
+    const server =
+      scope === "scoped"
+        ? createScopedMcpServer(
+            {
+              schemaVersion: 1,
+              tools: [
+                {
+                  ...tool,
+                  reference: { source: "BUILTIN", name: tool.name },
+                },
+              ],
+            },
+            (tool, args) => registry.callByName(tool.name, args),
+          )
+        : createBuiltInMcpServer(registry);
+    const client = new Client({ name: "test", version: "1" });
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+    try {
+      await server.connect(serverTransport);
+      await client.connect(clientTransport);
+      const result = await client.callTool({
+        name: "start_command",
+        arguments: { commandId: "preview" },
+      });
+      expect(result).toMatchObject({
+        isError: true,
+        content: [
+          { type: "text", text: failure.message },
+          {
+            type: "text",
+            text: JSON.stringify({
+              code: "COMMAND_PORT_CONFLICT",
+              portConflict,
+            }),
+          },
+        ],
+      });
+    } finally {
+      await client.close();
+      await server.close();
+    }
+  },
+);
 
 describe.each(["auto", "legacy"] as const)(
   "MCP HTTP %s negotiation",

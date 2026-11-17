@@ -1,9 +1,15 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { useState } from "react";
 
+import {
+  CommandPortConflictRuns,
+  type CommandPortConflict,
+} from "@/components/commands/command-port-conflict";
 import { DateTime } from "@/components/common/date-time";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -12,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
+import { controlPlaneRequest } from "@/lib/control-plane-client";
 
 import { useWorkflowLabels } from "./workflow-labels";
 import type { WorkflowAttempt, WorkflowRun, WorkflowWait } from "./types";
@@ -76,7 +83,91 @@ function Field({
   );
 }
 
-function ParkedStep({ run, wait }: { run: WorkflowRun; wait: WorkflowWait }) {
+function WorkflowCommandPortConflict({
+  conflict,
+  waitId,
+  onResolved,
+}: {
+  conflict: CommandPortConflict;
+  waitId: string;
+  onResolved: () => void | Promise<void>;
+}) {
+  const t = useTranslations("commands");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const resolve = async (
+    action: "CANCEL" | "CONTINUE" | "TERMINATE_AND_RUN",
+  ) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await controlPlaneRequest(
+        `mutation ResolveWorkflowCommandPortConflict($waitId: ID!, $action: WorkflowCommandPortConflictAction!) {
+          resolveWorkflowCommandPortConflict(waitId: $waitId, action: $action) { id }
+        }`,
+        { waitId, action },
+      );
+      await onResolved();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 space-y-3">
+      <p className="text-sm font-medium">
+        {t("portConflictTitle", { port: conflict.port })}
+      </p>
+      <p className="text-sm text-muted-foreground">
+        {t("portConflictDescription", { agent: conflict.agentName })}
+      </p>
+      <CommandPortConflictRuns runs={conflict.runs} />
+      {error && (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          disabled={busy}
+          onClick={() => void resolve("CONTINUE")}
+          size="sm"
+          variant="outline"
+        >
+          {t("portConflictContinue")}
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => void resolve("CANCEL")}
+          size="sm"
+          variant="outline"
+        >
+          {t("portConflictCancelStep")}
+        </Button>
+        <Button
+          disabled={busy}
+          onClick={() => void resolve("TERMINATE_AND_RUN")}
+          size="sm"
+          variant="destructive"
+        >
+          {t("portConflictTerminate")}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ParkedStep({
+  run,
+  wait,
+  onPortConflictResolved,
+}: {
+  run: WorkflowRun;
+  wait: WorkflowWait;
+  onPortConflictResolved?: () => void | Promise<void>;
+}) {
   const t = useTranslations("workflows");
   const labels = useWorkflowLabels();
   const target = waitTarget(run, wait);
@@ -87,34 +178,46 @@ function ParkedStep({ run, wait }: { run: WorkflowRun; wait: WorkflowWait }) {
         <span className="font-medium">{stepName(run, wait.attemptId)}</span>
         <Badge variant="outline">{labels.waitKind(wait.kind)}</Badge>
       </div>
-      <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Field label={t("waitTarget")}>
-          {target?.url ? (
-            <Link className="hover:underline" href={target.url}>
-              {target.label ?? wait.externalKey}
-            </Link>
-          ) : (
-            <span className="font-mono text-xs">{wait.externalKey ?? "—"}</span>
-          )}
-        </Field>
-        <Field label={t("waitSince")}>
-          <DateTime kind="relative" value={wait.createdAt} />
-        </Field>
-        <Field label={t("waitTimeout")}>
-          {wait.timeoutAt ? (
-            <DateTime kind="relative" value={wait.timeoutAt} />
-          ) : (
-            t("waitNoTimeout")
-          )}
-        </Field>
-        <Field label={t("waitNextCheck")}>
-          {wait.resumeAfter ? (
-            <DateTime kind="relative" value={wait.resumeAfter} />
-          ) : (
-            "—"
-          )}
-        </Field>
-      </dl>
+      {wait.kind === "COMMAND_PORT_CONFLICT" &&
+      wait.commandPortConflict &&
+      onPortConflictResolved ? (
+        <WorkflowCommandPortConflict
+          conflict={wait.commandPortConflict}
+          onResolved={onPortConflictResolved}
+          waitId={wait.id}
+        />
+      ) : (
+        <dl className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label={t("waitTarget")}>
+            {target?.url ? (
+              <Link className="hover:underline" href={target.url}>
+                {target.label ?? wait.externalKey}
+              </Link>
+            ) : (
+              <span className="font-mono text-xs">
+                {wait.externalKey ?? "—"}
+              </span>
+            )}
+          </Field>
+          <Field label={t("waitSince")}>
+            <DateTime kind="relative" value={wait.createdAt} />
+          </Field>
+          <Field label={t("waitTimeout")}>
+            {wait.timeoutAt ? (
+              <DateTime kind="relative" value={wait.timeoutAt} />
+            ) : (
+              t("waitNoTimeout")
+            )}
+          </Field>
+          <Field label={t("waitNextCheck")}>
+            {wait.resumeAfter ? (
+              <DateTime kind="relative" value={wait.resumeAfter} />
+            ) : (
+              "—"
+            )}
+          </Field>
+        </dl>
+      )}
     </div>
   );
 }
@@ -145,9 +248,18 @@ function HeldStep({
   );
 }
 
-export function WorkflowWaitCard({ run }: { run: WorkflowRun }) {
+export function WorkflowWaitCard({
+  run,
+  onPortConflictResolved,
+}: {
+  run: WorkflowRun;
+  onPortConflictResolved?: () => void | Promise<void>;
+}) {
   const t = useTranslations("workflows");
   const parked = (run.waits ?? []).filter(({ status }) => status === "PENDING");
+  const needsPortDecision = parked.some(
+    ({ kind }) => kind === "COMMAND_PORT_CONFLICT",
+  );
   // A held attempt keeps its phase after the run ends — cancelling a run leaves
   // the step it was holding stamped `WAITING_FOR_RESOURCE` — so the live
   // statuses, not the phase alone, decide whether it is still waiting.
@@ -161,11 +273,18 @@ export function WorkflowWaitCard({ run }: { run: WorkflowRun }) {
     <Card>
       <CardHeader>
         <CardTitle>{t("waitingOn")}</CardTitle>
-        <CardDescription>{t("waitingOnDescription")}</CardDescription>
+        {!needsPortDecision && (
+          <CardDescription>{t("waitingOnDescription")}</CardDescription>
+        )}
       </CardHeader>
       <CardContent className="space-y-3">
         {parked.map((wait) => (
-          <ParkedStep key={wait.id} run={run} wait={wait} />
+          <ParkedStep
+            key={wait.id}
+            onPortConflictResolved={onPortConflictResolved}
+            run={run}
+            wait={wait}
+          />
         ))}
         {held.map((attempt) => (
           <HeldStep attempt={attempt} key={attempt.id} run={run} />

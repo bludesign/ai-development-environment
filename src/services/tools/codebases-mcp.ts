@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod/v4";
 
 import { mcpScopeMetadata, type McpSecurityScheme } from "./mcp-permissions";
+import { commandPortConflictToolResult } from "./tool-call-errors";
 
 import type { BuildsService } from "@/services/builds";
 import type { CodebaseToolsService } from "@/services/codebases";
@@ -40,7 +41,15 @@ export function createBuiltInMcpServer(
         annotations: tool.annotations,
         _meta: mcpScopeMetadata(tool.name, false, authentication),
       },
-      async (input) => invoke(tool.name, input),
+      async (input) => {
+        try {
+          return await invoke(tool.name, input);
+        } catch (error) {
+          const conflict = commandPortConflictToolResult(error);
+          if (conflict) return conflict;
+          throw error;
+        }
+      },
     );
   }
 

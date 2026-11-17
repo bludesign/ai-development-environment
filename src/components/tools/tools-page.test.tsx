@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
@@ -354,6 +355,100 @@ describe("ToolsPage", () => {
         ),
       ).toHaveLength(1),
     );
+  });
+
+  test("shows command port conflict IDs for a manual retry in the runner", async () => {
+    requestMock.mockResolvedValue({ externalMcpServers: [] } as never);
+    const portConflict = {
+      agentId: "agent-1",
+      agentName: "Builder",
+      port: 3000,
+      runs: [
+        { id: "run-1", displayNumber: 1, name: "Preview", status: "RUNNING" },
+      ],
+    };
+    const portConflictResolution = {
+      action: "CONTINUE",
+      agentId: "agent-1",
+      port: 3000,
+      runIds: ["run-1"],
+    };
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).includes("/api/tools/catalog")) {
+          return catalogResponse(input, {
+            groups: [
+              {
+                id: "builtin:commands",
+                name: "Commands",
+                source: "BUILTIN",
+                tools: [
+                  {
+                    name: "start_command",
+                    inputSchema: {
+                      type: "object",
+                      properties: {
+                        portConflictResolution: {
+                          anyOf: [{ type: "object" }, { type: "null" }],
+                        },
+                      },
+                    },
+                    annotations: {
+                      readOnlyHint: false,
+                      destructiveHint: false,
+                      idempotentHint: true,
+                      openWorldHint: false,
+                    },
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        const { arguments: args } = JSON.parse(String(init?.body));
+        if (args.portConflictResolution) {
+          expect(args.portConflictResolution).toEqual(portConflictResolution);
+          return Response.json({ result: { id: "new-run" } });
+        }
+        return Response.json(
+          {
+            error: {
+              code: "COMMAND_PORT_CONFLICT",
+              message: "Port 3000 on Builder is in use by #1 Preview",
+              portConflict,
+            },
+          },
+          { status: 409 },
+        );
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ToolsPage />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Expand start_command" }),
+    );
+    const run = async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "Run tool" }));
+      const dialog = await screen.findByRole("alertdialog");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Run tool" }));
+    };
+    await run();
+    expect(await screen.findByText(/Port 3000 on Builder/)).toBeDefined();
+    expect(screen.getByText(/"agentId": "agent-1"/)).toBeDefined();
+    expect(screen.getByText(/"id": "run-1"/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Copy response" }));
+    await waitFor(() =>
+      expect(copyTextMock).toHaveBeenCalledWith(
+        JSON.stringify(portConflict, null, 2),
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText("portConflictResolution"), {
+      target: { value: JSON.stringify(portConflictResolution) },
+    });
+    await run();
+    expect(await screen.findByText(/"id": "new-run"/)).toBeDefined();
   });
 
   test("renders, searches, counts, and invokes nested built-in groups", async () => {

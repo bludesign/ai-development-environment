@@ -235,6 +235,65 @@ afterEach(() => {
 });
 
 describe("CommandRunPage", () => {
+  test("links to a Tailscale address for the snapshotted port", async () => {
+    const url = "https://[fd7a:115c:a1e0::12]:8443/dashboard";
+    const defaultRequest = request.getMockImplementation()!;
+    request.mockImplementation((query, variables, options) =>
+      query.includes("CommandRunDetail")
+        ? Promise.resolve({
+            commandRun: {
+              ...run,
+              snapshotPort: 3000,
+              tailscaleAddresses: [
+                {
+                  kind: "IPv6",
+                  protocol: "HTTPS",
+                  endpoint: "[fd7a:115c:a1e0::12]:8443",
+                  url,
+                },
+              ],
+            },
+          } as never)
+        : defaultRequest(query, variables, options),
+    );
+    render(<CommandRunPage runId="run-1" />);
+    const link = await screen.findByRole("link", { name: `IPv6 · ${url}` });
+    expect(link.getAttribute("href")).toBe(url);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(screen.getByText("3000")).toBeDefined();
+  });
+
+  test("copies a TLS-terminated TCP endpoint from run details", async () => {
+    const endpoint = "[fd7a:115c:a1e0::12]:6543";
+    const defaultRequest = request.getMockImplementation()!;
+    request.mockImplementation((query, variables, options) =>
+      query.includes("CommandRunDetail")
+        ? Promise.resolve({
+            commandRun: {
+              ...run,
+              snapshotPort: 5432,
+              tailscaleAddresses: [
+                {
+                  kind: "IPv6",
+                  protocol: "TLS_TERMINATED_TCP",
+                  endpoint,
+                  url: null,
+                },
+              ],
+            },
+          } as never)
+        : defaultRequest(query, variables, options),
+    );
+    render(<CommandRunPage runId="run-1" />);
+    expect(await screen.findByText(`IPv6 · ${endpoint} (TLS)`)).toBeDefined();
+    expect(screen.queryByRole("link", { name: /6543/ })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: `Copy endpoint ${endpoint}` }),
+    );
+    await screen.findByText("Endpoint copied.");
+    expect(writeText).toHaveBeenCalledWith(endpoint);
+  });
+
   test("links to the localized raw command output", async () => {
     render(<CommandRunPage runId="run-1" />);
 

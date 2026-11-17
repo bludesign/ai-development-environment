@@ -77,14 +77,20 @@ describe("control-plane HTTP requests", () => {
   });
 
   test("preserves the error code on a GraphQL rejection", async () => {
+    const portConflict = {
+      agentId: "a",
+      agentName: "Studio",
+      port: 3000,
+      runs: [],
+    };
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
         Response.json({
           errors: [
             {
-              message: "Build agent is unavailable",
-              extensions: { code: "BUILD_SUBMISSION_REJECTED" },
+              message: "Port is in use",
+              extensions: { code: "COMMAND_PORT_CONFLICT", portConflict },
             },
           ],
         }),
@@ -92,10 +98,11 @@ describe("control-plane HTTP requests", () => {
     );
 
     await expect(
-      controlPlaneRequest("mutation StartBuild { startBuild }"),
+      controlPlaneRequest("mutation RunCommand { startCommandRun }"),
     ).rejects.toMatchObject({
-      message: "Build agent is unavailable",
-      code: "BUILD_SUBMISSION_REJECTED",
+      message: "Port is in use",
+      code: "COMMAND_PORT_CONFLICT",
+      extensions: { code: "COMMAND_PORT_CONFLICT", portConflict },
     });
   });
 

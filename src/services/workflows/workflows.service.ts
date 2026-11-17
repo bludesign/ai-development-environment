@@ -66,6 +66,7 @@ import {
 } from "@/lib/workflows/wait-timing";
 import { workflowTriggerResourceLink } from "@/lib/workflows/resources";
 import {
+  COMMAND_PORT_CONFLICT_WAIT,
   WORKFLOW_QUICK_ACTION_KINDS,
   type WorkflowQuickActionKind,
 } from "@/lib/workflows/kinds";
@@ -81,7 +82,11 @@ import {
 import type { CredentialService } from "@/services/credentials";
 import type { NotificationsService } from "@/services/notifications";
 import type { RunsService } from "@/services/runs";
-import type { CommandsService } from "@/services/commands";
+import {
+  CommandPortConflictError,
+  type CommandPortConflictResolution,
+  type CommandsService,
+} from "@/services/commands";
 import type { JiraService } from "@/services/jira";
 import {
   CREDENTIAL_KINDS,
@@ -129,6 +134,16 @@ const TERMINAL_ATTEMPT_STATUSES = new Set([
   "SUPERSEDED",
 ]);
 const SCHEDULING_RUN_STATUSES = new Set(["RUNNING", "WAITING"]);
+const COMMAND_PORT_LAUNCH_STEPS = new Set([
+  "SAVED_COMMAND",
+  "CUSTOM_COMMAND",
+  "COMMAND_RERUN",
+  "MCP_CALL",
+]);
+export type WorkflowCommandPortConflictAction =
+  CommandPortConflictResolution["action"] | "CANCEL";
+type WorkflowCommandPortConflictDecision =
+  CommandPortConflictResolution | { action: "CANCEL" };
 const MAX_DEFINITION_BYTES = 2 * 1024 * 1024;
 const MAX_SESSION_BYTES = 2 * 1024 * 1024;
 const GLOBAL_CONCURRENCY = 4;
@@ -3903,6 +3918,68 @@ export class WorkflowsService {
     return this.run(result.runId);
   }
 
+  async resolveCommandPortConflict(
+    waitId: string,
+    action: WorkflowCommandPortConflictAction,
+  ) {
+    const prisma = await getPrismaClient();
+    const runId = await prisma.$transaction(async (transaction) => {
+      const wait = await transaction.workflowWait.findFirst({
+        where: { id: waitId, kind: COMMAND_PORT_CONFLICT_WAIT },
+        include: { attempt: true, run: true },
+      });
+      if (
+        !wait ||
+        wait.status !== "PENDING" ||
+        TERMINAL_RUN_STATUSES.has(wait.run.status) ||
+        wait.attempt.status !== "WAITING" ||
+        wait.attempt.phase !== COMMAND_PORT_CONFLICT_WAIT ||
+        wait.attempt.supersededAt
+      ) {
+        throw new Error("This command port conflict is no longer pending");
+      }
+      const conflict = json(wait.predicateJson ?? "null") as
+        CommandPortConflictError["conflict"] | null;
+      if (!conflict)
+        throw new Error("Command port conflict details are missing");
+      const decision: WorkflowCommandPortConflictDecision =
+        action === "CANCEL"
+          ? { action }
+          : {
+              action,
+              agentId: conflict.agentId,
+              port: conflict.port,
+              runIds: conflict.runs.map(({ id }) => id),
+            };
+      const resolved = await transaction.workflowWait.updateMany({
+        where: {
+          id: wait.id,
+          status: "PENDING",
+          run: { status: { notIn: [...TERMINAL_RUN_STATUSES] } },
+        },
+        data: {
+          status: "RESOLVED",
+          resultJson: JSON.stringify(decision),
+          resolvedAt: new Date(),
+        },
+      });
+      const resumed = await transaction.workflowStepAttempt.updateMany({
+        where: {
+          id: wait.attemptId,
+          status: "WAITING",
+          phase: COMMAND_PORT_CONFLICT_WAIT,
+          supersededAt: null,
+        },
+        data: { status: "PENDING", phase: "PENDING" },
+      });
+      if (!resolved.count || !resumed.count)
+        throw new Error("This command port conflict is no longer pending");
+      return wait.runId;
+    });
+    publishRunChanged(runId);
+    return this.run(runId);
+  }
+
   private async consumeCommandOutputMatches(): Promise<void> {
     if (this.commandOutputStream || !this.commandsService) return;
     const stream = agentEventBus.iterate<{
@@ -5079,6 +5156,29 @@ export class WorkflowsService {
       );
       return;
     }
+    const portWait = COMMAND_PORT_LAUNCH_STEPS.has(node.kind)
+      ? await prisma.workflowWait.findFirst({
+          where: {
+            attemptId,
+            kind: COMMAND_PORT_CONFLICT_WAIT,
+            status: "RESOLVED",
+          },
+          orderBy: [{ resolvedAt: "desc" }, { id: "desc" }],
+          select: { resultJson: true },
+        })
+      : null;
+    const portDecision = json(
+      portWait?.resultJson ?? "null",
+    ) as WorkflowCommandPortConflictDecision | null;
+    if (portDecision?.action === "CANCEL") {
+      await this.failAttempt(
+        attempt,
+        node,
+        new Error("Command launch cancelled at the port conflict prompt"),
+        { skipRetry: true },
+      );
+      return;
+    }
     let sessionData = workflowSessionData(attempt.run.sessionDataJson);
     if (attempt.iterationKey) {
       sessionData = await this.iterationSessionData(
@@ -5176,6 +5276,7 @@ export class WorkflowsService {
           node: resolvedNode,
           sessionData,
           signal,
+          ...(portDecision && { commandPortConflictResolution: portDecision }),
         });
       }
       // Simulator submissions need to persist their job links or cancel their
@@ -5188,6 +5289,28 @@ export class WorkflowsService {
         await this.completeAttempt(attempt, node, result);
       }
     } catch (error) {
+      if (
+        error instanceof CommandPortConflictError &&
+        COMMAND_PORT_LAUNCH_STEPS.has(node.kind)
+      ) {
+        const conflict = error.conflict;
+        const parked = await this.parkAttempt(attempt, node, {
+          wait: {
+            kind: COMMAND_PORT_CONFLICT_WAIT,
+            predicate: conflict,
+          },
+        });
+        if (parked) {
+          await this.notifyRun(
+            attempt.runId,
+            "WORKFLOW_NEEDS_ATTENTION",
+            "Workflow needs a port decision",
+            `Port ${conflict.port} is in use on ${conflict.agentName}.`,
+            `command-port-conflict:${parked}`,
+          );
+        }
+        return;
+      }
       const failure = error instanceof Error ? error : new Error(String(error));
       if (await this.holdForBusyCodebase(attempt, failure)) return;
       await this.failAttempt(attempt, node, failure);
@@ -5758,7 +5881,7 @@ export class WorkflowsService {
     attempt: WorkflowStepAttempt,
     node: WorkflowNodeDefinition,
     result: WorkflowExecutionResult,
-  ): Promise<void> {
+  ): Promise<string | undefined> {
     const wait = result.wait;
     if (!wait) throw new Error("Workflow wait is missing");
     const prisma = await getPrismaClient();
@@ -5861,6 +5984,7 @@ export class WorkflowsService {
       },
     );
     publishRunChanged(attempt.runId);
+    return waitId;
   }
 
   private async completeAttempt(
@@ -5986,7 +6110,7 @@ export class WorkflowsService {
     attempt: WorkflowStepAttempt,
     node: WorkflowNodeDefinition | null,
     error: Error,
-    result: WorkflowExecutionResult = {},
+    result: WorkflowExecutionResult & { skipRetry?: boolean } = {},
   ): Promise<void> {
     const prisma = await getPrismaClient();
     const definitionNode =
@@ -6005,7 +6129,7 @@ export class WorkflowsService {
         : definitionNode;
     const retry = resolvedNode?.retry;
     const shouldRetry = Boolean(
-      retry && attempt.attempt + 1 < retry.maxAttempts,
+      !result.skipRetry && retry && attempt.attempt + 1 < retry.maxAttempts,
     );
     const delaySeconds = retry
       ? Math.min(

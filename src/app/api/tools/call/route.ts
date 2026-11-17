@@ -3,6 +3,7 @@ import * as z from "zod/v4";
 import { CodebaseLookupError } from "@/services/codebases";
 import { getServerServices } from "@/services/server-services";
 import { authorizeToolRequest } from "@/services/tools";
+import { commandPortConflictDetails } from "@/services/tools/tool-call-errors";
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
@@ -47,6 +48,10 @@ export async function POST(request: Request): Promise<Response> {
           headers,
         },
       );
+    }
+    const conflict = commandPortConflictDetails(error);
+    if (conflict) {
+      return Response.json({ error: conflict }, { status: 409, headers });
     }
     const message = error instanceof Error ? error.message : String(error);
     return Response.json(
