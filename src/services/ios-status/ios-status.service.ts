@@ -28,6 +28,7 @@ const WIDGET_TTL_MS = 30 * 24 * 60 * 60_000;
 const ACTIVITY_TTL_MS = 8 * 60 * 60_000;
 const WIDGET_INTERVAL_MS = 5 * 60_000;
 const ACTIVITY_INTERVAL_MS = 15_000;
+const MAX_ACTIVE_SUBSCRIPTIONS = 64;
 const DEAD_TOKEN_REASONS = new Set([
   "BadDeviceToken",
   "DeviceTokenNotForTopic",
@@ -53,6 +54,7 @@ export function workActivityContent(
   },
   needsAttentionCount: number,
   now = new Date(),
+  integrationsKnown = true,
 ): WorkActivityContent {
   const kinds = [
     [counts.plans, "plan"],
@@ -70,13 +72,23 @@ export function workActivityContent(
       kinds
         .filter(([count]) => count > 0)
         .map(([count, name]) => `${count} ${name}${count === 1 ? "" : "s"}`)
-        .join(" · ") || "Work finished",
+        .join(" · ") ||
+      (integrationsKnown ? "Work finished" : "Checking work status"),
     updatedAt: Math.floor(now.getTime() / 1_000),
   };
 }
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function eligibleSubscription(now: Date) {
+  return {
+    status: "ACTIVE",
+    expiresAt: { gt: now },
+    session: { expiresAt: { gt: now } },
+    user: { OR: [{ banned: false }, { banned: null }] },
+  };
 }
 
 /** The native app's read-only status surfaces. Separate from the APNs test console. */
@@ -96,12 +108,18 @@ export class IosStatusService {
   ) {}
 
   async snapshot() {
+    return (await this.collectSnapshot()).snapshot;
+  }
+
+  private async collectSnapshot() {
     const [sidebar, actions] = await Promise.all([
-      this.systemStatus.status(false),
+      this.systemStatus.status(false, { includeUnfinishedWork: true }),
       this.actionCenter.list({ first: 8 }),
     ]);
     const now = new Date();
-    return {
+    const { unfinishedWork } = sidebar;
+    const integrationsKnown = unfinishedWork?.integrationsKnown ?? false;
+    const snapshot = {
       collectedAt: now.toISOString(),
       usageToday: sidebar.usageToday,
       activity: sidebar.activity,
@@ -121,11 +139,13 @@ export class IosStatusService {
         })),
       },
       liveActivity: workActivityContent(
-        sidebar.activity,
+        unfinishedWork ?? sidebar.activity,
         actions.needsAttentionCount,
         now,
+        integrationsKnown,
       ),
     };
+    return { snapshot, integrationsKnown };
   }
 
   async register(principal: UserPrincipal, value: unknown) {
@@ -135,47 +155,70 @@ export class IosStatusService {
       userId: principal.userId,
       clientRegistrationId: input.clientRegistrationId,
     };
-    const existing = await prisma.iosStatusSubscription.findUnique({
-      where: { userId_clientRegistrationId: key },
-    });
-    if (existing && existing.kind !== input.kind) {
-      throw new Error("An existing registration cannot change kind");
-    }
-    if (
-      !existing &&
-      (await prisma.iosStatusSubscription.count({
-        where: { userId: principal.userId },
-      })) >= 64
-    ) {
-      throw new Error(
-        "Too many status subscriptions; remove an existing subscription first",
-      );
-    }
-    const now = new Date();
-    const data = {
-      ...input,
-      sessionId: principal.sessionId,
-      status: "ACTIVE",
-      lastRegisteredAt: now,
+    const result = await prisma.$transaction(async (tx) => {
+      const subscriptions = tx.iosStatusSubscription;
+      const existing = await subscriptions.findUnique({
+        where: { userId_clientRegistrationId: key },
+        include: { session: { select: { expiresAt: true } } },
+      });
+      if (existing && existing.kind !== input.kind) {
+        throw new Error("An existing registration cannot change kind");
+      }
+      const sameDestination =
+        existing?.token === input.token &&
+        existing.topic === input.topic &&
+        existing.environment === input.environment;
+      const now = new Date();
       // ActivityKit's eight-hour lifetime begins at creation, not on token rotation.
-      expiresAt:
+      const expiresAt =
         input.kind === "LIVE_ACTIVITY" && existing
           ? existing.expiresAt
           : new Date(
               now.getTime() +
                 (input.kind === "WIDGET" ? WIDGET_TTL_MS : ACTIVITY_TTL_MS),
-            ),
-      ...(existing?.token === input.token
-        ? {}
-        : { lastPayloadHash: null, lastAttemptAt: null }),
-      lastFailureReason: null,
-    };
-    const result = await prisma.iosStatusSubscription.upsert({
-      where: { userId_clientRegistrationId: key },
-      create: { id: randomUUID(), userId: principal.userId, ...data },
-      update: data,
+            );
+      const alreadyActive =
+        existing?.status === "ACTIVE" &&
+        existing.expiresAt > now &&
+        existing.session.expiresAt > now;
+      const willBeActive =
+        expiresAt > now && (!sameDestination || existing.status === "ACTIVE");
+      if (
+        willBeActive &&
+        !alreadyActive &&
+        (await subscriptions.count({
+          where: { ...eligibleSubscription(now), userId: principal.userId },
+        })) >= MAX_ACTIVE_SUBSCRIPTIONS
+      ) {
+        throw new Error(
+          "Too many status subscriptions; remove an existing subscription first",
+        );
+      }
+      const data = {
+        ...input,
+        sessionId: principal.sessionId,
+        lastRegisteredAt: now,
+        expiresAt,
+      };
+      return subscriptions.upsert({
+        where: { userId_clientRegistrationId: key },
+        create: { id: randomUUID(), userId: principal.userId, ...data },
+        update: {
+          ...data,
+          // A routine repost of the cached token must preserve APNs's delivery result.
+          ...(sameDestination
+            ? {}
+            : {
+                status: "ACTIVE",
+                lastPayloadHash: null,
+                lastAttemptAt: null,
+                lastDeliveredAt: null,
+                lastFailureReason: null,
+              }),
+        },
+      });
     });
-    this.schedule();
+    if (result.status === "ACTIVE") this.schedule();
     return {
       id: result.id,
       status: result.status,
@@ -259,12 +302,8 @@ export class IosStatusService {
         where: { expiresAt: { lte: now } },
       });
       const registrations = await prisma.iosStatusSubscription.findMany({
-        where: {
-          status: "ACTIVE",
-          expiresAt: { gt: now },
-          session: { expiresAt: { gt: now } },
-          user: { OR: [{ banned: false }, { banned: null }] },
-        },
+        where: eligibleSubscription(now),
+        include: { session: { select: { expiresAt: true } } },
       });
       if (!registrations.length) return;
       const settings = await readConnectionSettings(
@@ -283,7 +322,7 @@ export class IosStatusService {
         keyId: settings.value.keyId,
         privateKey,
       };
-      const snapshot = await this.snapshot();
+      const { snapshot, integrationsKnown } = await this.collectSnapshot();
       const { updatedAt: _updatedAt, ...work } = snapshot.liveActivity;
       const widgetHash = hash({
         usageToday: snapshot.usageToday,
@@ -291,10 +330,15 @@ export class IosStatusService {
         actionCenter: snapshot.actionCenter,
       });
       const activityHash = hash(work);
+      // Wait for configured providers to report before treating an empty count as completion.
+      const recipients =
+        snapshot.liveActivity.activeCount > 0 || integrationsKnown
+          ? registrations
+          : registrations.filter(({ kind }) => kind === "WIDGET");
       // Bound concurrent APNs work without serializing every recipient's network retries.
-      for (let offset = 0; offset < registrations.length; offset += 10) {
+      for (let offset = 0; offset < recipients.length; offset += 10) {
         await Promise.all(
-          registrations
+          recipients
             .slice(offset, offset + 10)
             .map((registration) =>
               this.deliver(
@@ -302,7 +346,6 @@ export class IosStatusService {
                 authentication,
                 snapshot.liveActivity,
                 registration.kind === "WIDGET" ? widgetHash : activityHash,
-                now,
               ),
             ),
         );
@@ -314,7 +357,7 @@ export class IosStatusService {
   }
 
   private async deliver(
-    registration: IosStatusSubscription,
+    registration: IosStatusSubscription & { session: { expiresAt: Date } },
     authentication: {
       kind: "TOKEN";
       teamId: string;
@@ -323,8 +366,16 @@ export class IosStatusService {
     },
     content: WorkActivityContent,
     payloadHash: string,
-    now: Date,
   ): Promise<void> {
+    const now = new Date();
+    const sentAt = Math.floor(now.getTime() / 1_000);
+    const expiresAt = Math.floor(
+      Math.min(
+        registration.expiresAt.getTime(),
+        registration.session.expiresAt.getTime(),
+      ) / 1_000,
+    );
+    if (expiresAt <= sentAt) return;
     const widget = registration.kind === "WIDGET";
     // Refresh unchanged long-running work before ActivityKit's stale-date. Otherwise a
     // quiet build would appear stale despite the server continuing to monitor it.
@@ -347,15 +398,26 @@ export class IosStatusService {
     const where = {
       id: registration.id,
       token: registration.token,
+      topic: registration.topic,
+      environment: registration.environment,
       status: "ACTIVE",
     };
     // Persist the attempt before sending so transient failures also respect the budget.
     const claimed = await prisma.iosStatusSubscription.updateMany({
-      where: { ...where, lastAttemptAt: registration.lastAttemptAt },
+      where: {
+        ...where,
+        ...eligibleSubscription(now),
+        sessionId: registration.sessionId,
+        lastAttemptAt: registration.lastAttemptAt,
+      },
       data: { lastAttemptAt: now },
     });
     if (!claimed.count) return;
+    const attempt = { ...where, lastAttemptAt: now };
     const ending = !widget && content.activeCount === 0;
+    const expiration = ending
+      ? expiresAt
+      : Math.min(expiresAt, sentAt + (widget ? 300 : 60));
     try {
       const result = await this.apns.send({
         environment: registration.environment as "SANDBOX" | "PRODUCTION",
@@ -365,29 +427,25 @@ export class IosStatusService {
           "apns-push-type": widget ? "widgets" : "liveactivity",
           "apns-topic": `${registration.topic}.push-type.${widget ? "widgets" : "liveactivity"}`,
           "apns-priority": "5",
-          "apns-expiration": String(
-            Math.floor(now.getTime() / 1_000) + (widget ? 300 : 60),
-          ),
+          "apns-expiration": String(expiration),
           "apns-collapse-id": `aide-status-${registration.id}`,
         },
         payload: widget
           ? { aps: { "content-changed": true } }
           : {
               aps: {
-                timestamp: Math.floor(now.getTime() / 1_000),
+                timestamp: content.updatedAt,
                 event: ending ? "end" : "update",
                 "content-state": content,
                 ...(ending
-                  ? {
-                      "dismissal-date": Math.floor(now.getTime() / 1_000) + 300,
-                    }
-                  : { "stale-date": Math.floor(now.getTime() / 1_000) + 300 }),
+                  ? { "dismissal-date": sentAt + 300 }
+                  : { "stale-date": sentAt + 300 }),
               },
             },
       });
       const success = result.status === 200;
       await prisma.iosStatusSubscription.updateMany({
-        where,
+        where: attempt,
         data: {
           status:
             result.status === 410 || DEAD_TOKEN_REASONS.has(result.reason ?? "")
@@ -405,7 +463,7 @@ export class IosStatusService {
       });
     } catch (error) {
       await prisma.iosStatusSubscription.updateMany({
-        where,
+        where: attempt,
         data: {
           lastFailureReason: (error instanceof Error
             ? error.message

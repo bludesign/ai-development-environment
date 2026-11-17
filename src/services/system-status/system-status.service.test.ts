@@ -129,6 +129,82 @@ describe("SystemStatusService", () => {
     });
   });
 
+  test("reports unfinished work without changing the sidebar counts", async () => {
+    const agentRuns = vi.fn().mockResolvedValue([
+      { kind: "PLAN", _count: { _all: 2 } },
+      { kind: "SESSION", _count: { _all: 3 } },
+    ]);
+    const builds = vi.fn().mockResolvedValueOnce(0).mockResolvedValue(4);
+    const workflows = vi.fn().mockResolvedValueOnce(0).mockResolvedValue(5);
+    const commands = vi.fn().mockResolvedValueOnce(0).mockResolvedValue(6);
+    getPrismaClient.mockResolvedValue({
+      actionCenterSettings: {
+        findUnique: vi
+          .fn()
+          .mockResolvedValue({ showWorktreeCountsInSidebar: false }),
+      },
+      sidebarUsageSummary: {
+        findUnique: vi.fn().mockResolvedValue({
+          period: "2026-07-25",
+          totalCost: 0,
+          collectedAt: new Date("2026-07-25T11:55:00"),
+        }),
+      },
+      agentRun: { count: vi.fn().mockResolvedValue(0), groupBy: agentRuns },
+      build: { count: builds },
+      workflowRun: { count: workflows },
+      commandRun: { count: commands },
+    });
+    const { ccusage, diskSpace, polling } = dependencies();
+    const service = new SystemStatusService(ccusage, diskSpace, polling);
+
+    const result = await service.status(false, { includeUnfinishedWork: true });
+
+    expect(result.activity).toMatchObject({
+      plans: 0,
+      sessions: 0,
+      builds: 0,
+      workflows: 0,
+      commands: 0,
+    });
+    expect(result.unfinishedWork).toEqual({
+      plans: 2,
+      sessions: 3,
+      builds: 4,
+      workflows: 5,
+      commands: 6,
+      actions: null,
+      pipelines: null,
+      integrationsKnown: true,
+    });
+    expect(agentRuns).toHaveBeenCalledWith({
+      by: ["kind"],
+      where: {
+        kind: { in: ["PLAN", "SESSION"] },
+        archivedAt: null,
+        status: { in: ["QUEUED", "IN_PROGRESS", "PAUSED"] },
+      },
+      _count: { _all: true },
+    });
+    expect(builds).toHaveBeenLastCalledWith({
+      where: { status: { in: ["QUEUED", "PREPARING", "RUNNING"] } },
+    });
+    expect(workflows).toHaveBeenLastCalledWith({
+      where: {
+        archivedAt: null,
+        status: {
+          in: ["QUEUED", "RUNNING", "PAUSING", "PAUSED", "WAITING", "BLOCKED"],
+        },
+      },
+    });
+    expect(commands).toHaveBeenLastCalledWith({
+      where: {
+        archivedAt: null,
+        status: { in: ["QUEUED", "RUNNING", "RESTARTING", "CANCELLING"] },
+      },
+    });
+  });
+
   test("stores historical usage after a collection completes without a fresh agent result", async () => {
     const upsert = vi.fn().mockResolvedValue({});
     getPrismaClient.mockResolvedValue({

@@ -84,8 +84,8 @@ beforeAll(async () => {
 });
 
 describe("ApnsClient", () => {
-  test("reuses sandbox HTTP/2 sessions and ES256 JWTs", async () => {
-    const fake = fakeHttp2([{ status: 200 }, { status: 200 }]);
+  test("reuses sandbox HTTP/2 sessions and ES256 JWTs across concurrent and sequential sends", async () => {
+    const fake = fakeHttp2([]);
     const client = new ApnsClient(fake.factory);
     const input = {
       environment: "SANDBOX" as const,
@@ -98,16 +98,22 @@ describe("ApnsClient", () => {
       },
     };
 
-    await client.send(input);
+    await Promise.all([
+      client.send(input),
+      client.send({ ...input, deviceToken: "02".repeat(32) }),
+    ]);
     await client.send(input);
 
     expect(fake.authorities).toEqual(["https://api.sandbox.push.apple.com"]);
-    expect(fake.requests).toHaveLength(2);
-    expect(fake.requests[0]?.headers.authorization).toMatch(/^bearer /);
-    expect(fake.requests[1]?.headers.authorization).toBe(
-      fake.requests[0]?.headers.authorization,
-    );
-    expect(fake.requests[0]?.headers[":path"]).toBe(
+    expect(fake.requests).toHaveLength(3);
+    const authorization = fake.requests[0]?.headers.authorization;
+    expect(authorization).toMatch(/^bearer /);
+    expect(fake.requests.map(({ headers }) => headers.authorization)).toEqual([
+      authorization,
+      authorization,
+      authorization,
+    ]);
+    expect(fake.requests.map(({ headers }) => headers[":path"])).toContain(
       `/3/device/${"01".repeat(32)}`,
     );
   });

@@ -35,6 +35,7 @@ export type SidebarIntegrationCounts = {
   actions: number | null;
   mergeRequests: number | null;
   pipelines: number | null;
+  activeRunsKnown: boolean;
 };
 
 export const EMPTY_INTEGRATION_COUNTS: SidebarIntegrationCounts = {
@@ -42,6 +43,7 @@ export const EMPTY_INTEGRATION_COUNTS: SidebarIntegrationCounts = {
   actions: null,
   mergeRequests: null,
   pipelines: null,
+  activeRunsKnown: true,
 };
 
 /** Provider scans run once per server, independently of the number of connected clients. */
@@ -321,11 +323,12 @@ export class SidebarIntegrationsService {
     const settings = await actionCenterSettings();
     if (!settings.showIntegrationCountsInSidebar)
       return EMPTY_INTEGRATION_COUNTS;
-    const [github, gitlab, prisma] = await Promise.all([
-      this.configuration("github").catch(() => this.snapshots.github),
-      this.configuration("gitlab").catch(() => this.snapshots.gitlab),
-      getPrismaClient(),
-    ]);
+    const [githubConfiguration, gitlabConfiguration, prisma] =
+      await Promise.all([
+        this.configuration("github").catch(() => null),
+        this.configuration("gitlab").catch(() => null),
+        getPrismaClient(),
+      ]);
     const cutoff = actionCenterRequestCutoff(settings.maximumRequestAgeDays);
     const requests = await prisma.actionCenterRequest.groupBy({
       by: ["provider", "accountKey"],
@@ -343,11 +346,20 @@ export class SidebarIntegrationsService {
           )?._count._all ?? 0)
         : null;
     };
+    const github = githubConfiguration ?? this.snapshots.github;
+    const gitlab = gitlabConfiguration ?? this.snapshots.gitlab;
+    const actions = github.configured ? github.count : null;
+    const pipelines = gitlab.configured ? gitlab.count : null;
     return {
       pullRequests: github.configured ? total("GITHUB") : null,
-      actions: github.configured ? github.count : null,
+      actions,
       mergeRequests: gitlab.configured ? total("GITLAB") : null,
-      pipelines: gitlab.configured ? gitlab.count : null,
+      pipelines,
+      activeRunsKnown:
+        githubConfiguration !== null &&
+        gitlabConfiguration !== null &&
+        (!github.configured || actions !== null) &&
+        (!gitlab.configured || pipelines !== null),
     };
   }
 
