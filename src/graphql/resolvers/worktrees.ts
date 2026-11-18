@@ -448,7 +448,7 @@ export const createWorktreeResolvers = (
         input.operation,
         input.requestId,
         input.forcePreparations,
-        input.expectedBranch,
+        { expectedBranch: input.expectedBranch },
       );
     },
     forceWorktreeAutoSync: (

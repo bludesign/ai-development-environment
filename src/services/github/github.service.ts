@@ -93,11 +93,7 @@ import {
   GitHubPipelineStatusService,
   type GitHubPipelineObservation,
 } from "./github-pipeline-status.service";
-import {
-  aggregatePipelineStatus,
-  normalizePipelineState,
-} from "./pipeline-status";
-import { failingGitHubPipelines } from "@/lib/worktree-failing-pipelines";
+import { normalizePipelineState } from "./pipeline-status";
 import type { PipelineCI } from "@/services/worktrees/pipeline-repair";
 import type { PollingService } from "@/services/polling";
 import { GitHubCache } from "./github-cache";
@@ -370,7 +366,7 @@ type RawPipelineContext =
       detailsUrl: string | null;
       startedAt: string | null;
       completedAt: string | null;
-      checkSuite: RawCheckSuite;
+      checkSuite: RawCheckSuite & { repository?: { id: string } | null };
     }
   | {
       __typename: "StatusContext";
@@ -415,7 +411,7 @@ type RawPullRequestMergeState = {
   baseRefOid?: string;
   statusCheckRollup?: RawPullRequest["statusCheckRollup"];
   headRefName: string;
-  headRepository: { id?: string; nameWithOwner: string } | null;
+  headRepository: { nameWithOwner: string } | null;
   mergedAt: string | null;
   autoMergeRequest: { enabledAt: string } | null;
   viewerCanEnableAutoMerge: boolean;
@@ -511,6 +507,7 @@ const PIPELINE_CONTEXT_FIELDS = `
       conclusion
       url
       app { name slug }
+      repository { id }
       workflowRun {
         databaseId
         url
@@ -1080,7 +1077,7 @@ function pipelineObservationFromContext(
 }
 
 function freshPipelineCI(
-  repositoryGithubId: string,
+  fallbackRepositoryId: string,
   headSha: string,
   rollup: string | null | undefined,
   contexts: RawPipelineContext[],
@@ -1099,19 +1096,25 @@ function freshPipelineCI(
   const terminalFailure = (state: string | null | undefined) =>
     ["FAILURE", "ERROR", "STARTUP_FAILURE", "TIMED_OUT"].includes(state ?? "");
   if (
-    !terminalFailure(rollup) ||
+    rollup === "PENDING" ||
+    rollup === "EXPECTED" ||
     statuses.some((status) =>
-      [
-        "ACTION_REQUIRED",
-        "IN_PROGRESS",
-        "PENDING",
-        "QUEUED",
-        "EXPECTED",
-      ].includes(status),
+      ["IN_PROGRESS", "PENDING", "QUEUED", "EXPECTED"].includes(status),
     )
   )
     return { passed, failures: [] };
 
+  const terminalStatus = (
+    ["ACTION_REQUIRED", "CANCELLED", "STALE", "SKIPPED", "NEUTRAL"] as const
+  ).find((status) => statuses.includes(status));
+  if (!terminalFailure(rollup) || terminalStatus === "ACTION_REQUIRED")
+    return {
+      passed,
+      failures: [],
+      ...(!passed && terminalStatus ? { terminalStatus } : {}),
+    };
+
+  const fetchedAt = new Date();
   const records = new Map(
     contexts
       .filter((_, index) => terminalFailure(statuses[index]))
@@ -1119,29 +1122,30 @@ function freshPipelineCI(
         const pipeline = pipelineObservationFromContext(
           context,
           false,
-          new Date(),
+          fetchedAt,
         );
-        return [pipeline.id, pipeline] as const;
+        const repositoryGithubId =
+          (context.__typename === "CheckRun" &&
+            context.checkSuite.repository?.id) ||
+          fallbackRepositoryId;
+        return [pipeline.id, { ...pipeline, repositoryGithubId }] as const;
       }),
   );
-  const pipelines = [...records.values()].map((pipeline) => ({
-    ...pipeline,
-    url: pipeline.url ?? null,
-    workflowRunId: pipeline.workflowRunId ?? null,
-    status: terminalFailure(pipeline.status)
-      ? pipeline.status
-      : ("FAILURE" as const),
-  }));
+  const pipelines = [...records.values()];
   return {
     passed,
-    failures: failingGitHubPipelines({
-      repositoryGithubId,
+    failures: pipelines.map((pipeline) => ({
+      provider: "GITHUB",
+      id: pipeline.id,
+      repositoryGithubId: pipeline.repositoryGithubId,
       headSha,
-      pipelineStatus: aggregatePipelineStatus(
-        pipelines.map(({ status }) => status),
-      ),
-      pipelines,
-    }),
+      status: terminalFailure(pipeline.status) ? pipeline.status : "FAILURE",
+      url: pipeline.url ?? null,
+      ...(pipeline.workflowRunId
+        ? { workflowRunId: pipeline.workflowRunId }
+        : {}),
+    })),
+    ...(!pipelines.length && terminalStatus ? { terminalStatus } : {}),
     failureKey: JSON.stringify(
       pipelines
         .map((pipeline) => [
@@ -5972,6 +5976,7 @@ export class GitHubService {
     includeSyncReadiness = false,
   ): Promise<{
     pullRequest: RawPullRequestMergeState;
+    repositoryId: string;
     availableMethods: GitHubMergeMethod[];
     viewerEmail: string | null;
     viewerPermission: RepositoryPermission | null;
@@ -5979,6 +5984,7 @@ export class GitHubService {
     const data = await this.request<{
       viewer: { email: string };
       repository: {
+        id: string;
         mergeCommitAllowed: boolean;
         rebaseMergeAllowed: boolean;
         squashMergeAllowed: boolean;
@@ -5993,13 +5999,14 @@ export class GitHubService {
       ) {
         viewer { email }
         repository(owner: $owner, name: $name) {
+          id
           mergeCommitAllowed
           rebaseMergeAllowed
           squashMergeAllowed
           viewerPermission
           pullRequest(number: $number) {
             id title body url state isDraft mergeable mergeStateStatus
-            headRefOid headRefName headRepository { id nameWithOwner } mergedAt
+            headRefOid headRefName headRepository { nameWithOwner } mergedAt
             baseRefName mergeCommit { oid }
             ${includeSyncReadiness ? `baseRefOid statusCheckRollup { state contexts(first: 100) { nodes { ${PIPELINE_CONTEXT_FIELDS} } pageInfo { hasNextPage endCursor } } }` : ""}
             autoMergeRequest { enabledAt }
@@ -6012,17 +6019,18 @@ export class GitHubService {
       token,
       { requestSource, force, allowStaleOnError: !force },
     );
-    const pullRequest = data.repository?.pullRequest;
-    if (!pullRequest) throw new Error("Pull request was not found");
+    const repository = data.repository;
+    if (!repository?.pullRequest) throw new Error("Pull request was not found");
     const availableMethods: GitHubMergeMethod[] = [];
-    if (data.repository?.squashMergeAllowed) availableMethods.push("SQUASH");
-    if (data.repository?.mergeCommitAllowed) availableMethods.push("MERGE");
-    if (data.repository?.rebaseMergeAllowed) availableMethods.push("REBASE");
+    if (repository.squashMergeAllowed) availableMethods.push("SQUASH");
+    if (repository.mergeCommitAllowed) availableMethods.push("MERGE");
+    if (repository.rebaseMergeAllowed) availableMethods.push("REBASE");
     return {
-      pullRequest,
+      pullRequest: repository.pullRequest,
+      repositoryId: repository.id,
       availableMethods,
       viewerEmail: data.viewer.email.trim() || null,
-      viewerPermission: data.repository?.viewerPermission ?? null,
+      viewerPermission: repository.viewerPermission ?? null,
     };
   }
 
@@ -6297,7 +6305,7 @@ export class GitHubService {
         )),
       );
     const ci = freshPipelineCI(
-      pr.headRepository?.id ?? "",
+      state.repositoryId,
       pr.headRefOid,
       pr.statusCheckRollup?.state,
       contexts,

@@ -9,7 +9,10 @@ import type { JiraService } from "@/services/jira";
 import type { AgentControlService } from "@/services/agent-control";
 import type { WorkflowsService } from "@/services/workflows";
 import type { WorktreesService } from "./worktrees.service";
-import { WORKTREE_REVIEWED_SYNC_CAPABILITY } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_PUSH_EVIDENCE_CAPABILITY,
+  WORKTREE_REVIEWED_SYNC_CAPABILITY,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 vi.mock("@/services/operation-locks/operation-locks.service", () => ({
   mergeReservationBlockedReason: vi.fn(async () => null),
@@ -39,7 +42,9 @@ const db = vi.hoisted(() => ({
   },
   worktreeAutoSync: { findUnique: vi.fn() },
   workflow: { findMany: vi.fn() },
-  workflowRun: { findUnique: vi.fn() },
+  workflowRun: { findUnique: vi.fn(), findMany: vi.fn() },
+  workflowRunResourceLink: { findMany: vi.fn() },
+  workflowWait: { findMany: vi.fn() },
   agentJob: { findFirst: vi.fn() },
 }));
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient: async () => db }));
@@ -76,6 +81,9 @@ beforeEach(() => {
     },
   ]);
   db.workflowRun.findUnique.mockResolvedValue(null);
+  db.workflowRun.findMany.mockResolvedValue([]);
+  db.workflowRunResourceLink.findMany.mockResolvedValue([]);
+  db.workflowWait.findMany.mockResolvedValue([]);
   db.worktreeAutoMerge.findUnique.mockImplementation(async () => db.github);
   db.worktreeAutoMerge.delete.mockImplementation(async () => {
     const previous = db.github;
@@ -165,7 +173,10 @@ function fixture(provider: "GITHUB" | "GITLAB") {
       repositoryId: "repo",
       repository: { canonicalOrigin: origin },
       agent: {
-        capabilitiesJson: JSON.stringify([WORKTREE_REVIEWED_SYNC_CAPABILITY]),
+        capabilitiesJson: JSON.stringify([
+          WORKTREE_PUSH_EVIDENCE_CAPABILITY,
+          WORKTREE_REVIEWED_SYNC_CAPABILITY,
+        ]),
       },
     },
   };
@@ -351,6 +362,7 @@ function fixture(provider: "GITHUB" | "GITLAB") {
     nativeDisable,
     workflows,
     worktrees,
+    worktree,
     jira,
   };
 }
@@ -511,6 +523,51 @@ describe.each(["GITHUB", "GITLAB"] as const)(
       if (provider === "GITHUB") await f.tick();
       expect(f.row()?.state).toBe("COMPLETED");
     });
+    test("requires push evidence support only when automatic pipeline repair is selected", async () => {
+      const f = fixture(provider);
+      f.worktree.codebase.agent.capabilitiesJson = JSON.stringify([
+        WORKTREE_REVIEWED_SYNC_CAPABILITY,
+      ]);
+      await expect(f.configure(true, "pipeline-workflow")).rejects.toThrow(
+        "Update the agent to use automatic pipeline repair",
+      );
+      expect(f.row()).toBeNull();
+      await f.configure();
+      expect(f.row()?.state).toBe("SYNCING");
+    });
+
+    test("stops a pending pipeline repair if the agent loses push evidence support", async () => {
+      const f = fixture(provider);
+      await f.configure(true, "pipeline-workflow");
+      await f.tick();
+      await f.tick();
+      f.finish();
+      f.ready.pipelineCI = {
+        passed: false,
+        failures: [
+          {
+            provider,
+            id: "check",
+            status: "FAILURE",
+            headSha: synced,
+            url: null,
+          },
+        ],
+      };
+      await f.tick();
+      expect(f.row()?.state).toBe("RESOLVING_PIPELINE");
+
+      f.worktree.codebase.agent.capabilitiesJson = JSON.stringify([
+        WORKTREE_REVIEWED_SYNC_CAPABILITY,
+      ]);
+      await f.tick();
+      expect(f.row()).toMatchObject({
+        state: "ACTION_REQUIRED",
+        lastError: expect.stringContaining("Update the agent"),
+      });
+      expect(f.workflows.trigger).not.toHaveBeenCalled();
+    });
+
     test("runs pipeline repair after sync and waits for current CI before submitting", async () => {
       const f = fixture(provider);
       await f.configure(true, "pipeline-workflow");

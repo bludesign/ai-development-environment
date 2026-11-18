@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WORKTREE_PUSH_EVIDENCE_CAPABILITY } from "@ai-development-environment/agent-contract/worktrees";
 import { evaluateWorkflowCondition } from "@/lib/workflows/session.server";
 import type { WorkflowsService } from "@/services/workflows";
 import {
@@ -10,7 +11,8 @@ import {
 
 const db = vi.hoisted(() => ({
   workflow: { findMany: vi.fn() },
-  workflowRun: { findUnique: vi.fn() },
+  workflowRun: { findUnique: vi.fn(), findMany: vi.fn() },
+  workflowRunResourceLink: { findMany: vi.fn() },
   workflowWait: { findMany: vi.fn() },
   agentJob: { findMany: vi.fn() },
 }));
@@ -33,8 +35,15 @@ const worktree = {
   gitDirectory: "/git/worktrees/worktree",
   branch: "topic",
   headSha: "original",
-  codebase: { agentId: "agent", repositoryId: "repository" },
+  codebase: {
+    agentId: "agent",
+    repositoryId: "repository",
+    agent: {
+      capabilitiesJson: JSON.stringify([WORKTREE_PUSH_EVIDENCE_CAPABILITY]),
+    },
+  },
   availability: "AVAILABLE",
+  missingAt: null,
   hasConflicts: false,
   rebaseInProgress: false,
   hasStagedChanges: false,
@@ -63,10 +72,10 @@ function fixture() {
   const tick = (
     ci: PipelineCI = failingCI,
     now = finishedAt.getTime(),
-    headSha = worktree.headSha,
+    headSha: string | null = worktree.headSha,
   ) =>
     advancePipelineRepair({
-      worktree: { ...worktree, headSha },
+      worktree: { ...worktree, headSha: headSha ?? worktree.headSha },
       selection: { id: "repair", choice: null },
       repair,
       headSha,
@@ -103,6 +112,7 @@ beforeEach(() => {
     },
   ]);
   db.workflowRun.findUnique.mockResolvedValue(null);
+  db.workflowRun.findMany.mockResolvedValue([]);
   db.workflowWait.findMany.mockResolvedValue([]);
 });
 
@@ -158,6 +168,48 @@ describe("automatic pipeline repair", () => {
     expect(f.trigger).toHaveBeenCalledTimes(2);
   });
 
+  it("allows CI to settle before pausing on a canceled pipeline", async () => {
+    const f = fixture();
+    await f.tick();
+    await f.tick();
+    f.finish("SUCCEEDED");
+    await f.tick();
+    const canceledCI = { ...pendingCI, terminalStatus: "CANCELED" };
+    const finished = f.finishedAt.getTime();
+    await expect(f.tick(canceledCI, finished + 59_000)).resolves.toBe(true);
+    await expect(f.tick(canceledCI, finished + 60_000)).rejects.toThrow(
+      /CI reported CANCELED/,
+    );
+    expect(f.trigger).toHaveBeenCalledOnce();
+  });
+
+  it.each(["original", null])(
+    "times out after an hour without a CI verdict for remote head %s",
+    async (headSha) => {
+      const f = fixture();
+      await f.tick();
+      await f.tick();
+      f.finish("SUCCEEDED");
+      await f.tick();
+      const deadline = f.finishedAt.getTime() + 3_600_000;
+      await expect(f.tick(pendingCI, deadline - 1, headSha)).resolves.toBe(
+        true,
+      );
+      await expect(f.tick(pendingCI, deadline, headSha)).rejects.toThrow(
+        /Timed out waiting for CI/,
+      );
+    },
+  );
+
+  it("times out when a saved repair has no CI verdict before dispatch", async () => {
+    const f = fixture();
+    await f.tick();
+    await expect(
+      f.tick(pendingCI, f.finishedAt.getTime() + 3_600_000),
+    ).rejects.toThrow(/Timed out waiting for CI/);
+    expect(f.trigger).not.toHaveBeenCalled();
+  });
+
   it("only accepts a changed revision with a successful Push job from its own run", async () => {
     const f = fixture();
     await f.tick();
@@ -194,5 +246,80 @@ describe("automatic pipeline repair", () => {
     expect(f.lifecycle).toHaveBeenCalledWith(runId, "CANCEL", {
       ignoreMissing: true,
     });
+  });
+
+  it("cancels a parked commit and a push whose wait has not been saved", async () => {
+    const f = fixture();
+    await f.tick();
+    await f.tick();
+    const cancelJob = vi.fn();
+    f.lifecycle.mockImplementation(async () => {
+      db.workflowWait.findMany.mockResolvedValue([{ externalKey: "commit" }]);
+      db.workflowRunResourceLink.findMany.mockResolvedValue([
+        { resourceId: "commit" },
+        { resourceId: "push" },
+      ]);
+      db.agentJob.findMany.mockResolvedValue([
+        { id: "commit" },
+        { id: "push" },
+      ]);
+      return null;
+    });
+
+    await cancelPipelineRepair(
+      f.repair(),
+      { lifecycle: f.lifecycle },
+      { cancelJob },
+    );
+
+    expect(db.agentJob.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ["commit", "push"] },
+        kind: { in: ["worktree.commit", "worktree.operation"] },
+        status: { notIn: ["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"] },
+      },
+      select: { id: true },
+    });
+    expect(cancelJob.mock.calls).toEqual([["commit"], ["push"]]);
+  });
+
+  it("cancels descendants and their jobs using existing parent-run links", async () => {
+    const f = fixture();
+    await f.tick();
+    await f.tick();
+    const root = f.trigger.mock.calls[0]![1]!;
+    const children = [
+      { id: "child", parentRunId: root, status: "SUCCEEDED" },
+      { id: "grandchild", parentRunId: "child", status: "RUNNING" },
+    ];
+    db.workflowRun.findMany.mockImplementation(async ({ where }) =>
+      children.filter(({ parentRunId }) =>
+        where.parentRunId.in.includes(parentRunId),
+      ),
+    );
+    db.workflowRunResourceLink.findMany.mockResolvedValue([
+      { resourceId: "grandchild-push" },
+    ]);
+    db.agentJob.findMany.mockResolvedValue([{ id: "grandchild-push" }]);
+    const cancelJob = vi.fn();
+
+    await cancelPipelineRepair(
+      f.repair(),
+      { lifecycle: f.lifecycle },
+      { cancelJob },
+    );
+
+    expect(f.lifecycle.mock.calls.map(([id]) => id)).toEqual([
+      root,
+      "grandchild",
+    ]);
+    expect(db.workflowRunResourceLink.findMany).toHaveBeenCalledWith({
+      where: {
+        runId: { in: [root, "child", "grandchild"] },
+        kind: "AGENT_JOB",
+      },
+      select: { resourceId: true },
+    });
+    expect(cancelJob).toHaveBeenCalledWith("grandchild-push");
   });
 });

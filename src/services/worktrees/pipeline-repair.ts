@@ -1,9 +1,13 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
-import { WORKTREE_OPERATION_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_COMMIT_JOB_KIND,
+  WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PUSH_EVIDENCE_CAPABILITY,
+} from "@ai-development-environment/agent-contract/worktrees";
 import { getPrismaClient } from "@/data/prisma-client";
-import type { Worktree } from "@/generated/prisma/client";
+import type { Prisma, WorkflowRun, Worktree } from "@/generated/prisma/client";
 import {
   workflowResourceKind,
   workflowTriggerChoices,
@@ -34,7 +38,12 @@ export type PipelineCI = {
   failures: FailingPipeline[];
   /** The provider's identity for the failed run(s), including rerun information. */
   failureKey?: string;
+  /** A final CI result that neither permits the merge nor can be repaired. */
+  terminalStatus?: string;
 };
+
+const CI_SETTLE_MS = 60_000;
+const CI_RESULT_TIMEOUT_MS = 60 * 60_000;
 
 export type PipelineRepair = {
   id: string;
@@ -43,6 +52,7 @@ export type PipelineRepair = {
   retryCount: number;
   maxRetries: number;
   failureKey?: string;
+  scheduledAt?: number;
   verifiedAt?: number;
 };
 
@@ -132,6 +142,24 @@ export async function validatePipelineWorkflow(
 
 export class PipelineRepairError extends Error {}
 
+export function requirePipelineRepairCapability(agent: {
+  capabilitiesJson: string;
+}) {
+  try {
+    const capabilities: unknown = JSON.parse(agent.capabilitiesJson);
+    if (
+      Array.isArray(capabilities) &&
+      capabilities.includes(WORKTREE_PUSH_EVIDENCE_CAPABILITY)
+    )
+      return;
+  } catch {
+    // An unreadable inventory cannot confirm support for verified pushes.
+  }
+  throw new PipelineRepairError(
+    "Update the agent to use automatic pipeline repair. It must be able to verify worktree pushes.",
+  );
+}
+
 type Checkout = Pick<
   Worktree,
   | "id"
@@ -145,7 +173,14 @@ type Checkout = Pick<
   | "hasStagedChanges"
   | "hasUnstagedChanges"
   | "availability"
-> & { codebase: { agentId: string; repositoryId: string } };
+  | "missingAt"
+> & {
+  codebase: {
+    agentId: string;
+    repositoryId: string;
+    agent: { capabilitiesJson: string };
+  };
+};
 
 function checkoutKey(worktree: Checkout) {
   return JSON.stringify([
@@ -168,8 +203,42 @@ function isClean(worktree: Checkout) {
   );
 }
 
+const RUN_KEY_PREFIX = "auto-pipeline-repair:";
+const TERMINAL_RUN_STATUSES = ["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"];
+
+export const PIPELINE_REPAIR_DISPATCH_STATUSES = ["RUNNING", "WAITING"];
+
+export function isPipelineRepairRun(idempotencyKey: string | null | undefined) {
+  return idempotencyKey?.startsWith(RUN_KEY_PREFIX) === true;
+}
+
+type RepairRun = Pick<
+  WorkflowRun,
+  "id" | "idempotencyKey" | "parentRunId" | "status"
+>;
+
+export async function findPipelineRepairRoot(
+  prisma: Pick<Prisma.TransactionClient, "workflowRun">,
+  run: RepairRun | null,
+) {
+  while (run) {
+    if (isPipelineRepairRun(run.idempotencyKey)) return run;
+    if (!run.parentRunId) break;
+    run = await prisma.workflowRun.findUnique({
+      where: { id: run.parentRunId },
+      select: {
+        id: true,
+        idempotencyKey: true,
+        parentRunId: true,
+        status: true,
+      },
+    });
+  }
+  return null;
+}
+
 function runKey(repair: PipelineRepair) {
-  return `auto-pipeline-repair:${repair.id}:${repair.retryCount}`;
+  return `${RUN_KEY_PREFIX}${repair.id}:${repair.retryCount}`;
 }
 
 export async function cancelPipelineRepair(
@@ -177,36 +246,59 @@ export async function cancelPipelineRepair(
   workflows?: Pick<WorkflowsService, "lifecycle">,
   agents?: Pick<AgentControlService, "cancelJob">,
 ) {
-  if (!repair || repair.verifiedAt || !workflows) return;
+  if (!repair || !workflows) return;
   const prisma = await getPrismaClient();
   const run = await prisma.workflowRun.findUnique({
     where: { idempotencyKey: runKey(repair) },
     select: { id: true, status: true },
   });
   if (!run) return;
-  if (!["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"].includes(run.status))
+  if (!TERMINAL_RUN_STATUSES.includes(run.status))
     await workflows.lifecycle(run.id, "CANCEL", { ignoreMissing: true });
+  const runIds = [run.id];
+  let parents = [run.id];
+  while (parents.length) {
+    const children = await prisma.workflowRun.findMany({
+      where: { parentRunId: { in: parents } },
+      select: { id: true, status: true },
+    });
+    for (const child of children) {
+      if (!TERMINAL_RUN_STATUSES.includes(child.status))
+        await workflows.lifecycle(child.id, "CANCEL", { ignoreMissing: true });
+    }
+    parents = children.map(({ id }) => id);
+    runIds.push(...parents);
+  }
   if (!agents) return;
 
-  // A Git job already dispatched by the run can outlive the workflow itself.
-  const waits = await prisma.workflowWait.findMany({
-    where: {
-      runId: run.id,
-      kind: "AGENT_JOB",
-      status: { in: ["PENDING", "CANCELLED", "FAILED"] },
-      externalKey: { not: null },
-      attempt: { kind: "WORKTREE_OPERATION" },
-    },
-    select: { externalKey: true },
-  });
-  const ids = waits.flatMap(({ externalKey }) =>
-    externalKey ? [externalKey] : [],
-  );
+  // The job link is saved at dispatch, which can precede creation of the wait.
+  const [links, waits] = await Promise.all([
+    prisma.workflowRunResourceLink.findMany({
+      where: { runId: { in: runIds }, kind: "AGENT_JOB" },
+      select: { resourceId: true },
+    }),
+    prisma.workflowWait.findMany({
+      where: {
+        runId: { in: runIds },
+        kind: "AGENT_JOB",
+        status: { in: ["PENDING", "CANCELLED", "FAILED"] },
+        externalKey: { not: null },
+        attempt: { kind: { in: ["WORKTREE_COMMIT", "WORKTREE_OPERATION"] } },
+      },
+      select: { externalKey: true },
+    }),
+  ]);
+  const ids = [
+    ...new Set([
+      ...links.map(({ resourceId }) => resourceId),
+      ...waits.flatMap(({ externalKey }) => (externalKey ? [externalKey] : [])),
+    ]),
+  ];
   if (!ids.length) return;
   const activeJobs = await prisma.agentJob.findMany({
     where: {
       id: { in: ids },
-      kind: WORKTREE_OPERATION_JOB_KIND,
+      kind: { in: [WORKTREE_COMMIT_JOB_KIND, WORKTREE_OPERATION_JOB_KIND] },
       status: { notIn: ["SUCCEEDED", "FAILED", "CANCELLED", "TIMED_OUT"] },
     },
     select: { id: true },
@@ -263,6 +355,19 @@ async function recordedPush(
   });
 }
 
+function waitForCIResult(since: number, now: number, terminalStatus?: string) {
+  const elapsed = now - since;
+  if (terminalStatus && elapsed >= CI_SETTLE_MS)
+    throw new PipelineRepairError(
+      `CI reported ${terminalStatus} during pipeline repair. Review the pipeline before resuming.`,
+    );
+  if (elapsed >= CI_RESULT_TIMEOUT_MS)
+    throw new PipelineRepairError(
+      "Timed out waiting for CI during pipeline repair. Check that CI is running before resuming.",
+    );
+  return true;
+}
+
 /** Move at most one checkpoint per poll. Scheduling is keyed by the persisted attempt. */
 export async function advancePipelineRepair({
   worktree,
@@ -286,6 +391,13 @@ export async function advancePipelineRepair({
   ) => Promise<void>;
   now?: number;
 }): Promise<boolean> {
+  if (worktree.missingAt) {
+    if (repair)
+      throw new PipelineRepairError(
+        "The worktree disappeared during pipeline repair. Restore it before resuming.",
+      );
+    return false;
+  }
   const checkout = checkoutKey(worktree);
   if (repair && repair.checkout !== checkout)
     throw new PipelineRepairError(
@@ -299,6 +411,7 @@ export async function advancePipelineRepair({
       !ci?.failures.length
     )
       return false;
+    requirePipelineRepairCapability(worktree.codebase.agent);
     const workflow = await validatePipelineWorkflow(
       worktree.codebase.repositoryId,
       selection,
@@ -310,12 +423,13 @@ export async function advancePipelineRepair({
       retryCount: 0,
       maxRetries: workflow.maxPipelineRepairRetries,
       failureKey: ci.failureKey,
+      scheduledAt: now,
     });
     return true;
   }
 
   if (repair.verifiedAt) {
-    if (!headSha) return true;
+    if (!headSha) return waitForCIResult(repair.verifiedAt, now);
     if (repair.headSha !== headSha)
       throw new PipelineRepairError(
         "The source commit changed while waiting for pipeline results. Review it before resuming.",
@@ -324,8 +438,12 @@ export async function advancePipelineRepair({
       await save(null);
       return false;
     }
-    if (!ci?.failures.length) return true;
-    if (ci.failureKey === repair.failureKey && now - repair.verifiedAt < 60_000)
+    if (!ci?.failures.length)
+      return waitForCIResult(repair.verifiedAt, now, ci?.terminalStatus);
+    if (
+      ci.failureKey === repair.failureKey &&
+      now - repair.verifiedAt < CI_SETTLE_MS
+    )
       return true;
     if (repair.retryCount >= repair.maxRetries)
       throw new PipelineRepairError(
@@ -339,6 +457,7 @@ export async function advancePipelineRepair({
       ...repair,
       retryCount: repair.retryCount + 1,
       failureKey: ci.failureKey,
+      scheduledAt: now,
       verifiedAt: undefined,
     });
     return true;
@@ -351,27 +470,35 @@ export async function advancePipelineRepair({
     select: { id: true, status: true, finishedAt: true },
   });
   if (!run) {
-    if (!headSha) return true;
     if (
-      headSha !== repair.headSha ||
-      worktree.headSha !== repair.headSha ||
-      !isClean(worktree)
+      headSha &&
+      (headSha !== repair.headSha ||
+        worktree.headSha !== repair.headSha ||
+        !isClean(worktree))
     )
       throw new PipelineRepairError(
         "The checkout changed before pipeline repair started. Review it before resuming.",
       );
     // Recheck the failure before dispatch if a restart interrupted scheduling.
-    if (!ci?.failures.length) {
-      if (ci?.passed) {
+    if (!headSha || !ci?.failures.length) {
+      if (headSha && ci?.passed) {
         await save(null);
         return false;
       }
-      return true;
+      const scheduledAt = repair.scheduledAt ?? now;
+      if (repair.scheduledAt === undefined)
+        await save({ ...repair, scheduledAt });
+      return waitForCIResult(
+        scheduledAt,
+        now,
+        headSha ? ci?.terminalStatus : undefined,
+      );
     }
     if (ci.failureKey !== repair.failureKey) {
       await save({ ...repair, failureKey: ci.failureKey });
       return true;
     }
+    requirePipelineRepairCapability(worktree.codebase.agent);
     await validatePipelineWorkflow(worktree.codebase.repositoryId, selection);
     const scheduled = await workflows.trigger(
       {
@@ -403,11 +530,10 @@ export async function advancePipelineRepair({
     throw new PipelineRepairError(
       `Pipeline repair workflow ${run.status.toLowerCase()}. Review the run before resuming.`,
     );
-  if (run.status !== "SUCCEEDED" || !headSha) return true;
-  if (
-    headSha !== worktree.headSha &&
-    now - (run.finishedAt?.getTime() ?? now) < 60_000
-  )
+  if (run.status !== "SUCCEEDED") return true;
+  const finishedAt = run.finishedAt?.getTime() ?? now;
+  if (!headSha) return waitForCIResult(finishedAt, now);
+  if (headSha !== worktree.headSha && now - finishedAt < CI_SETTLE_MS)
     return true;
   if (headSha !== worktree.headSha || !isClean(worktree))
     throw new PipelineRepairError(
@@ -424,7 +550,7 @@ export async function advancePipelineRepair({
     {
       ...repair,
       headSha,
-      verifiedAt: run.finishedAt?.getTime() ?? now,
+      verifiedAt: finishedAt,
     },
     headSha,
   );

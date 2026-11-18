@@ -17,6 +17,7 @@ import {
   worktreeAutomationWorkflows,
   pipelineWorkflowSelection,
   PipelineRepairError,
+  requirePipelineRepairCapability,
   validatePipelineWorkflow,
   type PipelineCI,
   type PipelineRepair,
@@ -347,11 +348,13 @@ export async function prepareMergeSync(
     selection,
     previousPipelineWorkflow,
   );
-  if (pipelineWorkflow)
+  if (pipelineWorkflow) {
+    requirePipelineRepairCapability(worktree.codebase.agent);
     await validatePipelineWorkflow(
       worktree.codebase.repository.id,
       pipelineWorkflow,
     );
+  }
   const workflowId = selection.conflictWorkflowId?.trim();
   const workflowChoice = selection.conflictWorkflowChoice?.trim() || null;
   if (workflowChoice && !workflowId)
@@ -696,8 +699,13 @@ export async function advanceMergeSync(input: {
             "The source commit changed after syncing. Review it before resuming Auto Merge.",
           );
         intent.headSha = result.syncedHeadSha;
-        if (intent.pipelineRepair?.verifiedAt)
+        if (
+          intent.pipelineRepair?.verifiedAt &&
+          intent.pipelineRepair.headSha !== result.syncedHeadSha
+        ) {
           intent.pipelineRepair.headSha = result.syncedHeadSha;
+          intent.pipelineRepair.verifiedAt = Date.now();
+        }
         intent.syncedTargetSha = result.syncedTargetSha;
         intent.jobId = null;
         intent.requestId = null;

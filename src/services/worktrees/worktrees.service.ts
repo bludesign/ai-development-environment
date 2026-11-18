@@ -4028,8 +4028,12 @@ export class WorktreesService {
     operation: WorktreeOperation,
     requestId: string,
     forcePreparations = false,
-    expectedBranch?: string | null,
+    options?: {
+      expectedBranch?: string | null;
+      pipelineRepairAttemptId?: string;
+    },
   ) {
+    const { expectedBranch, pipelineRepairAttemptId } = options ?? {};
     if (!WORKTREE_OPERATIONS.includes(operation))
       throw new Error("Unknown worktree operation");
     const worktree = await this.requireRunnable(
@@ -4077,6 +4081,7 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
+      ...(pipelineRepairAttemptId ? { pipelineRepairAttemptId } : {}),
     });
   }
 
@@ -4087,6 +4092,7 @@ export class WorktreesService {
     stageAll?: boolean | null;
     paths?: string[] | null;
     requestId: string;
+    pipelineRepairAttemptId?: string;
   }) {
     if (!input.requestId.trim()) throw new Error("requestId is required");
     if (!input.message.trim()) throw new Error("Commit message is required");
@@ -4113,6 +4119,9 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:commit:${input.requestId}:${input.worktreeId}`,
       timeoutSeconds: 120,
+      ...(input.pipelineRepairAttemptId
+        ? { pipelineRepairAttemptId: input.pipelineRepairAttemptId }
+        : {}),
     });
   }
 

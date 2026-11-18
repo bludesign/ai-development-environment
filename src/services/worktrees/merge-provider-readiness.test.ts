@@ -14,7 +14,7 @@ function githubFixture(
     requireToken(): Promise<string>;
     mergeState(): Promise<unknown>;
     remainingPipelineContexts(): Promise<unknown[]>;
-    request(): Promise<unknown>;
+    request(query: string): Promise<unknown>;
   };
   vi.spyOn(internal, "requireToken").mockResolvedValue("token");
   const pr = {
@@ -23,7 +23,7 @@ function githubFixture(
     isDraft: false,
     headRefOid: head,
     headRefName: "feature",
-    headRepository: { id: "source-repo", nameWithOwner: "fork/repo" },
+    headRepository: { nameWithOwner: "fork/repo" },
     baseRefName: "release",
     baseRefOid: target,
     mergeable: "MERGEABLE",
@@ -41,6 +41,7 @@ function githubFixture(
             id: `suite-${index}`,
             status: "COMPLETED",
             conclusion,
+            repository: { id: "source-repo" },
             workflowRun: {
               databaseId: 1,
               runAttempt: 1,
@@ -55,6 +56,7 @@ function githubFixture(
   };
   const state = {
     pullRequest: pr,
+    repositoryId: "base-repo",
     viewerPermission: "WRITE",
     availableMethods: ["SQUASH"],
   };
@@ -93,8 +95,54 @@ describe("GitHub managed merge readiness", () => {
       );
     },
   );
-  test("attributes a completed failure to the reviewed source repository and head", async () => {
+  test("uses each check suite's repository and falls back to the base repository for statuses", async () => {
     const f = githubFixture(["FAILURE"], "FAILURE");
+    f.pr.statusCheckRollup.contexts.pageInfo = {
+      hasNextPage: true,
+      endCursor: "cursor",
+    } as never;
+    f.mergeState.mockRestore();
+    const baseCheck = f.pr.statusCheckRollup.contexts.nodes[0]!;
+    f.request
+      .mockResolvedValueOnce({
+        viewer: { email: "" },
+        repository: {
+          id: "base-repo",
+          viewerPermission: "WRITE",
+          squashMergeAllowed: true,
+          pullRequest: f.pr,
+        },
+      })
+      .mockResolvedValueOnce({
+        node: {
+          statusCheckRollup: {
+            contexts: {
+              nodes: [
+                {
+                  ...baseCheck,
+                  checkSuite: {
+                    ...baseCheck.checkSuite,
+                    id: "base-suite",
+                    repository: { id: "base-repo" },
+                    workflowRun: {
+                      ...baseCheck.checkSuite.workflowRun,
+                      url: "https://github.com/team/repo/actions/runs/1",
+                    },
+                  },
+                },
+                {
+                  __typename: "StatusContext",
+                  id: "external-status",
+                  state: "ERROR",
+                  targetUrl: null,
+                  updatedAt: "2026-11-18T18:00:00Z",
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      });
     const ready = await f.service.managedMergeReadiness("team", "repo", 1);
     expect(ready.pipelineCI?.failures).toEqual([
       {
@@ -106,8 +154,48 @@ describe("GitHub managed merge readiness", () => {
         status: "FAILURE",
         url: "https://github.com/fork/repo/actions/runs/1",
       },
+      {
+        provider: "GITHUB",
+        id: "base-suite",
+        repositoryGithubId: "base-repo",
+        workflowRunId: "1",
+        headSha: head,
+        status: "FAILURE",
+        url: "https://github.com/team/repo/actions/runs/1",
+      },
+      {
+        provider: "GITHUB",
+        id: "external-status",
+        repositoryGithubId: "base-repo",
+        headSha: head,
+        status: "ERROR",
+        url: null,
+      },
+    ]);
+    expect(f.request.mock.calls.map(([query]) => query)).toEqual([
+      expect.stringContaining("repository { id }"),
+      expect.stringContaining("repository { id }"),
     ]);
   });
+
+  test.each<[string[], string, string | undefined]>([
+    [["CANCELLED"], "FAILURE", "CANCELLED"],
+    [["STALE"], "FAILURE", "STALE"],
+    [["SKIPPED"], "SUCCESS", "SKIPPED"],
+    [["CANCELLED", "QUEUED"], "FAILURE", undefined],
+  ])(
+    "reports a terminal block only after checks settle: %j",
+    async (conclusions, rollup, status) => {
+      const f = githubFixture(conclusions, rollup);
+      const { pipelineCI } = await f.service.managedMergeReadiness(
+        "team",
+        "repo",
+        1,
+      );
+      expect(pipelineCI).toMatchObject({ passed: false, failures: [] });
+      expect(pipelineCI?.terminalStatus).toBe(status);
+    },
+  );
 
   test("includes paginated check contexts before allowing a merge", async () => {
     const f = githubFixture();
@@ -259,5 +347,156 @@ describe("GitLab managed merge readiness", () => {
     expect(
       (await stale.service.managedMergeReadiness("project", 1)).ciPassed,
     ).toBe(false);
+  });
+});
+
+function gitlabBranchFixture() {
+  const service = new GitLabService();
+  const internal = service as unknown as {
+    projectForCanonicalOrigin(): Promise<unknown>;
+    get(input: { path: string }): Promise<unknown>;
+    allPages(): Promise<unknown[]>;
+  };
+  const mergeRequest = {
+    id: 17,
+    iid: 3,
+    project_id: 20,
+    source_project_id: 10,
+    state: "opened",
+    source_branch: "feature",
+    target_branch: "release",
+    sha: head,
+    author: { id: 1, username: "user" },
+    head_pipeline: {
+      id: 14,
+      project_id: 10,
+      sha: head,
+      ref: "refs/merge-requests/3/head",
+      source: "merge_request_event",
+      status: "failed",
+      web_url: "https://gitlab.test/fork/repo/-/pipelines/14",
+    },
+  };
+  const parents = [head, target];
+  const branchPipelines: unknown[] = [];
+  vi.spyOn(internal, "projectForCanonicalOrigin").mockResolvedValue({
+    id: "10",
+  });
+  vi.spyOn(internal, "allPages").mockResolvedValue(branchPipelines);
+  const get = vi.spyOn(internal, "get").mockImplementation(async ({ path }) => {
+    if (path === "/projects/10/repository/branches/feature")
+      return { data: { commit: { id: head } } };
+    if (path === "/projects/20/repository/branches/release")
+      return { data: { commit: { id: target } } };
+    if (path === "/projects/20/merge_requests/3") return { data: mergeRequest };
+    if (
+      path ===
+      `/projects/10/repository/commits/${mergeRequest.head_pipeline.sha}`
+    )
+      return { data: { parent_ids: parents } };
+    throw new Error(`Unexpected GitLab path ${path}`);
+  });
+  const observe = () =>
+    service.branchPipelineCI("gitlab.test/fork/repo", "feature", {
+      projectId: "20",
+      iid: 3,
+    });
+  return { observe, mergeRequest, parents, branchPipelines, get };
+}
+
+describe("GitLab standalone branch CI", () => {
+  test("includes a freshly linked merge-request-only failure on the branch head", async () => {
+    const f = gitlabBranchFixture();
+    expect(await f.observe()).toMatchObject({
+      headSha: head,
+      ci: {
+        passed: false,
+        failures: [
+          {
+            provider: "GITLAB",
+            id: "14",
+            projectId: "10",
+            headSha: head,
+            status: "FAILED",
+          },
+        ],
+      },
+    });
+    expect(f.get).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/projects/20/merge_requests/3",
+        force: true,
+        allowStaleOnError: false,
+      }),
+    );
+  });
+
+  test.each([
+    { state: "closed" },
+    { project_id: 21 },
+    { iid: 4 },
+    { source_project_id: 11 },
+    { source_branch: "other" },
+    { sha: "old-source" },
+  ])(
+    "ignores a stale or unrelated linked merge request: %j",
+    async (invalidFields) => {
+      const f = gitlabBranchFixture();
+      Object.assign(f.mergeRequest, invalidFields);
+      expect(await f.observe()).toEqual({
+        headSha: head,
+        ci: { passed: false, failures: [] },
+      });
+    },
+  );
+
+  test("accepts a successful synthetic merge request pipeline only for current parents", async () => {
+    const f = gitlabBranchFixture();
+    const synthetic = "c".repeat(40);
+    Object.assign(f.mergeRequest.head_pipeline, {
+      sha: synthetic,
+      status: "success",
+      ref: "refs/merge-requests/3/merge",
+    });
+    expect(await f.observe()).toEqual({
+      headSha: head,
+      ci: { passed: true, failures: [] },
+    });
+    expect(f.get).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: `/projects/10/repository/commits/${synthetic}`,
+        force: true,
+        allowStaleOnError: false,
+      }),
+    );
+    f.parents[1] = "old-target";
+    expect(await f.observe()).toEqual({
+      headSha: head,
+      ci: { passed: false, failures: [] },
+    });
+  });
+
+  test("waits for a linked running pipeline before acting on branch failures", async () => {
+    const f = gitlabBranchFixture();
+    f.branchPipelines.push({
+      ...f.mergeRequest.head_pipeline,
+      id: 15,
+      source: "push",
+      ref: "feature",
+    });
+    f.mergeRequest.head_pipeline.status = "running";
+    expect(await f.observe()).toEqual({
+      headSha: head,
+      ci: { passed: false, failures: [] },
+    });
+  });
+
+  test("reports a matching manual pipeline as blocked", async () => {
+    const f = gitlabBranchFixture();
+    f.mergeRequest.head_pipeline.status = "manual";
+    expect(await f.observe()).toEqual({
+      headSha: head,
+      ci: { passed: false, failures: [], terminalStatus: "MANUAL" },
+    });
   });
 });

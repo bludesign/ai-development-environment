@@ -83,6 +83,10 @@ import type { CredentialService } from "@/services/credentials";
 import type { NotificationsService } from "@/services/notifications";
 import type { RunsService } from "@/services/runs";
 import {
+  findPipelineRepairRoot,
+  PIPELINE_REPAIR_DISPATCH_STATUSES,
+} from "@/services/worktrees/pipeline-repair";
+import {
   CommandPortConflictError,
   type CommandPortConflictResolution,
   type CommandsService,
@@ -3221,9 +3225,23 @@ export class WorkflowsService {
       const parent = parentRunId
         ? await transaction.workflowRun.findUnique({
             where: { id: parentRunId },
-            select: { worktreeId: true, worktreeLeaseOwnerRunId: true },
+            select: {
+              id: true,
+              idempotencyKey: true,
+              parentRunId: true,
+              status: true,
+              worktreeId: true,
+              worktreeLeaseOwnerRunId: true,
+            },
           })
         : null;
+      const repairRoot = await findPipelineRepairRoot(transaction, parent);
+      if (
+        repairRoot &&
+        !PIPELINE_REPAIR_DISPATCH_STATUSES.includes(repairRoot.status)
+      ) {
+        throw new Error("The parent pipeline repair is no longer active");
+      }
       const inheritedLeaseOwner =
         parent?.worktreeId === worktreeId
           ? parent.worktreeLeaseOwnerRunId

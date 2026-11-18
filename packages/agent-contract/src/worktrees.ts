@@ -31,6 +31,8 @@ export const WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY =
   "worktree.branch.expected-source";
 export const WORKTREE_BRANCH_RENAME_CAPABILITY = "worktree.branch.rename";
 export const WORKTREE_PUBLISH_CAPABILITY = "worktree.operation.publish";
+export const WORKTREE_PUSH_EVIDENCE_CAPABILITY =
+  "worktree.operation.push-evidence";
 export const WORKTREE_POST_MERGE_SWITCH_JOB_KIND = "worktree.post-merge-switch";
 export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";

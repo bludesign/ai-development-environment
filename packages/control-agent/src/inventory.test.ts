@@ -38,6 +38,10 @@ describe("agent inventory", () => {
     expect(AGENT_CAPABILITIES).toContain("worktree.branch.expected-source");
   });
 
+  test("advertises push evidence used by automatic pipeline repair", () => {
+    expect(AGENT_CAPABILITIES).toContain("worktree.operation.push-evidence");
+  });
+
   test("reports the operating system instead of assuming macOS", () => {
     expect(operatingSystemVersion("darwin", "25.0.0")).toBe("macOS 25.0.0");
     expect(operatingSystemVersion("linux", "6.8.0")).toBe("Linux 6.8.0");

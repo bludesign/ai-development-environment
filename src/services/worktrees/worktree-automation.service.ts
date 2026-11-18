@@ -52,6 +52,7 @@ import {
   cancelPipelineRepair,
   pipelineWorkflowSelection,
   PipelineRepairError,
+  requirePipelineRepairCapability,
   validatePipelineWorkflow,
   type PipelineWorkflowInput,
   type PipelineRepair,
@@ -369,6 +370,7 @@ export class WorktreeAutomationService {
             repositoryId: true,
             defaultBranch: true,
             repository: { select: { defaultBranchPatternsJson: true } },
+            agent: { select: { capabilitiesJson: true } },
           },
         },
       },
@@ -390,11 +392,13 @@ export class WorktreeAutomationService {
           }
         : undefined,
     );
-    if (pipelineWorkflow)
+    if (pipelineWorkflow) {
+      requirePipelineRepairCapability(worktree.codebase.agent);
       await validatePipelineWorkflow(
         worktree.codebase.repositoryId,
         pipelineWorkflow,
       );
+    }
     const workflowId = input.conflictWorkflowId?.trim() || null;
     if (workflowId) {
       const workflow = await prisma.workflow.findUnique({
@@ -1814,7 +1818,15 @@ export class WorktreeAutomationService {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findUnique({
       where: { id: rule.worktreeId },
-      include: { codebase: { include: { repository: true } } },
+      include: {
+        gitLabMergeRequest: { select: { projectId: true, iid: true } },
+        codebase: {
+          include: {
+            repository: true,
+            agent: { select: { capabilitiesJson: true } },
+          },
+        },
+      },
     });
     if (!worktree || !worktree.branch || !rule.pipelineWorkflowId) return;
     const origin = worktree.codebase.repository.canonicalOrigin;
@@ -1824,7 +1836,11 @@ export class WorktreeAutomationService {
         ? await this.github.branchPipelineCI(
             ...repositoryBranchParts(origin, worktree.branch),
           )
-        : await this.gitlab?.branchPipelineCI(origin, worktree.branch);
+        : await this.gitlab?.branchPipelineCI(
+            origin,
+            worktree.branch,
+            worktree.gitLabMergeRequest,
+          );
     } catch {
       // Provider reads for the repair path allow no stale fallback. Wait for a fresh result.
     }
@@ -1886,6 +1902,7 @@ export class WorktreeAutomationService {
             where: { id: rule.worktreeId },
             select: {
               branch: true,
+              missingAt: true,
               codebase: {
                 select: {
                   defaultBranch: true,
@@ -1907,6 +1924,10 @@ export class WorktreeAutomationService {
             rule = { ...rule, ...recovered };
           }
           if (await managedMergeOwnsWorktree(rule.worktreeId)) return;
+          if (rule.pipelineWorkflowId && current?.missingAt)
+            throw new PipelineRepairError(
+              "The worktree is missing. Restore it before resuming Auto Sync.",
+            );
           if (current?.branch !== rule.branch) {
             throw new Error(
               "Auto Sync paused because the worktree branch changed",
