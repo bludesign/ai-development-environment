@@ -14,13 +14,14 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useEdgesState,
+  useNodesInitialized,
   useNodesState,
+  useOptionsStore,
   useReactFlow,
-  useStore,
-  useStoreApi,
+  useReactFlowStoreApi,
   type Connection,
   type Edge,
-  type EdgeChange,
+  type EdgeChangeset,
   type Node,
   type ReactFlowInstance,
 } from "@xyflow/react";
@@ -194,7 +195,7 @@ function WorkflowDiagnosticFocus({
   onFocused: (request: DiagnosticFocus) => void;
 }) {
   const { fitView } = useReactFlow();
-  const initialized = useStore((state) => state.nodesInitialized);
+  const initialized = useNodesInitialized();
   useEffect(() => {
     if (!request || (request.nodeIds.length > 0 && !initialized)) return;
     let active = true;
@@ -202,7 +203,7 @@ function WorkflowDiagnosticFocus({
       request.nodeIds.length > 0
         ? fitView({
             nodes: request.nodeIds.map((id) => ({ id })),
-            padding: 0.3,
+            padding: "11.5%",
             maxZoom: 1,
             duration: 250,
           })
@@ -305,8 +306,8 @@ function touchLike(event: ReactMouseEvent): boolean {
  */
 function WorkflowInteractivityButton() {
   const t = useTranslations("workflows");
-  const store = useStoreApi();
-  const interactive = useStore(
+  const { optionsStore } = useReactFlowStoreApi();
+  const interactive = useOptionsStore(
     (state) =>
       state.nodesDraggable ||
       state.nodesConnectable ||
@@ -318,7 +319,7 @@ function WorkflowInteractivityButton() {
     <ControlButton
       aria-label={label}
       onClick={() =>
-        store.setState({
+        optionsStore.setState({
           elementsSelectable: !interactive,
           nodesConnectable: !interactive,
           nodesDraggable: !interactive,
@@ -745,12 +746,10 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   );
 
   const handleEdgesChange = useCallback(
-    (changes: EdgeChange<Edge>[]) => {
+    (changes: EdgeChangeset<Edge>) => {
       onEdgesChange(changes);
       const removedIds = new Set(
-        changes.flatMap((change) =>
-          change.type === "remove" ? [change.id] : [],
-        ),
+        changes.getByType("remove").map(({ id }) => id),
       );
       if (removedIds.size === 0) return;
       setFocusRequest(null);
@@ -1508,7 +1507,6 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               <WorkflowNodeActionsContext value={nodeActions}>
                 <ReactFlow
                   className={locked ? workflowFitLockPaneClass : undefined}
-                  colorMode="system"
                   deleteKeyCode={["Backspace", "Delete"]}
                   edges={diagnosticElements.edges}
                   fitView

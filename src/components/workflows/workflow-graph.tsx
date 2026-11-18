@@ -8,14 +8,16 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  useNodesInitialized,
   useReactFlow,
-  useStore,
-  useStoreApi,
+  useReactFlowStoreApi,
   useUpdateNodeInternals,
+  useViewportStore,
   type Dimensions,
   type Edge,
+  type FitViewOptions,
   type Node,
-  type NodeChange,
+  type NodeChangeset,
   type NodeProps,
 } from "@xyflow/react";
 import {
@@ -186,7 +188,7 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
   const labels = useWorkflowLabels();
   const t = useTranslations("workflows");
   const actions = useContext(WorkflowNodeActionsContext);
-  const store = useStoreApi();
+  const { optionsStore } = useReactFlowStoreApi();
   const updateNodeInternals = useUpdateNodeInternals();
   const handles = data.handles;
   const handleSignature = JSON.stringify([data.handleLayout, handles]);
@@ -379,7 +381,7 @@ function WorkflowCard({ data, id, selected }: NodeProps<WorkflowFlowNode>) {
     // call that click path uses.
     <ContextMenu
       onOpenChange={(open) => {
-        if (open) store.getState().addSelectedNodes([id]);
+        if (open) optionsStore.getState().addSelectedNodes([id]);
       }}
     >
       <ContextMenuTrigger asChild>{card}</ContextMenuTrigger>
@@ -489,9 +491,9 @@ function WorkflowBasicViewport({
     WorkflowFlowNode,
     Edge
   >();
-  const width = useStore((state) => state.width);
-  const height = useStore((state) => state.height);
-  const initialized = useStore((state) => state.nodesInitialized);
+  const width = useViewportStore((state) => state.width);
+  const height = useViewportStore((state) => state.height);
+  const initialized = useNodesInitialized();
   useEffect(() => {
     if (!initialized || !width || !height) return;
     const bounds = getNodesBounds(getNodes());
@@ -958,11 +960,11 @@ export function WorkflowGraph({
   // of the definition it was handed.
   const [sizes, setSizes] = useState<Record<string, Dimensions>>({});
   const onNodesChange = useCallback(
-    (changes: NodeChange<WorkflowFlowNode>[]) => {
+    (changes: NodeChangeset<WorkflowFlowNode>) => {
       setSizes((current) => {
         let next = current;
-        for (const change of changes) {
-          if (change.type !== "dimensions" || !change.dimensions) continue;
+        for (const change of changes.getByType("dimensions")) {
+          if (!change.dimensions) continue;
           const previous = current[change.id];
           if (
             previous?.width === change.dimensions.width &&
@@ -1028,8 +1030,8 @@ export function WorkflowGraph({
   const basicVerticalHeight = basicLayout
     ? Math.ceil(basicLayout.bounds.height * basicScale + 48)
     : 0;
-  const fitViewOptions = useMemo(
-    () => (basic ? { padding: 0.08, minZoom: 0.8, maxZoom: 1 } : undefined),
+  const fitViewOptions = useMemo<FitViewOptions | undefined>(
+    () => (basic ? { padding: "3.7%", minZoom: 0.8, maxZoom: 1 } : undefined),
     [basic],
   );
   const basicTranslateExtent = useMemo(
@@ -1068,7 +1070,6 @@ export function WorkflowGraph({
     >
       <ReactFlow
         className={cn(locked && workflowFitLockPaneClass)}
-        colorMode="system"
         edges={edges}
         // Steps here are read, not picked: a click opens whatever the page
         // hangs off `onNodeClick`, which fires either way, and nothing acts on

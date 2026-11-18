@@ -1,6 +1,11 @@
 "use client";
 
-import { ControlButton, useReactFlow, useStore } from "@xyflow/react";
+import {
+  ControlButton,
+  useNodesInitialized,
+  useReactFlow,
+  useViewportStore,
+} from "@xyflow/react";
 import { Lock, LockOpen } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect } from "react";
@@ -27,11 +32,11 @@ export function WorkflowFitLock({
   signature: string;
 }) {
   const { fitView } = useReactFlow();
-  const width = useStore((state) => state.width);
-  const height = useStore((state) => state.height);
+  const width = useViewportStore((state) => state.width);
+  const height = useViewportStore((state) => state.height);
   // Fitting against unmeasured nodes or a pane React Flow has not sized yet
   // computes a viewport from zeroes; both settle a tick later and re-run this.
-  const initialized = useStore((state) => state.nodesInitialized);
+  const initialized = useNodesInitialized();
   useEffect(() => {
     if (!locked || !initialized || !width || !height) return;
     void fitView();
@@ -44,10 +49,8 @@ export function WorkflowFitLock({
  * panning in JavaScript, but its stylesheet pins `touch-action: none` on the
  * pane unconditionally, so on a touch screen a drag that starts over the graph
  * is swallowed: the graph refuses to move and the page underneath cannot
- * scroll. The rule this hooks into lives in `globals.css` rather than being a
- * Tailwind utility, because React Flow's stylesheet is imported unlayered and
- * would outrank anything in `@layer utilities`. Cards sit outside the pane and
- * are unaffected, so a tap still selects a step.
+ * scroll. The rule in `globals.css` restores scrolling on the pane. Cards
+ * sit outside the pane, so a tap still selects a step.
  */
 export const workflowFitLockPaneClass = "workflow-fit-locked";
 
