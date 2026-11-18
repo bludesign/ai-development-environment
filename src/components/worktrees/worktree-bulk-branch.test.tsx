@@ -185,13 +185,19 @@ test("submits the chosen visible worktrees with their own bases and shows mixed 
   const firstChoice = screen.getByRole("checkbox", {
     name: "Select feature/one",
   });
+  const firstFolder = screen.getByText("/repos/one");
+  expect(firstChoice.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(firstFolder);
+  expect(firstChoice.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(firstFolder);
   expect(firstChoice.getAttribute("aria-checked")).toBe("false");
   fireEvent.click(firstChoice);
-  expect(
-    screen
-      .getByRole("checkbox", { name: "Select feature/extra" })
-      .hasAttribute("disabled"),
-  ).toBe(true);
+  const extraChoice = screen.getByRole("checkbox", {
+    name: "Select feature/extra",
+  });
+  expect(extraChoice.hasAttribute("disabled")).toBe(true);
+  fireEvent.click(screen.getByText("/repos/extra"));
+  expect(extraChoice.getAttribute("aria-checked")).toBe("false");
   fireEvent.click(screen.getByRole("checkbox", { name: "Select feature/two" }));
   fireEvent.click(
     screen.getByRole("button", { name: "Change branch on 2 worktrees" }),
