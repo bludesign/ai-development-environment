@@ -18,6 +18,7 @@
  * time, long after both constructors have run.
  */
 
+import { WORKFLOW_QUICK_ACTION_KINDS } from "@/lib/workflows/quick-action-kinds";
 import * as z from "zod/v4";
 import { createWorkflowQuickActionTools } from "./administration-tools";
 
@@ -146,12 +147,7 @@ const WorkflowSchema = z.object({
   blocksGitOperations: z.boolean(),
   activeVersionId: z.string().nullable(),
   draftSchemaVersion: z.number(),
-  quickActionKind: z.enum([
-    "STANDARD",
-    "MERGE_CONFLICT",
-    "GITHUB_ACTIONS",
-    "NONE",
-  ]),
+  quickActionKind: z.enum(WORKFLOW_QUICK_ACTION_KINDS),
   archivedAt: z.string().nullable(),
   versionCount: z.number(),
   runCount: z.number(),

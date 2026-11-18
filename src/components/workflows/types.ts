@@ -118,7 +118,12 @@ export type WorkflowSummary = {
   exclusiveWorktree: boolean;
   worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
   blocksGitOperations: boolean;
-  quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
+  quickActionKind:
+    | "STANDARD"
+    | "MERGE_CONFLICT"
+    | "FAILING_PIPELINE"
+    | "GITHUB_ACTIONS"
+    | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   quickActionRepositories: Array<{

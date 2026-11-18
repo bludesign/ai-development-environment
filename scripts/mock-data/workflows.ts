@@ -274,6 +274,58 @@ export async function seedWorkflows(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  const pipelineWorkflowId = "workflow-diagnose-ci";
+  const pipelineVersionId = "workflow-version-diagnose-ci";
+  const pipelineTrigger = {
+    ...definition.triggers[0],
+    kind: "RESOURCE_MANUAL",
+    name: "Worktree",
+    config: { resourceKind: "WORKTREE" },
+  };
+  const pipelineDefinition = JSON.stringify({
+    ...definition,
+    name: "Diagnose CI failure",
+    description: "Load the pull request for a failing CI run.",
+    triggers: [pipelineTrigger],
+  });
+  await prisma.workflow.create({
+    data: {
+      id: pipelineWorkflowId,
+      name: "Diagnose CI failure",
+      description: "Load the pull request for a failing CI run.",
+      draftDefinitionJson: pipelineDefinition,
+      quickActionKind: "FAILING_PIPELINE",
+      quickActionIconKey: "search",
+      quickActionButtonVariant: "outline",
+      quickActionRepositories: {
+        create: { repositoryId: ids.repositories.web },
+      },
+      versions: {
+        create: {
+          id: pipelineVersionId,
+          version: 1,
+          name: "Diagnose CI failure",
+          description: "Load the pull request for a failing CI run.",
+          schemaVersion: 1,
+          definitionJson: pipelineDefinition,
+          contentHash: "sha256-workflow-diagnose-ci",
+          triggers: {
+            create: {
+              id: "trigger-diagnose-ci",
+              nodeId: pipelineTrigger.id!,
+              kind: pipelineTrigger.kind,
+              configJson: JSON.stringify(pipelineTrigger.config),
+            },
+          },
+        },
+      },
+    },
+  });
+  await prisma.workflow.update({
+    where: { id: pipelineWorkflowId },
+    data: { activeVersionId: pipelineVersionId, enabled: true },
+  });
+
   await prisma.workflowRunNumberSequence.create({
     data: { id: "default", nextValue: displayNumbers.workflowRuns.running + 1 },
   });

@@ -643,12 +643,14 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Merge conflict",
+      "FAILING_PIPELINE": "Failing pipeline",
       "GITHUB_ACTIONS": "GitHub Actions",
       "NONE": "None"
     },
     "quickActionKindHelp": {
       "STANDARD": "Show this action with the standard worktree actions.",
       "MERGE_CONFLICT": "Show this action while a worktree rebase is stopped on conflicts.",
+      "FAILING_PIPELINE": "Show this action on worktrees with a failing CI pipeline.",
       "GITHUB_ACTIONS": "Show this action in matching GitHub pipeline and job menus.",
       "NONE": "Do not show this workflow as a quick action."
     },
@@ -3554,6 +3556,7 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Merge conflict",
+      "FAILING_PIPELINE": "Failing pipeline",
       "GITHUB_ACTIONS": "GitHub Actions"
     },
     "allRepositories": "All repositories",
@@ -3943,6 +3946,9 @@
     "forcePush": "Force push",
     "sync": "Sync",
     "rebase": "Rebase",
+    "pipelineFailing": "Pipeline failing",
+    "sessionsInProgress": "{count, plural, one {# session in progress} other {# sessions in progress}}",
+    "plansInProgress": "{count, plural, one {# plan in progress} other {# plans in progress}}",
     "rebasePaused": "Rebase paused",
     "rebaseConflicts": "Resolve the merge conflicts with a workflow, or cancel to restore the branch to its pre-rebase state.",
     "rebaseIncomplete": "A rebase is still in progress. Cancel it to restore the branch to its pre-rebase state.",

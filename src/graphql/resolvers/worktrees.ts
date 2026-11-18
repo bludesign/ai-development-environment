@@ -39,6 +39,14 @@ export const createWorktreeResolvers = (
   automation: WorktreeAutomationService,
 ) => ({
   WorktreeOverview: {
+    inProgressRunCounts: (value: {
+      agents: Array<{ codebases: Array<{ worktrees: Array<{ id: string }> }> }>;
+    }) =>
+      service.inProgressRunCounts(
+        value.agents.flatMap(({ codebases }) =>
+          codebases.flatMap(({ worktrees }) => worktrees.map(({ id }) => id)),
+        ),
+      ),
     activeSyncBatches: (value: {
       syncScope?: { appId?: string | null; worktreeId?: string | null };
     }) =>

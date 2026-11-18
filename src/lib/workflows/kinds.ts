@@ -324,16 +324,10 @@ export type WorkflowResourceKind = (typeof WORKFLOW_RESOURCE_KINDS)[number];
 
 export const COMMAND_PORT_CONFLICT_WAIT = "COMMAND_PORT_CONFLICT";
 
-export const WORKFLOW_QUICK_ACTION_KINDS = [
-  "STANDARD",
-  "MERGE_CONFLICT",
-  "GITHUB_ACTIONS",
-  "GITLAB_PIPELINES",
-  "NONE",
-] as const;
-
-export type WorkflowQuickActionKind =
-  (typeof WORKFLOW_QUICK_ACTION_KINDS)[number];
+export {
+  WORKFLOW_QUICK_ACTION_KINDS,
+  type WorkflowQuickActionKind,
+} from "./quick-action-kinds";
 
 /**
  * The manual trigger kinds come in pairs: a plain one, and a `*_CHOICE` one for

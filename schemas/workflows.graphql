@@ -54,6 +54,8 @@ enum WorkflowQuickActionKind {
   STANDARD
   "Represents the merge conflict option."
   MERGE_CONFLICT
+  "Offers a workflow on a worktree with a failing CI pipeline."
+  FAILING_PIPELINE
   "Represents the GitHub actions option."
   GITHUB_ACTIONS
   "Represents GitLab pipelines."

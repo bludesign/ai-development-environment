@@ -643,12 +643,14 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Conflit de fusion",
+      "FAILING_PIPELINE": "Pipeline en échec",
       "GITHUB_ACTIONS": "Actions GitHub",
       "NONE": "Aucune"
     },
     "quickActionKindHelp": {
       "STANDARD": "Afficher avec les actions standard du worktree.",
       "MERGE_CONFLICT": "Afficher lorsqu’un rebase est interrompu par des conflits.",
+      "FAILING_PIPELINE": "Afficher cette action sur les arbres de travail dont le pipeline CI est en échec.",
       "GITHUB_ACTIONS": "Afficher dans les menus de pipelines et de tâches GitHub.",
       "NONE": "Ne pas afficher comme action rapide."
     },
@@ -3554,6 +3556,7 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Conflit de fusion",
+      "FAILING_PIPELINE": "Pipeline en échec",
       "GITHUB_ACTIONS": "Actions GitHub"
     },
     "allRepositories": "Tous les dépôts",
@@ -3943,6 +3946,9 @@
     "forcePush": "Forcer le push",
     "sync": "Synchroniser",
     "rebase": "Rebaser",
+    "pipelineFailing": "Pipeline en échec",
+    "sessionsInProgress": "{count, plural, one {# session en cours} other {# sessions en cours}}",
+    "plansInProgress": "{count, plural, one {# plan en cours} other {# plans en cours}}",
     "rebasePaused": "Rebase en pause",
     "rebaseConflicts": "Résolvez les conflits avec un workflow ou annulez pour restaurer l’état antérieur au rebase.",
     "rebaseIncomplete": "Un rebase est toujours en cours. Annulez-le pour restaurer l’état précédent de la branche.",

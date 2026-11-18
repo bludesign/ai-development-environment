@@ -1,6 +1,7 @@
 import { validateTransferReferences } from "./integrity";
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { WORKFLOW_QUICK_ACTION_KINDS } from "@/lib/workflows/quick-action-kinds";
 import { z } from "zod";
 import {
   normalizeGitOrigin,
@@ -1975,7 +1976,7 @@ export class RepositoryTransferService {
             .boolean()
             .parse(f.completionNotificationsEnabled ?? true),
           quickActionKind: z
-            .enum(["NONE", "STANDARD", "MERGE_CONFLICT", "GITHUB_ACTIONS"])
+            .enum(WORKFLOW_QUICK_ACTION_KINDS)
             .parse(f.quickActionKind ?? "NONE"),
         };
       }

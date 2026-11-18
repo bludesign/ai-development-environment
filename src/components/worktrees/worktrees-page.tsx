@@ -195,6 +195,7 @@ import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
   CODEBASE_FIELDS,
   WORKTREE_FIELDS,
+  WORKTREE_QUICK_ACTION_FIELDS,
   WORKTREE_LIST_FIELDS,
   WORKTREE_SYNC_BATCH_FIELDS,
 } from "./worktree-graphql";
@@ -211,6 +212,8 @@ import {
   waitForWorktreeOperationJob,
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
+import { WorktreeRunBadges } from "./worktree-run-badges";
+import { WorktreeFailingPipelineItem } from "./worktree-failing-pipeline-item";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import { WorktreeBulkBranch } from "./worktree-bulk-branch";
 import { WorktreeBulkMerge } from "./worktree-bulk-merge";
@@ -791,6 +794,7 @@ export function WorktreesPage({
           worktreeOverview(appId: $appId, savedOnly: true) {
             durationMs
             hiddenCount
+            inProgressRunCounts { worktreeId sessionCount planCount }
             settings { editorVariant updatedAt }
             tags { id name color createdAt updatedAt }
             activeMoves {
@@ -804,16 +808,9 @@ export function WorktreesPage({
               codebases {
                 hasPreparations iosBuildConfigured androidProjectEnabled androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
-                quickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
-                mergeConflictQuickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
+                quickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+                mergeConflictQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+                failingPipelineQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
                 worktrees { ${WORKTREE_LIST_FIELDS} }
@@ -931,6 +928,29 @@ export function WorktreesPage({
         complete: () => undefined,
       },
     );
+    const unsubscribeAgentRuns = subscriptions.subscribe(
+      {
+        query:
+          "subscription WorktreeAgentRunsChanged($appId: ID) { agentRunListChanged(appId: $appId) }",
+        variables: { appId: appId ?? null },
+      },
+      {
+        next: () => live.invalidate(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const unsubscribeGitLabPipelines = subscriptions.subscribe(
+      {
+        query:
+          "subscription WorktreeGitLabPipelinesChanged { gitlabPipelineStatusChanged { id } }",
+      },
+      {
+        next: () => live.invalidate(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       live.dispose();
@@ -939,6 +959,8 @@ export function WorktreesPage({
       unsubscribeBuilds();
       unsubscribeRepositorySettings();
       unsubscribeWorkflows();
+      unsubscribeAgentRuns();
+      unsubscribeGitLabPipelines();
     };
   }, [load, appId]);
 
@@ -1984,6 +2006,11 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} />
           )}
+          <WorktreeRunBadges
+            counts={props.overview.inProgressRunCounts?.find(
+              (count) => count.worktreeId === worktree.id,
+            )}
+          />
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           {isDefault && <Badge variant="outline">{t("defaultBranch")}</Badge>}
@@ -2000,6 +2027,10 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
           showPullRequest={!isDefault}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
+        />
+        <WorktreeFailingPipelineItem
+          worktree={worktree}
+          workflows={props.group.failingPipelineQuickActions}
         />
         <WorktreeRebaseConflictItem
           group={props.group}
@@ -4597,6 +4628,11 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} compact />
           )}
+          <WorktreeRunBadges
+            counts={props.overview.inProgressRunCounts?.find(
+              (count) => count.worktreeId === worktree.id,
+            )}
+          />
         </TableCell>
         <TableCell className="font-mono text-xs">
           {displayedWorktreePath(worktree.folder, baseRepoDirectory)}
@@ -4638,6 +4674,10 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
       </TableRow>
       <TableRow className={cn(highlight)}>
         <TableCell className="space-y-2" colSpan={8}>
+          <WorktreeFailingPipelineItem
+            worktree={worktree}
+            workflows={props.group.failingPipelineQuickActions}
+          />
           <WorktreeRebaseConflictItem
             group={props.group}
             onCompleted={props.onReload}

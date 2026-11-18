@@ -50,6 +50,8 @@ const github = {
 };
 const snapshot = { snapshots: vi.fn() };
 const findMany = vi.fn();
+const findWorkflows = vi.fn();
+const groupRuns = vi.fn();
 const mergeRequest: GitLabMergeRequestView = {
   id: "mr-1",
   iid: 1,
@@ -95,6 +97,7 @@ function service() {
 beforeEach(() => {
   vi.resetAllMocks();
   findMany.mockResolvedValue([row()]);
+  findWorkflows.mockResolvedValue([]);
   const transaction = {
     worktree: { update: vi.fn() },
     worktreePullRequest: { deleteMany: vi.fn() },
@@ -116,7 +119,8 @@ beforeEach(() => {
     },
     codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
     worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
-    workflow: { findMany: vi.fn().mockResolvedValue([]) },
+    workflow: { findMany: findWorkflows },
+    agentRun: { groupBy: groupRuns },
   });
   gitlab.projectForCanonicalOrigin.mockResolvedValue({ id: "42" });
   gitlab.storedPipelines.mockResolvedValue(
@@ -355,4 +359,71 @@ test("reports stale pipeline fallback and does not overwrite the last good clien
       include: expect.anything(),
     }),
   );
+});
+
+test("projects published failing pipeline workflows with a worktree trigger and matching repository", async () => {
+  const workflow = (
+    id: string,
+    repositoryId?: string,
+    resourceKind = "WORKTREE",
+  ) => ({
+    id,
+    quickActionKind: "FAILING_PIPELINE",
+    quickActionRepositories: repositoryId ? [{ repositoryId }] : [],
+    activeVersion: {
+      triggers: [
+        {
+          kind: "RESOURCE_MANUAL",
+          configJson: JSON.stringify({ resourceKind }),
+        },
+      ],
+    },
+  });
+  findWorkflows.mockResolvedValue([
+    workflow("global"),
+    workflow("local", "repo-1"),
+    workflow("different-repo", "repo-2"),
+    workflow("wrong-trigger", undefined, "GITLAB_PIPELINE"),
+  ]);
+  const overview = await service().overview(undefined, undefined, true);
+  expect(findWorkflows).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+        quickActionKind: { in: expect.arrayContaining(["FAILING_PIPELINE"]) },
+      }),
+    }),
+  );
+  const group = overview.agents[0]?.codebases[0];
+  expect(group?.quickActions).toEqual([]);
+  expect(group?.failingPipelineQuickActions.map(({ id }) => id)).toEqual([
+    "global",
+    "local",
+  ]);
+});
+
+test("batches the in-progress run counts by worktree and kind", async () => {
+  groupRuns.mockResolvedValue([
+    { worktreeId: "worktree-1", kind: "SESSION", _count: { _all: 2 } },
+    { worktreeId: "worktree-1", kind: "PLAN", _count: { _all: 1 } },
+    { worktreeId: "worktree-2", kind: "PLAN", _count: { _all: 3 } },
+  ]);
+  expect(
+    await service().inProgressRunCounts(["worktree-1", "worktree-2"]),
+  ).toEqual([
+    { worktreeId: "worktree-1", sessionCount: 2, planCount: 1 },
+    { worktreeId: "worktree-2", sessionCount: 0, planCount: 3 },
+  ]);
+  expect(groupRuns).toHaveBeenCalledExactlyOnceWith({
+    by: ["worktreeId", "kind"],
+    where: {
+      worktreeId: { in: ["worktree-1", "worktree-2"] },
+      kind: { in: ["PLAN", "SESSION"] },
+      status: "IN_PROGRESS",
+      archivedAt: null,
+    },
+    _count: { _all: true },
+  });
 });

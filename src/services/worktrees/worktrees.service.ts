@@ -1927,7 +1927,9 @@ export class WorktreesService {
         enabled: true,
         archivedAt: null,
         activeVersionId: { not: null },
-        quickActionKind: { in: ["STANDARD", "MERGE_CONFLICT"] },
+        quickActionKind: {
+          in: ["STANDARD", "MERGE_CONFLICT", "FAILING_PIPELINE"],
+        },
         OR: [
           { quickActionRepositories: { none: {} } },
           {
@@ -1983,6 +1985,7 @@ export class WorktreesService {
       androidBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
       mergeConflictQuickActions: typeof eligibleQuickActions;
+      failingPipelineQuickActions: typeof eligibleQuickActions;
     };
     type AgentGroup = {
       agent: View["codebase"]["agent"];
@@ -2002,6 +2005,14 @@ export class WorktreesService {
         const androidProject = worktree.codebase.repository.projects?.find(
           (project) => project.type === "ANDROID_APP",
         );
+        const repositoryActions = eligibleQuickActions.filter(
+          (workflow) =>
+            workflow.quickActionRepositories.length === 0 ||
+            workflow.quickActionRepositories.some(
+              ({ repositoryId }) =>
+                repositoryId === worktree.codebase.repository.id,
+            ),
+        );
         codebaseGroup = {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
@@ -2019,23 +2030,14 @@ export class WorktreesService {
           androidBuildConfigured: Boolean(
             androidProject?.androidConfigurations.length,
           ),
-          quickActions: eligibleQuickActions.filter(
-            (workflow) =>
-              workflow.quickActionKind === "STANDARD" &&
-              (workflow.quickActionRepositories.length === 0 ||
-                workflow.quickActionRepositories.some(
-                  ({ repositoryId }) =>
-                    repositoryId === worktree.codebase.repository.id,
-                )),
+          quickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "STANDARD",
           ),
-          mergeConflictQuickActions: eligibleQuickActions.filter(
-            (workflow) =>
-              workflow.quickActionKind === "MERGE_CONFLICT" &&
-              (workflow.quickActionRepositories.length === 0 ||
-                workflow.quickActionRepositories.some(
-                  ({ repositoryId }) =>
-                    repositoryId === worktree.codebase.repository.id,
-                )),
+          mergeConflictQuickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "MERGE_CONFLICT",
+          ),
+          failingPipelineQuickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "FAILING_PIPELINE",
           ),
         };
         agentGroup.codebaseMap.set(worktree.codebase.id, codebaseGroup);
@@ -2061,6 +2063,37 @@ export class WorktreesService {
       syncScope: { appId, worktreeId },
       durationMs: performance.now() - started,
     };
+  }
+
+  async inProgressRunCounts(worktreeIds: string[]) {
+    if (!worktreeIds.length) return [];
+    const prisma = await getPrismaClient();
+    const groups = await prisma.agentRun.groupBy({
+      by: ["worktreeId", "kind"],
+      where: {
+        worktreeId: { in: worktreeIds },
+        kind: { in: ["PLAN", "SESSION"] },
+        status: "IN_PROGRESS",
+        archivedAt: null,
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map<
+      string,
+      { worktreeId: string; planCount: number; sessionCount: number }
+    >();
+    for (const { worktreeId, kind, _count } of groups) {
+      if (!worktreeId) continue;
+      const count = counts.get(worktreeId) ?? {
+        worktreeId,
+        planCount: 0,
+        sessionCount: 0,
+      };
+      if (kind === "PLAN") count.planCount = _count._all;
+      if (kind === "SESSION") count.sessionCount = _count._all;
+      counts.set(worktreeId, count);
+    }
+    return [...counts.values()];
   }
 
   async hidden(appId?: string | null) {

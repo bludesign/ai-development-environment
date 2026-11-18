@@ -175,6 +175,7 @@ export type WorktreeCodebaseGroup = {
   androidBuildConfigured?: boolean;
   quickActions?: WorktreeQuickAction[];
   mergeConflictQuickActions?: WorktreeQuickAction[];
+  failingPipelineQuickActions?: WorktreeQuickAction[];
 };
 
 export type WorktreeAgentGroup = {
@@ -184,6 +185,7 @@ export type WorktreeAgentGroup = {
 
 export type WorktreeOverview = {
   durationMs?: number;
+  inProgressRunCounts?: WorktreeInProgressRunCount[];
   agents: WorktreeAgentGroup[];
   tags: WorktreeTag[];
   settings: {
@@ -193,6 +195,12 @@ export type WorktreeOverview = {
   hiddenCount: number;
   activeMoves: WorktreeMove[];
   activeSyncBatches?: WorktreeSyncBatch[];
+};
+
+export type WorktreeInProgressRunCount = {
+  worktreeId: string;
+  planCount: number;
+  sessionCount: number;
 };
 
 export type WorktreeSyncItemStatus =

@@ -643,12 +643,14 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Merge-Konflikt",
+      "FAILING_PIPELINE": "Fehlgeschlagene Pipeline",
       "GITHUB_ACTIONS": "GitHub-Aktionen",
       "NONE": "Keine"
     },
     "quickActionKindHelp": {
       "STANDARD": "Mit den Standard-Worktree-Aktionen anzeigen.",
       "MERGE_CONFLICT": "Bei einem durch Konflikte angehaltenen Rebase anzeigen.",
+      "FAILING_PIPELINE": "Diese Aktion in Arbeitsbäumen mit einer fehlgeschlagenen CI-Pipeline anzeigen.",
       "GITHUB_ACTIONS": "In passenden GitHub-Pipeline- und Job-Menüs anzeigen.",
       "NONE": "Nicht als Schnellaktion anzeigen."
     },
@@ -3554,6 +3556,7 @@
     "quickActionKinds": {
       "STANDARD": "Standard",
       "MERGE_CONFLICT": "Merge-Konflikt",
+      "FAILING_PIPELINE": "Fehlgeschlagene Pipeline",
       "GITHUB_ACTIONS": "GitHub-Aktionen"
     },
     "allRepositories": "Alle Repositorys",
@@ -3943,6 +3946,9 @@
     "forcePush": "Push erzwingen",
     "sync": "Synchronisieren",
     "rebase": "Rebasen",
+    "pipelineFailing": "Pipeline fehlgeschlagen",
+    "sessionsInProgress": "{count, plural, one {# laufende Sitzung} other {# laufende Sitzungen}}",
+    "plansInProgress": "{count, plural, one {# laufender Plan} other {# laufende Pläne}}",
     "rebasePaused": "Rebase angehalten",
     "rebaseConflicts": "Merge-Konflikte mit einem Workflow lösen oder abbrechen, um den Zustand vor dem Rebase wiederherzustellen.",
     "rebaseIncomplete": "Ein Rebase läuft noch. Brechen Sie ihn ab, um den vorherigen Branch-Zustand wiederherzustellen.",

@@ -643,12 +643,14 @@
     "quickActionKinds": {
       "STANDARD": "Estándar",
       "MERGE_CONFLICT": "Conflicto de fusión",
+      "FAILING_PIPELINE": "Pipeline con errores",
       "GITHUB_ACTIONS": "Acciones de GitHub",
       "NONE": "Ninguna"
     },
     "quickActionKindHelp": {
       "STANDARD": "Mostrar con las acciones estándar del worktree.",
       "MERGE_CONFLICT": "Mostrar cuando un rebase se detiene por conflictos.",
+      "FAILING_PIPELINE": "Mostrar esta acción en los árboles de trabajo con un pipeline de CI con errores.",
       "GITHUB_ACTIONS": "Mostrar en los menús de pipelines y trabajos de GitHub.",
       "NONE": "No mostrar como acción rápida."
     },
@@ -3554,6 +3556,7 @@
     "quickActionKinds": {
       "STANDARD": "Estándar",
       "MERGE_CONFLICT": "Conflicto de fusión",
+      "FAILING_PIPELINE": "Pipeline con errores",
       "GITHUB_ACTIONS": "Acciones de GitHub"
     },
     "allRepositories": "Todos los repositorios",
@@ -3943,6 +3946,9 @@
     "forcePush": "Forzar push",
     "sync": "Sincronizar",
     "rebase": "Rebasar",
+    "pipelineFailing": "Error en el pipeline",
+    "sessionsInProgress": "{count, plural, one {# sesión en curso} other {# sesiones en curso}}",
+    "plansInProgress": "{count, plural, one {# plan en curso} other {# planes en curso}}",
     "rebasePaused": "Rebase en pausa",
     "rebaseConflicts": "Resuelve los conflictos con un flujo o cancela para restaurar el estado anterior al rebase.",
     "rebaseIncomplete": "Hay un rebase en curso. Cancélalo para restaurar el estado anterior de la rama.",

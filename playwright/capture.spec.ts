@@ -163,6 +163,24 @@ test.describe("app screenshots", () => {
       if (route.scrollTo) {
         await scrollToLazyTarget(page, route.scrollTo);
       }
+      if (route.name === "worktree-failing-pipeline") {
+        const card = page.locator(route.scrollTo!);
+        await expect(
+          card.getByText("1 session in progress", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          card.getByText("1 plan in progress", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          card.getByText("Pipeline failing", { exact: true }),
+        ).toBeVisible();
+        await expect(
+          card.getByRole("button", {
+            name: "Diagnose CI failure",
+            exact: true,
+          }),
+        ).toBeVisible();
+      }
       if (route.sessionAgents) {
         const agents = page.getByTestId("run-agents-card");
         for (const label of [

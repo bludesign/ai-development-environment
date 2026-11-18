@@ -446,6 +446,11 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
       description: "Whether an inspection found conflicts",
     },
     { name: "conflicts", description: "Conflicting files" },
+    {
+      name: "failingPipelines",
+      description:
+        "Pipeline IDs, links, and status captured by a failing pipeline quick action",
+    },
     { name: "missingAt", description: "When the worktree was found missing" },
     { name: "dirtySince", description: "When the worktree became dirty" },
     {

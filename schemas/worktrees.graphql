@@ -491,6 +491,18 @@ type WorktreeCodebaseGroup {
   quickActions: [Workflow!]!
   "Merge conflict quick actions associated with this worktree codebase group."
   mergeConflictQuickActions: [Workflow!]!
+  "Failing pipeline quick actions available to this repository."
+  failingPipelineQuickActions: [Workflow!]!
+}
+
+"Counts of plans and sessions in progress on a worktree."
+type WorktreeInProgressRunCount {
+  "Identifier of the worktree."
+  worktreeId: ID!
+  "Number of plans in progress."
+  planCount: Int!
+  "Number of sessions in progress."
+  sessionCount: Int!
 }
 
 "Represents a worktree agent group in the GraphQL API."
@@ -507,6 +519,8 @@ type WorktreeOverview {
   durationMs: Float!
   "Agents associated with this worktree overview."
   agents: [WorktreeAgentGroup!]!
+  "In-progress plan and session counts for worktrees with active runs in this overview."
+  inProgressRunCounts: [WorktreeInProgressRunCount!]!
   "Tags associated with this worktree overview."
   tags: [WorktreeTag!]!
   "The settings associated with this worktree overview."

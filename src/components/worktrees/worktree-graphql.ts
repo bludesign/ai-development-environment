@@ -1,7 +1,13 @@
 import { POST_MERGE_SWITCH_FIELDS } from "@/components/github/post-merge-switch-client";
 
 export const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision requestedReviewerCount unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision requestedReviewerCount unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
+
+export const WORKTREE_QUICK_ACTION_FIELDS = `
+  id name description quickActionIconKey quickActionButtonVariant
+  hasPlainTrigger(resourceKind: "WORKTREE")
+  triggerChoices(resourceKind: "WORKTREE") { key label description }
+`;
 
 export const SOURCE_CONTROL_REQUEST_FIELDS = `
   provider id number title url isDraft headRefName headRefOid createdAt
