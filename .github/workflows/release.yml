@@ -473,6 +473,8 @@ jobs:
       ((github.event_name == 'push' && needs.tag.result == 'success') ||
        github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
+    outputs:
+      published_latest: ${{ steps.release.outputs.latest }}
     permissions:
       contents: read
       packages: write
@@ -614,3 +616,23 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.AGENT_IMAGE_NAME }}
           subject-digest: ${{ steps.agent-publish.outputs.digest }}
           push-to-registry: true
+
+  update-watchtower:
+    needs: publish-ghcr
+    if: github.ref == 'refs/heads/main' && needs.publish-ghcr.outputs.published_latest == 'true'
+    runs-on: ubuntu-latest
+    environment: watchtower
+    permissions: {}
+    steps:
+      - name: Update AIDE on server Watchtower
+        uses: bludesign/watchtower-update@2ddec391c04fdefc2bc26edaee2caabcf5de043c # v4.0
+        with:
+          url: ${{ secrets.WATCH_TOWER_URL }}
+          api_token: ${{ secrets.WATCHTOWER_HTTP_API_TOKEN }}
+          images: ghcr.io/bludesign/ai-development-environment:latest
+          timeout: '180'
+          headers: |
+            {
+              "CF-Access-Client-Id": ${{ toJSON(secrets.CF_ACCESS_CLIENT_ID) }},
+              "CF-Access-Client-Secret": ${{ toJSON(secrets.CF_ACCESS_CLIENT_SECRET) }}
+            }
