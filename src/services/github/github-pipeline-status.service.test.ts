@@ -122,6 +122,36 @@ afterAll(async () => {
 });
 
 describe("GitHubPipelineStatusService", () => {
+  test("loads saved snapshots by exact repository name and commit", async () => {
+    const target = run({
+      repositoryGithubId: "worktree-pipeline-repo",
+      repositoryNameWithOwner: "Acme/Widgets",
+      headSha: "worktree-pipeline-head",
+      id: "worktree-pipeline-run",
+      status: "FAILURE",
+    });
+    await service.observeWorkflowRuns([
+      target,
+      { ...target, headSha: "worktree-pipeline-old-head" },
+      {
+        ...target,
+        repositoryGithubId: "unrelated-worktree-pipeline-repo",
+        repositoryNameWithOwner: "Other/Widgets",
+      },
+    ]);
+
+    const snapshots = await service.snapshotsForRepositoryHeads(
+      new Map([["acme/widgets", new Set([target.headSha])]]),
+    );
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      repositoryGithubId: target.repositoryGithubId,
+      headSha: target.headSha,
+      pipelineStatus: "FAILURE",
+      pipelines: [{ workflowRunId: target.id }],
+    });
+  });
+
   test("scoped subscriptions replay current rows and retain events arriving before the initial read", async () => {
     const key = {
       repositoryGithubId: "replay-repository",

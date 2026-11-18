@@ -7,6 +7,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 
+import { GitHubPipelineStatusProvider } from "@/components/github/pipeline-status-provider";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { GitLabPipelineView } from "@/services/gitlab/types";
 
@@ -42,13 +43,19 @@ const pipeline = (
   ({
     id,
     projectId: "44",
+    ref: "feature/ci",
     source,
     sha,
     status,
     webUrl: `https://gitlab.example/pipelines/${id}`,
   }) as GitLabPipelineView;
 const gitlabWorktree = (gitLabPipelines: GitLabPipelineView[]) =>
-  ({ id: "worktree-1", headSha: "current-head", gitLabPipelines }) as Worktree;
+  ({
+    id: "worktree-1",
+    branch: "feature/ci",
+    headSha: "current-head",
+    gitLabPipelines,
+  }) as Worktree;
 
 test("uses the newest GitLab pipeline per source and sends only current failures", async () => {
   const run = {
@@ -128,16 +135,76 @@ test("uses the newest GitLab pipeline per source and sends only current failures
   expect(screen.getByRole("button", manageRunning)).toBeTruthy();
 });
 
-test("uses the linked GitHub pull request rollup and includes its check details", async () => {
+test("does not offer a GitHub quick action when only a different PR commit failed", () => {
   vi.mocked(controlPlaneRequest).mockResolvedValue({
     workflowTargetSummaries: [],
-    triggerWorkflow: { id: "run-1" },
   });
   const worktree = {
     ...gitlabWorktree([]),
     pullRequest: {
       repositoryGithubId: "44",
-      headRefOid: "pr-head",
+      headRefOid: "stale-pr-head",
+      pipelineStatus: "FAILURE",
+      pipelines: [{ id: "stale-check", status: "FAILURE" }],
+    },
+  } as Worktree;
+  render(
+    <WorktreeFailingPipelineItem worktree={worktree} workflows={[workflow]} />,
+  );
+  expect(screen.queryByText("Pipeline failing")).toBeNull();
+  expect(screen.queryByRole("button", { name: workflow.name })).toBeNull();
+});
+
+test("watches the exact GitHub head before a tracked worktree has a saved pipeline", async () => {
+  const key = { repositoryGithubId: "44", headSha: "current-head" };
+  vi.mocked(controlPlaneRequest).mockImplementation(async (query) => {
+    if (query.includes("GitHubPipelineStatuses")) {
+      return {
+        githubPipelineStatuses: [
+          {
+            ...key,
+            pipelineStatus: "FAILURE",
+            pipelines: [{ id: "failed-check", status: "FAILURE" }],
+            revision: 1,
+          },
+        ],
+      };
+    }
+    return {
+      workflowTargetSummaries: [
+        { resourceKind: "WORKTREE", resourceId: "worktree-1", activeRuns: [] },
+      ],
+    };
+  });
+  render(
+    <GitHubPipelineStatusProvider>
+      <WorktreeFailingPipelineItem
+        worktree={{
+          ...gitlabWorktree([]),
+          pullRequest: null,
+          gitHubPipelineRepositoryId: key.repositoryGithubId,
+        }}
+        workflows={[workflow]}
+      />
+    </GitHubPipelineStatusProvider>,
+  );
+
+  await screen.findByRole("button", { name: workflow.name });
+  expect(controlPlaneRequest).toHaveBeenCalledWith(
+    expect.stringContaining("GitHubPipelineStatuses"),
+    { keys: [key] },
+  );
+});
+
+test.each([true, false])(
+  "includes exact-HEAD GitHub check details with a linked PR = %s",
+  async (hasPullRequest) => {
+    vi.mocked(controlPlaneRequest).mockResolvedValue({
+      workflowTargetSummaries: [],
+      triggerWorkflow: { id: "run-1" },
+    });
+    const currentHeadStatus = {
+      repositoryGithubId: "44",
       pipelineStatus: "FAILURE",
       pipelines: [
         {
@@ -148,37 +215,54 @@ test("uses the linked GitHub pull request rollup and includes its check details"
         },
         { id: "check-2", status: "SUCCESS" },
       ],
-    },
-  } as Worktree;
-  render(
-    <WorktreeFailingPipelineItem worktree={worktree} workflows={[workflow]} />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: workflow.name }));
-  await waitFor(() =>
-    expect(controlPlaneRequest).toHaveBeenCalledWith(
-      expect.stringContaining("RunWorktreeQuickAction"),
-      expect.objectContaining({
-        input: expect.objectContaining({
-          sessionData: {
-            worktree: {
-              failingPipelines: [
-                {
-                  provider: "GITHUB",
-                  id: "check-1",
-                  workflowRunId: "987",
-                  status: "TIMED_OUT",
-                  url: "https://github.com/acme/app/actions/runs/987",
-                  headSha: "pr-head",
-                  repositoryGithubId: "44",
-                },
-              ],
+    };
+    const worktree = {
+      ...gitlabWorktree([]),
+      ...(hasPullRequest
+        ? {
+            pullRequest: { ...currentHeadStatus, headRefOid: "current-head" },
+          }
+        : {
+            pullRequest: null,
+            gitHubHeadPipelineStatus: {
+              ...currentHeadStatus,
+              headSha: "current-head",
             },
-          },
+          }),
+    } as Worktree;
+    render(
+      <WorktreeFailingPipelineItem
+        worktree={worktree}
+        workflows={[workflow]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: workflow.name }));
+    await waitFor(() =>
+      expect(controlPlaneRequest).toHaveBeenCalledWith(
+        expect.stringContaining("RunWorktreeQuickAction"),
+        expect.objectContaining({
+          input: expect.objectContaining({
+            sessionData: {
+              worktree: {
+                failingPipelines: [
+                  {
+                    provider: "GITHUB",
+                    id: "check-1",
+                    workflowRunId: "987",
+                    status: "TIMED_OUT",
+                    url: "https://github.com/acme/app/actions/runs/987",
+                    headSha: "current-head",
+                    repositoryGithubId: "44",
+                  },
+                ],
+              },
+            },
+          }),
         }),
-      }),
-    ),
-  );
-});
+      ),
+    );
+  },
+);
 
 test("shows both kinds of work in progress and clears zero-count badges", () => {
   const { rerender } = render(

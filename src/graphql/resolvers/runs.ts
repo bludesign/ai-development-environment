@@ -610,14 +610,7 @@ export const createRunResolvers = (service: RunsService) => ({
     agentRunListChanged: {
       subscribe: (
         _root: unknown,
-        args: {
-          workflowId?: string | null;
-          worktreeId?: string | null;
-          kind?: string | null;
-          appId?: string | null;
-          provider?: string | null;
-          origin?: string | null;
-        },
+        args: Parameters<RunsService["subscribeRunList"]>[0],
         context: GraphQLContext,
       ) => {
         requireControlPlane(context);

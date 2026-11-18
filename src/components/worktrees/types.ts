@@ -8,7 +8,10 @@ import type {
   Codebase,
   CodebaseRepository,
 } from "@/components/codebases/types";
-import type { GitHubPullRequestView } from "@/services/github/types";
+import type {
+  GitHubPipelineStatusSnapshotView,
+  GitHubPullRequestView,
+} from "@/services/github/types";
 import type {
   GitLabMergeOperationView,
   GitLabPipelineView,
@@ -129,7 +132,10 @@ export type Worktree = {
   ticketTitle: string | null;
   ticketStatus: string | null;
   pullRequest: GitHubPullRequestView | null;
+  gitHubHeadPipelineStatus?: GitHubPipelineStatusSnapshotView | null;
+  gitHubPipelineRepositoryId?: string | null;
   sourceControlRequest: WorktreeSourceControlRequest | null;
+  gitLabProjectId?: string | null;
   gitLabPipelines: GitLabPipelineView[];
   latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];

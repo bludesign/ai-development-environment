@@ -219,6 +219,68 @@ describe("run subagent sessions", () => {
     }
   });
 
+  test("scopes state-only list updates and skips transcript and usage activity", async () => {
+    await prisma.codebaseRepository.create({
+      data: {
+        id: "list-repository",
+        canonicalOrigin: "github.com/example/list-repository",
+        displayOrigin: "example/list-repository",
+        name: "List Repository",
+      },
+    });
+    await prisma.app.create({
+      data: {
+        id: "list-app",
+        name: "List App",
+        normalizedName: "list app",
+        repositories: { create: { repositoryId: "list-repository" } },
+      },
+    });
+    await prisma.agentRun.update({
+      where: { id: "run" },
+      data: { repositoryId: "list-repository" },
+    });
+    await seedRun("other-run", 1);
+
+    const activity = service.subscribeRunList({});
+    const state = service.subscribeRunList({
+      appId: "list-app",
+      stateOnly: true,
+    });
+    const changed = (stateChanged: boolean) => ({
+      value: { runChanged: { id: "run" }, stateChanged },
+      done: false,
+    });
+    try {
+      await service.appendEvents("owner", "run", "run-attempt", [
+        event(0, { type: "system", subtype: "init" }),
+      ]);
+      await service.reportUsage("owner", "run", "run-attempt", {
+        model: "opus",
+        inputTokens: 10,
+      });
+      expect(await activity.next()).toEqual(changed(false));
+      expect(await activity.next()).toEqual(changed(false));
+
+      await service.archive(["other-run"], true);
+      await service.archive(["run"], true);
+      expect(await state.next()).toEqual(changed(true));
+
+      await service.archive(["run"], false);
+      expect(await state.next()).toEqual(changed(true));
+
+      await prisma.agentRun.update({
+        where: { id: "run" },
+        data: { agentId: null },
+      });
+      expect(await service.deleteRuns(["run"])).toBe(1);
+      expect(await state.next()).toEqual(changed(true));
+    } finally {
+      await activity.return?.();
+      await state.return?.();
+    }
+  });
+
   test("records nested task parent IDs and excludes non-agent background tasks", async () => {
     await service.appendEvents("owner", "run", "run-attempt", [
       event(0, {

@@ -195,6 +195,7 @@ import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
   CODEBASE_FIELDS,
   WORKTREE_FIELDS,
+  WORKTREE_HEAD_PIPELINE_FIELDS,
   WORKTREE_QUICK_ACTION_FIELDS,
   WORKTREE_LIST_FIELDS,
   WORKTREE_SYNC_BATCH_FIELDS,
@@ -813,7 +814,7 @@ export function WorktreesPage({
                 failingPipelineQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
-                worktrees { ${WORKTREE_LIST_FIELDS} }
+                worktrees { ${WORKTREE_HEAD_PIPELINE_FIELDS} ${WORKTREE_LIST_FIELDS} }
               }
             }
           }
@@ -931,7 +932,7 @@ export function WorktreesPage({
     const unsubscribeAgentRuns = subscriptions.subscribe(
       {
         query:
-          "subscription WorktreeAgentRunsChanged($appId: ID) { agentRunListChanged(appId: $appId) }",
+          "subscription WorktreeAgentRunsChanged($appId: ID) { agentRunListChanged(appId: $appId, stateOnly: true) }",
         variables: { appId: appId ?? null },
       },
       {

@@ -34,27 +34,43 @@ function PipelineActions({
   workflows: WorktreeQuickAction[];
 }) {
   const t = useTranslations("worktrees");
-  const { pullRequest } = worktree;
-  const seed = useMemo(
-    () =>
-      pullRequest?.headRefOid
-        ? {
-            repositoryGithubId: pullRequest.repositoryGithubId,
-            repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
-            repositoryUrl: pullRequest.repositoryUrl,
-            headSha: pullRequest.headRefOid,
-            pipelineStatus: pullRequest.pipelineStatus,
-            pipelines: pullRequest.pipelines,
-            revision: pullRequest.pipelineRevision ?? 0,
-            updatedAt: "",
-          }
-        : null,
-    [pullRequest],
+  const { gitHubHeadPipelineStatus, headSha, pullRequest } = worktree;
+  const repositoryGithubId =
+    worktree.gitHubPipelineRepositoryId ??
+    gitHubHeadPipelineStatus?.repositoryGithubId ??
+    (pullRequest && pullRequest.headRefOid === headSha
+      ? pullRequest.repositoryGithubId
+      : null);
+  const seed = useMemo(() => {
+    if (!headSha) return null;
+    if (
+      gitHubHeadPipelineStatus?.headSha === headSha &&
+      gitHubHeadPipelineStatus.repositoryGithubId === repositoryGithubId
+    )
+      return gitHubHeadPipelineStatus;
+    if (
+      pullRequest?.headRefOid !== headSha ||
+      pullRequest.repositoryGithubId !== repositoryGithubId
+    )
+      return null;
+    return {
+      repositoryGithubId: pullRequest.repositoryGithubId,
+      repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
+      repositoryUrl: pullRequest.repositoryUrl,
+      headSha,
+      pipelineStatus: pullRequest.pipelineStatus,
+      pipelines: pullRequest.pipelines,
+      revision: pullRequest.pipelineRevision ?? 0,
+      updatedAt: "",
+    };
+  }, [gitHubHeadPipelineStatus, headSha, pullRequest, repositoryGithubId]);
+  const github = useGitHubPipelineSnapshot(
+    repositoryGithubId && headSha ? { repositoryGithubId, headSha } : null,
+    seed,
   );
-  const github = useGitHubPipelineSnapshot(seed, seed);
   const gitlab = failingGitLabPipelines(
     worktree.gitLabPipelines ?? [],
-    worktree.headSha,
+    worktree,
   );
   const failing =
     gitlab.length > 0 ||

@@ -441,8 +441,14 @@ type Worktree {
   ticketStatus: String
   "The pull request associated with this worktree. May be null when unavailable or not applicable."
   pullRequest: GitHubPullRequest
+  "Saved GitHub pipeline status for the exact worktree commit when it differs from or has no linked pull request."
+  gitHubHeadPipelineStatus: GitHubPipelineStatusSnapshot
+  "GitHub repository identifier for monitoring the worktree commit's pipeline status, when known."
+  gitHubPipelineRepositoryId: ID
   "The provider-neutral pull or merge request associated with this worktree."
   sourceControlRequest: SourceControlRequest
+  "Identifier of the configured GitLab project for this worktree's repository."
+  gitLabProjectId: ID
   "GitLab pipelines associated with the worktree's current commit."
   gitLabPipelines: [GitLabPipeline!]!
   "The latest build associated with this worktree. May be null when unavailable or not applicable."

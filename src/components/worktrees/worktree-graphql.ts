@@ -9,6 +9,17 @@ export const WORKTREE_QUICK_ACTION_FIELDS = `
   triggerChoices(resourceKind: "WORKTREE") { key label description }
 `;
 
+export const WORKTREE_HEAD_PIPELINE_FIELDS = `
+  gitHubPipelineRepositoryId
+  gitHubHeadPipelineStatus {
+    repositoryGithubId repositoryNameWithOwner repositoryUrl headSha pipelineStatus revision updatedAt
+    pipelines {
+      id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt
+      jobs { id name status url canRetry retryUnavailableReason steps { number name status } runAttempt }
+    }
+  }
+`;
+
 export const SOURCE_CONTROL_REQUEST_FIELDS = `
   provider id number title url isDraft headRefName headRefOid createdAt
   ... on GitLabMergeRequest {

@@ -307,6 +307,26 @@ export class GitHubPipelineStatusService {
     return (rows as PipelineSnapshotRow[]).map(snapshotView);
   }
 
+  async snapshotsForRepositoryHeads(
+    heads: ReadonlyMap<string, ReadonlySet<string>>,
+  ): Promise<GitHubPipelineStatusSnapshotView[]> {
+    const shas = [
+      ...new Set([...heads.values()].flatMap((group) => [...group])),
+    ];
+    if (!shas.length) return [];
+    const prisma = await getPrismaClient();
+    const rows = await prisma.gitHubPipelineSnapshot.findMany({
+      where: { headSha: { in: shas } },
+      include: { records: true },
+      orderBy: { lastObservedAt: "asc" },
+    });
+    return rows
+      .filter((row) =>
+        heads.get(row.repositoryNameWithOwner.toLowerCase())?.has(row.headSha),
+      )
+      .map(snapshotView);
+  }
+
   async records(
     keys: GitHubPipelineRecordKeyInput[],
   ): Promise<GitHubPipelineRecordView[]> {
