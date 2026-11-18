@@ -1,4 +1,4 @@
-import { readFile, realpath, writeFile } from "node:fs/promises";
+import { readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, test } from "vitest";
@@ -16,11 +16,41 @@ import {
   discoverWorktrees,
   inspectWorktreeDetail,
   inspectWorktreeDiff,
+  inspectWorktreeItem,
   operateWorktree,
 } from "./worktrees.js";
 import { executeWorktreePreparations } from "./worktree-preparations.js";
 
 registerWorktreeFixtures();
+
+async function renameBranch(
+  rootFolder: string,
+  folder: string,
+  expectedBranch: string,
+  branch: string,
+) {
+  const gitDirectory = await realpath(
+    (
+      await git(folder, "rev-parse", "--path-format=absolute", "--git-dir")
+    ).stdout.trim(),
+  );
+  return branchWorktree(
+    {
+      action: "RENAME",
+      codebaseId: "codebase-1",
+      rootFolder,
+      folder,
+      gitDirectory,
+      expectedOrigin: "github.com/openai/codex",
+      expectedBranch,
+      branch,
+      baseBranch: null,
+    },
+    10_000,
+    new AbortController().signal,
+    async () => undefined,
+  );
+}
 
 describe("worktree inventory and inspection", () => {
   test("discovers the primary checkout and linked worktrees", async () => {
@@ -125,6 +155,207 @@ describe("worktree inventory and inspection", () => {
       "feature/APP-123",
     );
   });
+
+  test("renames a linked branch in place and preserves its HEAD, edits, and upstream", async () => {
+    const folder = await repository();
+    const target = `${folder}-rename`;
+    temporaryDirectories.push(target);
+    await git(folder, "worktree", "add", "-b", "feature/old", target);
+    await git(folder, "tag", "feature/old");
+    await git(folder, "tag", "feature/new");
+    await git(target, "branch", "--set-upstream-to=origin/main");
+    await writeFile(join(target, "README.md"), "staged change\n");
+    await git(target, "add", "README.md");
+    await writeFile(join(target, "README.md"), "unstaged change\n");
+    const { stdout: head } = await git(target, "rev-parse", "HEAD");
+    const { stdout: status } = await git(target, "status", "--porcelain");
+    const before = await inspectWorktreeItem(
+      target,
+      folder,
+      null,
+      false,
+      10_000,
+      new AbortController().signal,
+    );
+    expect(before.branch).toBe("feature/old");
+    const rename = (expectedBranch: string, branch: string) =>
+      renameBranch(folder, target, expectedBranch, branch);
+
+    await expect(rename("main", "feature/new")).rejects.toThrow(
+      "The worktree branch changed after selection",
+    );
+    await git(folder, "branch", "taken");
+    await expect(rename("feature/old", "taken")).rejects.toThrow(
+      "already exists",
+    );
+    await expect(rename(before.branch!, "feature/new")).resolves.toMatchObject({
+      renamedFrom: "feature/old",
+      worktree: {
+        gitDirectory: before.gitDirectory,
+        branch: "feature/new",
+        headSha: head.trim(),
+        upstream: "origin/main",
+        hasStagedChanges: true,
+        hasUnstagedChanges: true,
+      },
+    });
+    expect((await git(target, "status", "--porcelain")).stdout).toBe(status);
+    expect((await git(folder, "branch", "--list", "feature/old")).stdout).toBe(
+      "",
+    );
+  });
+
+  test("renames a checked-out branch when only its case changes", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "Feature/lower");
+    await git(folder, "branch", "--set-upstream-to=origin/main");
+
+    await expect(
+      renameBranch(folder, folder, "Feature/lower", "feature/LOWER"),
+    ).resolves.toMatchObject({
+      renamedFrom: "Feature/lower",
+      worktree: { branch: "feature/LOWER", upstream: "origin/main" },
+    });
+    expect(
+      (
+        await git(
+          folder,
+          "for-each-ref",
+          "--format=%(refname:strip=2)",
+          "refs/heads",
+        )
+      ).stdout
+        .trim()
+        .split(/\r?\n/),
+    ).toEqual(["feature/LOWER", "main"]);
+  });
+
+  test("leaves sibling refs untouched when changing a shared namespace's case", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "Feature/foo");
+    await git(folder, "branch", "Feature/bar");
+    const caseInsensitive = await stat(
+      join(folder, ".git", "refs", "heads", "feature", "bar"),
+    ).then(
+      () => true,
+      () => false,
+    );
+    const rename = renameBranch(folder, folder, "Feature/foo", "feature/foo");
+    if (caseInsensitive) {
+      await expect(rename).rejects.toThrow(
+        "could not store the exact branch name",
+      );
+    } else {
+      await expect(rename).resolves.toMatchObject({
+        worktree: { branch: "feature/foo" },
+      });
+    }
+    const branches = (
+      await git(
+        folder,
+        "for-each-ref",
+        "--format=%(refname:strip=2)",
+        "refs/heads",
+      )
+    ).stdout
+      .trim()
+      .split(/\r?\n/);
+    expect(branches.sort()).toEqual(
+      [
+        "Feature/bar",
+        caseInsensitive ? "Feature/foo" : "feature/foo",
+        "main",
+      ].sort(),
+    );
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      caseInsensitive ? "Feature/foo" : "feature/foo",
+    );
+  });
+
+  test("keeps both refs when a differently cased destination branch already exists", async () => {
+    const folder = await repository();
+    await git(folder, "switch", "-c", "feature/lower");
+    // Packing the source allows Git to store two distinct refs on APFS too.
+    await git(folder, "pack-refs", "--all");
+    await git(folder, "branch", "feature/LOWER");
+    const list = () =>
+      git(folder, "for-each-ref", "--format=%(refname)", "refs/heads");
+    const { stdout: before } = await list();
+
+    await expect(
+      renameBranch(folder, folder, "feature/lower", "feature/LOWER"),
+    ).rejects.toThrow("already exists");
+    expect((await list()).stdout).toBe(before);
+    expect((await git(folder, "branch", "--show-current")).stdout.trim()).toBe(
+      "feature/lower",
+    );
+  });
+
+  test.each([
+    {
+      stage: "initial",
+      rejection: "update of config-file failed",
+      hookCases: `    committed:refs/heads/feature/lower)
+      touch .git/config.lock
+      ;;
+    prepared:refs/heads/aide-rename-*)
+      rm -f .git/config.lock
+      ;;`,
+    },
+    {
+      stage: "final",
+      rejection: "reference-transaction hook",
+      hookCases: `    prepared:refs/heads/aide-rename-*)
+      if [ ! -e .git/rename-failed ]; then
+        touch .git/rename-failed
+        exit 1
+      fi
+      ;;`,
+    },
+  ])(
+    "restores the source branch when Git rejects the $stage case-only rename",
+    async ({ rejection, hookCases }) => {
+      const folder = await repository();
+      await git(folder, "switch", "-c", "feature/lower");
+      await git(folder, "branch", "--set-upstream-to=origin/main");
+      const hook = join(folder, ".git", "hooks", "reference-transaction");
+      await writeFile(
+        hook,
+        `#!/bin/sh
+while read -r old new ref; do
+  case "$1:$ref" in
+${hookCases}
+  esac
+done
+`,
+        { mode: 0o755 },
+      );
+
+      await expect(
+        renameBranch(folder, folder, "feature/lower", "feature/LOWER"),
+      ).rejects.toThrow(rejection);
+      expect(
+        (await git(folder, "branch", "--show-current")).stdout.trim(),
+      ).toBe("feature/lower");
+      expect(
+        (
+          await git(folder, "rev-parse", "--abbrev-ref", "@{upstream}")
+        ).stdout.trim(),
+      ).toBe("origin/main");
+      expect(
+        (
+          await git(
+            folder,
+            "for-each-ref",
+            "--format=%(refname:strip=2)",
+            "refs/heads",
+          )
+        ).stdout
+          .trim()
+          .split(/\r?\n/),
+      ).toEqual(["feature/lower", "main"]);
+    },
+  );
 
   test("stashes and retries a branch switch after Git rejects dirty changes", async () => {
     const folder = await repository();

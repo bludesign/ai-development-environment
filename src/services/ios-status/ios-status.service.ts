@@ -118,10 +118,6 @@ export class IosStatusService {
   ) {}
 
   async snapshot() {
-    return (await this.collectSnapshot()).snapshot;
-  }
-
-  private async collectSnapshot() {
     const settings = await liveActivitySettings();
     const [sidebar, actions, diskSummary] = await Promise.all([
       this.systemStatus.status(false, {
@@ -145,7 +141,7 @@ export class IosStatusService {
         (unfinishedWork?.gitlabKnown ??
           unfinishedWork?.integrationsKnown ??
           false));
-    const snapshot = {
+    return {
       collectedAt: now.toISOString(),
       usageToday: sidebar.usageToday,
       activity: sidebar.activity,
@@ -193,8 +189,8 @@ export class IosStatusService {
         integrationsKnown,
         settings,
       ),
+      liveActivityCountsKnown: integrationsKnown,
     };
-    return { snapshot, integrationsKnown };
   }
 
   async register(principal: UserPrincipal, value: unknown) {
@@ -371,7 +367,7 @@ export class IosStatusService {
         keyId: settings.value.keyId,
         privateKey,
       };
-      const { snapshot, integrationsKnown } = await this.collectSnapshot();
+      const snapshot = await this.snapshot();
       const { updatedAt: _updatedAt, ...work } = snapshot.liveActivity;
       const widgetHash = hash({
         usageToday: snapshot.usageToday,
@@ -382,7 +378,8 @@ export class IosStatusService {
       const activityHash = hash(work);
       // Wait for configured providers to report before treating an empty count as completion.
       const recipients =
-        snapshot.liveActivity.activeCount > 0 || integrationsKnown
+        snapshot.liveActivity.activeCount > 0 ||
+        snapshot.liveActivityCountsKnown
           ? registrations
           : registrations.filter(({ kind }) => kind === "WIDGET");
       // Bound concurrent APNs work without serializing every recipient's network retries.

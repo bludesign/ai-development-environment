@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { controlPlaneRequest } from "@/lib/control-plane-client";
+import type { OnEdgesChange } from "@xyflow/react";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { WorkflowEditor } from "./workflow-editor";
@@ -41,8 +42,10 @@ const canvas = vi.hoisted(() => ({
   selectedId: null as string | null,
 }));
 
-vi.mock("@xyflow/react", async () => {
+vi.mock("@xyflow/react", async (importOriginal) => {
   const React = await import("react");
+  const { EdgeChangeset } =
+    await importOriginal<typeof import("@xyflow/react")>();
   return {
     addEdge: (edge: unknown, current: unknown[]) => [...current, edge],
     Background: () => null,
@@ -53,17 +56,22 @@ vi.mock("@xyflow/react", async () => {
       React.createElement("button", { type: "button", ...props }, children),
     Controls: ({ children }: { children: React.ReactNode }) => children,
     MiniMap: () => null,
-    useReactFlow: () => ({ fitView: canvas.fitView }),
-    useStore: (selector: (state: Record<string, unknown>) => unknown) =>
+    useNodesInitialized: () => true,
+    useOptionsStore: (selector: (state: Record<string, unknown>) => unknown) =>
       selector({
-        nodesInitialized: true,
-        width: 1000,
-        height: 700,
         nodesDraggable: true,
         nodesConnectable: true,
         elementsSelectable: true,
       }),
-    useStoreApi: () => ({ getState: () => ({}), setState: vi.fn() }),
+    useReactFlow: () => ({ fitView: canvas.fitView }),
+    useReactFlowStoreApi: () => ({
+      optionsStore: { setState: vi.fn() },
+    }),
+    useViewportStore: (selector: (state: Record<string, unknown>) => unknown) =>
+      selector({
+        width: 1000,
+        height: 700,
+      }),
     ReactFlow: ({
       children,
       nodes,
@@ -77,7 +85,7 @@ vi.mock("@xyflow/react", async () => {
       nodes: { id: string; name?: string; data: { provides: string[] } }[];
       edges: { id: string; selected?: boolean }[];
       onEdgeClick: (event: unknown, edge: { id: string }) => void;
-      onEdgesChange: (changes: { id: string; type: "remove" }[]) => void;
+      onEdgesChange: OnEdgesChange;
       onInit: (instance: { getNodes: () => unknown[] }) => void;
       onNodeClick: (
         event: React.MouseEvent<HTMLButtonElement>,
@@ -113,7 +121,11 @@ vi.mock("@xyflow/react", async () => {
           "button",
           {
             onClick: () =>
-              onEdgesChange([{ id: "trigger-to-session", type: "remove" }]),
+              onEdgesChange(
+                new EdgeChangeset([
+                  { id: "trigger-to-session", type: "remove" },
+                ]),
+              ),
             type: "button",
           },
           "Remove test edge",

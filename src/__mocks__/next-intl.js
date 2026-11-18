@@ -1392,6 +1392,8 @@ const mockTranslations = {
     originBranch: "Origin remote",
     localAndOrigin: "Local and origin",
     remoteDefault: "Remote default",
+    renameBranch: "Rename branch",
+    renameBranchDescription: "Rename the local branch in this worktree.",
     changeBranch: "Change branch",
     viewCodebase: "View codebase",
     viewRepository: "View repository",

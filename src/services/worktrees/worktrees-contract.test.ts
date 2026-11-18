@@ -213,7 +213,9 @@ describe("worktree agent contract", () => {
       candidates: ["feature/APP-123", "feature/APP-123-2"],
       stashOnFailure: false,
     });
-    expect(payload.candidates).toHaveLength(2);
+    expect(payload).toMatchObject({
+      candidates: ["feature/APP-123", "feature/APP-123-2"],
+    });
     expect(() =>
       worktreeBranchJobPayload({
         ...payload,

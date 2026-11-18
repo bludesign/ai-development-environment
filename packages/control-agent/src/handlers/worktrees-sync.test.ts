@@ -23,6 +23,57 @@ import { executeWorktreePreparations } from "./worktree-preparations.js";
 registerWorktreeFixtures();
 
 describe("worktree pull, sync, and rebase", () => {
+  test("publishes a renamed branch and tracks the new origin branch", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "config", "push.default", "simple");
+    await git(folder, "switch", "-c", "feature/old");
+    await git(folder, "push", "--set-upstream", "origin", "HEAD");
+    const oldHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+    await git(folder, "branch", "-m", "feature/new");
+    await git(
+      folder,
+      "commit",
+      "--allow-empty",
+      "-m",
+      "Advance renamed branch",
+    );
+    const newHead = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+
+    const gitDirectory = await realpath(join(folder, ".git"));
+    const publish = (expectedBranch: string) =>
+      operateWorktree(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          gitDirectory,
+          expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+          baseBranch: "main",
+          operation: "PUBLISH",
+          expectedBranch,
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      );
+
+    await expect(publish("feature/old")).rejects.toThrow(
+      "The worktree branch changed after selection",
+    );
+    await expect(publish("feature/new")).resolves.toMatchObject({
+      worktree: { branch: "feature/new", upstream: "origin/feature/new" },
+    });
+    expect(
+      (await git(remote, "rev-parse", "refs/heads/feature/old")).stdout.trim(),
+    ).toBe(oldHead);
+    expect(
+      (await git(remote, "rev-parse", "refs/heads/feature/new")).stdout.trim(),
+    ).toBe(newHead);
+    await expect(git(folder, "push")).resolves.toBeDefined();
+  });
+
   test("fast-forwards the branch onto its upstream", async () => {
     const folder = await repository();
     const remote = await localRemote();

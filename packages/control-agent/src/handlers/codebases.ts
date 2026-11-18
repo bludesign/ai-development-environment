@@ -242,12 +242,12 @@ async function inspectCodebaseProcess(
     const linkedWorktree = gitDirectory !== commonDirectory;
     const branchResult = await git(
       folder,
-      ["symbolic-ref", "--short", "-q", "HEAD"],
+      ["branch", "--show-current"],
       timeoutMs,
       signal,
     );
     const branch =
-      branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+      branchResult.exitCode === 0 ? branchResult.stdout.trim() || null : null;
     const upstreamResult = branch
       ? await git(
           folder,
@@ -451,7 +451,7 @@ export async function updateBaseBranchAfterFetch(
         }
         const current = await git(
           folder,
-          ["symbolic-ref", "--short", "-q", "HEAD"],
+          ["branch", "--show-current"],
           timeoutMs,
           signal,
         );
@@ -531,7 +531,7 @@ export async function updateBaseBranchAfterFetch(
         if (ancestor.exitCode !== 0) return false;
         const branch = await git(
           folder,
-          ["symbolic-ref", "--short", "-q", "HEAD"],
+          ["branch", "--show-current"],
           timeoutMs,
           signal,
         );
@@ -863,7 +863,7 @@ export async function inspectCodebaseGitState(
 ): Promise<CodebaseGitState> {
   const [currentResult, statusResult, localResult, remoteResult, stashResult] =
     await Promise.all([
-      git(folder, ["symbolic-ref", "--short", "-q", "HEAD"], timeoutMs, signal),
+      git(folder, ["branch", "--show-current"], timeoutMs, signal),
       git(
         folder,
         ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
@@ -896,7 +896,7 @@ export async function inspectCodebaseGitState(
   requireSuccess(localResult, "Could not list local branches");
   requireSuccess(remoteResult, "Could not list remote branches");
   const current =
-    currentResult.exitCode === 0 ? currentResult.stdout.trim() : null;
+    currentResult.exitCode === 0 ? currentResult.stdout.trim() || null : null;
   const branches = new Map<string, CodebaseGitState["branches"][number]>();
   for (const fields of refFields(localResult.stdout)) {
     const name = fields[0]?.trim();

@@ -1,5 +1,7 @@
+@layer theme, base, xyflow, components, utilities;
+
 @import "tailwindcss";
-@import "@xyflow/react/dist/style.css";
+@import "@xyflow/react/style.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @plugin "@tailwindcss/typography";
@@ -184,13 +186,7 @@
   }
 }
 
-/* React Flow pins `touch-action: none` on its pane so it can own every touch
-   gesture. A graph locked to fit has panning and zooming turned off, so it
-   owns nothing — but the pane still swallows the drag, leaving the gesture
-   dead: the graph will not move and the page underneath cannot scroll past it.
-   This hands the gesture back to the browser. It sits outside `@layer` on
-   purpose: React Flow's stylesheet is imported unlayered above, and unlayered
-   rules beat layered ones, so a Tailwind utility could not override it. */
+/* Let the page scroll when a touch starts on a graph locked to fit. */
 .workflow-fit-locked .react-flow__pane {
   touch-action: auto;
 }

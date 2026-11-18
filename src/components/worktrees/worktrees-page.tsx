@@ -17,6 +17,11 @@ import {
   IOS_BUILD_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
 import {
+  WORKTREE_BRANCH_RENAME_CAPABILITY,
+  WORKTREE_PUBLISH_CAPABILITY,
+  type WorktreeOperation,
+} from "@ai-development-environment/agent-contract/worktrees";
+import {
   Archive,
   ArrowDown,
   ArrowRight,
@@ -530,19 +535,6 @@ function replaceIssueParam(issueKey: string | null) {
 
 type Layout = "cards" | "table";
 type GroupBy = "agent" | "repository";
-type Operation =
-  | "OPEN_EDITOR"
-  | "FORCE_PUSH"
-  | "SYNC"
-  | "REBASE"
-  | "CANCEL_REBASE"
-  | "PULL"
-  | "PUSH"
-  | "RESET"
-  | "CLEAR_LOCK"
-  | "STASH_ALL"
-  | "STAGE_ALL"
-  | "UNSTAGE_ALL";
 
 export function worktreeChangeActionState(
   worktree: Pick<Worktree, "hasStagedChanges" | "hasUnstagedChanges">,
@@ -1024,7 +1016,10 @@ export function WorktreesPage({
       ) ?? [],
     );
 
-  const updateLocalWorktree = (next: Worktree) => {
+  const updateLocalWorktree = (
+    next: Worktree,
+    pullRequestRefreshed = false,
+  ) => {
     setOverview((current) =>
       current
         ? {
@@ -1042,7 +1037,9 @@ export function WorktreesPage({
                         ticketTitle: next.ticketTitle ?? worktree.ticketTitle,
                         ticketStatus:
                           next.ticketStatus ?? worktree.ticketStatus,
-                        pullRequest: next.pullRequest ?? worktree.pullRequest,
+                        pullRequest: pullRequestRefreshed
+                          ? next.pullRequest
+                          : (next.pullRequest ?? worktree.pullRequest),
                       }
                     : worktree,
                 ),
@@ -1725,7 +1722,7 @@ type WorktreeSectionProps = {
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
   inspectionRefreshToken: number;
   onReload: () => Promise<void>;
-  onUpdate: (worktree: Worktree) => void;
+  onUpdate: (worktree: Worktree, pullRequestRefreshed?: boolean) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
   overview: WorktreeOverview;
@@ -2099,7 +2096,7 @@ export type WorktreeItemProps = {
   inspectionRefreshToken: number;
   liveUpdatesEnabled: boolean;
   onReload: () => Promise<void>;
-  onUpdate: (worktree: Worktree) => void;
+  onUpdate: (worktree: Worktree, pullRequestRefreshed?: boolean) => void;
   onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
@@ -2830,6 +2827,7 @@ export function WorktreeMenus(
   } = props;
   const t = useTranslations("worktrees");
   const [changeOpen, setChangeOpen] = useState(false);
+  const [branchToRename, setBranchToRename] = useState<string | null>(null);
   const [commitOpen, setCommitOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -2838,6 +2836,8 @@ export function WorktreeMenus(
   const [failedSelection, setFailedSelection] =
     useState<WorktreeBranchSelection | null>(null);
   const [retryError, setRetryError] = useState<string | null>(null);
+  const menuTrigger = useRef<HTMLButtonElement>(null);
+  const renameBranchOnMenuClose = useRef<string | null>(null);
   const openChangeBranchOnMenuClose = useRef(false);
   const targets = moveTargets(props);
   const moveReason = moveDisabledReason(props, targets, t);
@@ -2904,7 +2904,7 @@ export function WorktreeMenus(
         }`,
         { id: worktree.id },
       );
-      onUpdate(data.refreshWorktreePullRequest);
+      onUpdate(data.refreshWorktreePullRequest, true);
       onError(null);
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
@@ -2995,7 +2995,7 @@ export function WorktreeMenus(
         open={changeOpen}
       >
         <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+          <DropdownMenuTrigger asChild ref={menuTrigger}>
             <PopoverAnchor asChild>
               {trigger ?? (
                 <Button
@@ -3013,6 +3013,12 @@ export function WorktreeMenus(
             alignOffset={contentAlignOffset}
             className="w-72"
             onCloseAutoFocus={(event) => {
+              if (renameBranchOnMenuClose.current) {
+                event.preventDefault();
+                setBranchToRename(renameBranchOnMenuClose.current);
+                renameBranchOnMenuClose.current = null;
+                return;
+              }
               if (!openChangeBranchOnMenuClose.current) return;
               openChangeBranchOnMenuClose.current = false;
               event.preventDefault();
@@ -3048,6 +3054,20 @@ export function WorktreeMenus(
                 <MoveRight /> {t("moveToAgent")}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              disabled={
+                branchChangeDisabled ||
+                !worktree.branch ||
+                !sourceAgent?.agent.capabilities.includes(
+                  WORKTREE_BRANCH_RENAME_CAPABILITY,
+                )
+              }
+              onSelect={() => {
+                renameBranchOnMenuClose.current = worktree.branch;
+              }}
+            >
+              <Pencil /> {t("renameBranch")}
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={branchChangeDisabled}
               onSelect={() => {
@@ -3255,6 +3275,18 @@ export function WorktreeMenus(
           />
         </PopoverContent>
       </Popover>
+      {branchToRename && (
+        <RenameWorktreeBranchDialog
+          expectedBranch={branchToRename}
+          onClose={() => setBranchToRename(null)}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            menuTrigger.current?.focus();
+          }}
+          onReload={props.onReload}
+          worktreeId={worktree.id}
+        />
+      )}
       {moveOpen && (
         <MoveWorktreeDialog
           onOpenChange={setMoveOpen}
@@ -3279,6 +3311,107 @@ export function WorktreeMenus(
         />
       )}
     </>
+  );
+}
+
+function RenameWorktreeBranchDialog({
+  expectedBranch,
+  onClose,
+  onCloseAutoFocus,
+  onReload,
+  worktreeId,
+}: {
+  expectedBranch: string;
+  onClose: () => void;
+  onCloseAutoFocus: (event: Event) => void;
+  onReload: () => Promise<void>;
+  worktreeId: string;
+}) {
+  const t = useTranslations("worktrees");
+  const [name, setName] = useState(expectedBranch);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const branchName = name.trim();
+  const canSubmit =
+    !busy && Boolean(branchName) && branchName !== expectedBranch;
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        renameWorktreeBranch: { id: string };
+      }>(
+        `mutation RenameWorktreeBranch($input: RenameWorktreeBranchInput!) {
+          renameWorktreeBranch(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId,
+            expectedBranch,
+            branchName,
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.renameWorktreeBranch.id);
+      onClose();
+      await onReload();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus}>
+        <DialogHeader>
+          <DialogTitle>{t("renameBranch")}</DialogTitle>
+          <DialogDescription>{t("renameBranchDescription")}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={(event) => void submit(event)}>
+          <div className="space-y-1.5">
+            <Label htmlFor="worktree-rename-branch">{t("branchName")}</Label>
+            <Input
+              autoCapitalize="none"
+              disabled={busy}
+              id="worktree-rename-branch"
+              onChange={(event) => setName(event.target.value)}
+              spellCheck={false}
+              value={name}
+            />
+          </div>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button
+              disabled={busy}
+              onClick={onClose}
+              type="button"
+              variant="outline"
+            >
+              {t("cancel")}
+            </Button>
+            <Button disabled={!canSubmit} type="submit">
+              {busy && <Spinner />}
+              {t("renameBranch")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -3956,13 +4089,22 @@ export function ActionRow(
   const [customCommandOpen, setCustomCommandOpen] = useState(false);
   const moreButton = useRef<HTMLButtonElement>(null);
   const openCommandOnMenuClose = useRef(false);
-  const commandSupported = props.overview.agents
-    .find((entry) =>
-      entry.codebases.some(
-        (codebase) => codebase.codebase.id === props.group.codebase.id,
-      ),
-    )
-    ?.agent.capabilities.includes("command.run");
+  const capabilities = props.overview.agents.find((entry) =>
+    entry.codebases.some(
+      (codebase) => codebase.codebase.id === props.group.codebase.id,
+    ),
+  )?.agent.capabilities;
+  const commandSupported = capabilities?.includes("command.run");
+  const { branch, upstream } = worktree;
+  const publishTrackedBranch = Boolean(
+    branch &&
+    upstream &&
+    upstream.slice(upstream.indexOf("/") + 1) !== branch &&
+    capabilities?.includes(WORKTREE_PUBLISH_CAPABILITY),
+  );
+  const pushOperation = publishTrackedBranch ? "PUBLISH" : "PUSH";
+  const pushLabel =
+    upstream && !publishTrackedBranch ? t("push") : t("publish");
   const unavailable =
     worktree.availability !== "AVAILABLE" ||
     Boolean(props.group.blockingJob || props.worktree.blockingJob) ||
@@ -4009,8 +4151,8 @@ export function ActionRow(
       {!isDefault && (
         <OperationButton
           icon={<Upload />}
-          label={worktree.upstream ? t("push") : t("publish")}
-          operation="PUSH"
+          label={pushLabel}
+          operation={pushOperation}
           props={props}
           disabled={unavailable || !worktree.branch}
         />
@@ -4094,13 +4236,22 @@ export function ActionRow(
               />
               <OperationMenuItem
                 icon={<Upload />}
-                label={worktree.upstream ? t("push") : t("publish")}
-                operation="PUSH"
+                label={pushLabel}
+                operation={pushOperation}
                 props={props}
                 disabled={unavailable || !worktree.branch}
               />
               <DropdownMenuSeparator />
             </>
+          )}
+          {publishTrackedBranch && (
+            <OperationMenuItem
+              icon={<Upload />}
+              label={t("push")}
+              operation="PUSH"
+              props={props}
+              disabled={unavailable}
+            />
           )}
           <OperationMenuItem
             confirm
@@ -4163,7 +4314,7 @@ export function ActionRow(
 
 type OperationProps = {
   props: WorktreeItemProps & { onCompleted: () => Promise<void> };
-  operation: Operation;
+  operation: WorktreeOperation;
   label: string;
   icon: React.ReactNode;
   confirm?: boolean;
@@ -4208,6 +4359,9 @@ function useWorktreeOperation({
           input: {
             worktreeId: props.worktree.id,
             operation,
+            ...(operation === "PUBLISH"
+              ? { expectedBranch: props.worktree.branch }
+              : {}),
             requestId: createClientId(),
             ...(forcePreparations ? { forcePreparations: true } : {}),
           },

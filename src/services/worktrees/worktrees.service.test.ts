@@ -450,7 +450,10 @@ describe("WorktreesService", () => {
       created: vi.fn(),
     };
     const tx = {
-      codebase: { update: vi.fn() },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+        update: vi.fn(),
+      },
       worktree: {
         upsert: vi.fn().mockResolvedValue({
           id: "new-worktree",
@@ -461,9 +464,6 @@ describe("WorktreesService", () => {
       },
     };
     getPrismaClient.mockResolvedValue({
-      codebase: {
-        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
-      },
       $transaction: vi.fn((callback) => callback(tx)),
     });
     new WorktreesService(
@@ -501,6 +501,187 @@ describe("WorktreesService", () => {
     await complete!({ ...job, worktreeId: "existing-worktree" });
     await complete!({ ...job, status: "FAILED" });
     expect(notifications.recordInTransaction).not.toHaveBeenCalled();
+  });
+
+  test("projects a branch rename without replacing the worktree or its base branch", async () => {
+    let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === WORKTREE_BRANCH_JOB_KIND) complete = handler;
+      }),
+    } as unknown as AgentControlService;
+    const inventory = report();
+    const original = inventory.worktrees[0]!;
+    const item = { ...original, branch: "feature/AIDE-42" };
+    const localBranchesJson = JSON.stringify([item.branch, "main"]);
+    const tx = {
+      codebase: {
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValueOnce({
+            localBranchesJson: JSON.stringify(inventory.localBranches),
+          })
+          .mockResolvedValue({ localBranchesJson }),
+        update: vi.fn(),
+        updateMany: vi
+          .fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValue({ count: 0 }),
+      },
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({ id: "worktree-1" }),
+        updateMany: vi
+          .fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValue({ count: 0 }),
+      },
+      worktreePullRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreeGitLabMergeRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    service(control);
+    const job = {
+      codebaseId: "codebase-1",
+      worktreeId: "worktree-1",
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        worktree: item,
+        renamedFrom: original.branch,
+      }),
+    };
+
+    await complete!(job);
+    await complete!(job);
+
+    const { where, data } = tx.worktree.updateMany.mock.calls[0]![0];
+    expect(where).toMatchObject({
+      id: "worktree-1",
+      gitDirectory: item.gitDirectory,
+    });
+    expect(data).toMatchObject({
+      branch: item.branch,
+    });
+    expect(data).not.toHaveProperty("baseBranchOverride");
+    expect(tx.codebase.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: "codebase-1" },
+      data: { localBranchesJson },
+    });
+    expect(tx.codebase.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "codebase-1",
+          folder: item.folder,
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+          ],
+        },
+        data: expect.objectContaining({
+          branch: item.branch,
+          lastCheckedAt: new Date(item.checkedAt),
+        }),
+      }),
+    );
+  });
+
+  test("reconciles a watched rename without resetting the new branch's associations", async () => {
+    let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === WORKTREE_BRANCH_JOB_KIND) complete = handler;
+      }),
+    } as unknown as AgentControlService;
+    const inventory = report();
+    const original = inventory.worktrees[0]!;
+    const item = { ...original, branch: "feature/AIDE-42" };
+    const worktreeId = "worktree-1";
+    const tx = {
+      codebase: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          localBranchesJson: JSON.stringify(inventory.localBranches),
+        }),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({ id: worktreeId }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreePullRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreeGitLabMergeRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    service(control);
+
+    await complete!({
+      codebaseId: inventory.codebaseId,
+      worktreeId,
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        worktree: item,
+        renamedFrom: original.branch,
+      }),
+    });
+
+    const identity = {
+      id: worktreeId,
+      codebaseId: inventory.codebaseId,
+      folder: item.folder,
+      gitDirectory: item.gitDirectory,
+      missingAt: null,
+    };
+    expect(tx.worktree.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          ...identity,
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+          ],
+        },
+      }),
+    );
+    expect(tx.worktree.findFirst).toHaveBeenCalledExactlyOnceWith({
+      where: { ...identity, branch: item.branch },
+      select: { id: true },
+    });
+    expect(tx.worktree.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        ...identity,
+        branch: item.branch,
+        pullRequestLookupBranch: { not: item.branch },
+      },
+      data: {
+        pullRequestLookupOrigin: null,
+        pullRequestLookupBranch: null,
+        pullRequestLookupAt: null,
+      },
+    });
+    expect(tx.worktreePullRequest.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { worktreeId, headRefName: { not: item.branch } },
+    });
+    expect(
+      tx.worktreeGitLabMergeRequest.deleteMany,
+    ).toHaveBeenCalledExactlyOnceWith({
+      where: { worktreeId, sourceBranch: { not: item.branch } },
+    });
+    expect(tx.codebase.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: inventory.codebaseId },
+      data: { localBranchesJson: JSON.stringify([item.branch, "main"]) },
+    });
   });
 
   test("removes a deleted worktree even when Xcode cleanup or its warning delivery fails", async () => {
@@ -1564,10 +1745,12 @@ describe("WorktreesService", () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
-  test("hydrates the canonical pipeline snapshot in a forced refresh response", async () => {
+  test("persists fresh merge readiness and hydrates the canonical pipeline snapshot", async () => {
     const record = storedWorktreeRecord();
     const worktreeUpdate = vi.fn().mockResolvedValue(undefined);
-    const pullRequestUpsert = vi.fn().mockResolvedValue(undefined);
+    const pullRequestUpsert = vi.fn(async ({ update }) => {
+      Object.assign(record.pullRequest, update);
+    });
     getPrismaClient.mockResolvedValue({
       worktree: {
         findUnique: vi.fn().mockResolvedValue(record),
@@ -1614,11 +1797,17 @@ describe("WorktreesService", () => {
       { registerCompletionHandler: vi.fn() } as unknown as AgentControlService,
       {} as JiraService,
       {
-        pullRequestsForBranches: vi
-          .fn()
-          .mockResolvedValue(
-            new Map([["feature/AIDE-24", githubPullRequest()]]),
-          ),
+        pullRequestsForBranches: vi.fn().mockResolvedValue(
+          new Map([
+            [
+              "feature/AIDE-24",
+              githubPullRequest({
+                mergeable: "CONFLICTING",
+                mergeStateStatus: "DIRTY",
+              }),
+            ],
+          ]),
+        ),
       } as unknown as GitHubService,
       undefined,
       undefined,
@@ -1634,6 +1823,8 @@ describe("WorktreesService", () => {
       },
     ]);
     expect(result.pullRequest).toMatchObject({
+      mergeable: "CONFLICTING",
+      mergeStateStatus: "DIRTY",
       pipelineStatus: "FAILURE",
       pipelineRevision: 8,
       pipelines: [expect.objectContaining({ id: "pipeline-1" })],
@@ -2189,7 +2380,10 @@ describe("WorktreesService", () => {
     };
     const transaction = {
       worktreeSettings: { findUnique: vi.fn().mockResolvedValue(null) },
-      codebase: { update: vi.fn() },
+      codebase: {
+        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+        update: vi.fn(),
+      },
       worktree: {
         findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn(),
@@ -2198,9 +2392,6 @@ describe("WorktreesService", () => {
       },
     };
     getPrismaClient.mockResolvedValue({
-      codebase: {
-        findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
-      },
       worktree: {
         findFirst: vi.fn().mockResolvedValue(projected),
         findUnique: vi.fn().mockResolvedValue(projected),
@@ -3879,7 +4070,10 @@ describe("worktreeDisplayPath", () => {
         return projected;
       });
       const tx = {
-        codebase: { update: vi.fn() },
+        codebase: {
+          findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
+          update: vi.fn(),
+        },
         worktreeSettings: {
           findUnique: vi.fn().mockResolvedValue({
             autoAssignHighlightColor: enabled,
@@ -3898,9 +4092,6 @@ describe("worktreeDisplayPath", () => {
         },
       };
       getPrismaClient.mockResolvedValue({
-        codebase: {
-          findUnique: vi.fn().mockResolvedValue({ localBranchesJson: "[]" }),
-        },
         $transaction: vi.fn((callback) => callback(tx)),
       });
       service(control);

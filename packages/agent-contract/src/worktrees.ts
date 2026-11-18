@@ -29,6 +29,8 @@ export const WORKTREE_WATCH_JOB_KIND = "worktree.watch";
 export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
 export const WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY =
   "worktree.branch.expected-source";
+export const WORKTREE_BRANCH_RENAME_CAPABILITY = "worktree.branch.rename";
+export const WORKTREE_PUBLISH_CAPABILITY = "worktree.operation.publish";
 export const WORKTREE_POST_MERGE_SWITCH_JOB_KIND = "worktree.post-merge-switch";
 export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
@@ -96,6 +98,7 @@ export const WORKTREE_OPERATIONS = [
   "CANCEL_REBASE",
   "PULL",
   "PUSH",
+  "PUBLISH",
   "RESET",
   "CLEAR_LOCK",
   "STASH_ALL",
@@ -142,7 +145,7 @@ export type WorktreePreparationDefinition = {
 };
 export type WorktreeEditorVariant = "CODE" | "CODE_INSIDERS" | "NONE";
 export type WorktreeWatchAction = "START" | "STOP";
-export type WorktreeBranchAction = "CREATE" | "CHANGE";
+export type WorktreeBranchAction = "CREATE" | "CHANGE" | "RENAME";
 export type WorktreeBranchJobMode = "NEW" | "EXISTING";
 export const WORKTREE_PUSH_STATUSES = [
   "READY",
@@ -762,7 +765,7 @@ export function worktreePostMergeSwitchJobPayload(
   return parsed;
 }
 
-export function worktreeBranchJobPayload(value: unknown): {
+type WorktreeBranchCheckoutPayload = {
   codebaseId: string;
   rootFolder: string;
   folder: string | null;
@@ -770,14 +773,70 @@ export function worktreeBranchJobPayload(value: unknown): {
   expectedOrigin: string;
   expectedBranch?: string | null;
   baseBranch: string;
-  action: WorktreeBranchAction;
+  action: "CREATE" | "CHANGE";
   mode: WorktreeBranchJobMode;
   candidates: string[];
   aiNaming?: ReturnType<typeof jiraBranchGenerationPayload>;
   stashOnFailure: boolean;
   preparations: WorktreePreparationDefinition[];
-} {
+};
+
+type WorktreeBranchRenamePayload = {
+  action: "RENAME";
+  codebaseId: string;
+  rootFolder: string;
+  folder: string;
+  gitDirectory: string;
+  expectedOrigin: string;
+  expectedBranch: string;
+  branch: string;
+  baseBranch: string | null;
+};
+
+export function worktreeBranchJobPayload(
+  value: unknown,
+): WorktreeBranchCheckoutPayload | WorktreeBranchRenamePayload {
   const payload = objectValue(value, "worktree branch payload");
+  if (payload.action === "RENAME") {
+    const fields = [
+      "codebaseId",
+      "rootFolder",
+      "folder",
+      "gitDirectory",
+      "expectedOrigin",
+      "expectedBranch",
+      "branch",
+    ] as const;
+    const allowed = new Set<string>([...fields, "action", "baseBranch"]);
+    const unexpected = Object.keys(payload).find((key) => !allowed.has(key));
+    if (unexpected)
+      throw new Error(
+        `Unexpected worktree branch payload field: ${unexpected}`,
+      );
+    const parsed = Object.fromEntries(
+      fields.map((field) => [
+        field,
+        stringValue(payload[field], `worktree branch payload.${field}`),
+      ]),
+    ) as Record<(typeof fields)[number], string>;
+    if (
+      !validGitBranchName(parsed.expectedBranch) ||
+      !validGitBranchName(parsed.branch) ||
+      parsed.expectedBranch === parsed.branch
+    ) {
+      throw new Error(
+        "Renaming requires two different, valid Git branch names",
+      );
+    }
+    return {
+      ...parsed,
+      action: "RENAME",
+      baseBranch: nullableString(
+        payload.baseBranch,
+        "worktree branch payload.baseBranch",
+      ),
+    };
+  }
   const allowed = new Set([
     "codebaseId",
     "rootFolder",
@@ -1221,6 +1280,7 @@ export function worktreeJobPayload(value: unknown): {
   expectedOrigin: string;
   baseBranch: string | null;
   operation?: WorktreeOperation;
+  expectedBranch?: string;
   editorVariant?: WorktreeEditorVariant;
   forcePreparations: boolean;
   preparations: WorktreePreparationDefinition[];
@@ -1233,6 +1293,7 @@ export function worktreeJobPayload(value: unknown): {
     "expectedOrigin",
     "baseBranch",
     "operation",
+    "expectedBranch",
     "editorVariant",
     "forcePreparations",
     "preparations",
@@ -1247,6 +1308,18 @@ export function worktreeJobPayload(value: unknown): {
       !WORKTREE_OPERATIONS.includes(operation as WorktreeOperation))
   ) {
     throw new Error("worktree payload.operation is invalid");
+  }
+  const expectedBranch =
+    operation === "PUBLISH"
+      ? stringValue(payload.expectedBranch, "worktree payload.expectedBranch")
+      : undefined;
+  if (expectedBranch !== undefined && !validGitBranchName(expectedBranch)) {
+    throw new Error("Publish requires a valid expected branch");
+  }
+  if (operation !== "PUBLISH" && payload.expectedBranch !== undefined) {
+    throw new Error(
+      "A worktree operation may only specify expectedBranch when publishing",
+    );
   }
   const editorVariant = payload.editorVariant;
   if (
@@ -1279,6 +1352,7 @@ export function worktreeJobPayload(value: unknown): {
     ...(operation === undefined
       ? {}
       : { operation: operation as WorktreeOperation }),
+    ...(expectedBranch === undefined ? {} : { expectedBranch }),
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),
