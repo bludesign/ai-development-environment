@@ -126,6 +126,64 @@ describe("worktree inventory and inspection", () => {
     );
   });
 
+  test("renames a linked branch in place and preserves its HEAD, edits, and upstream", async () => {
+    const folder = await repository();
+    const target = `${folder}-rename`;
+    temporaryDirectories.push(target);
+    await git(folder, "worktree", "add", "-b", "feature/old", target);
+    await git(target, "branch", "--set-upstream-to=origin/main");
+    await writeFile(join(target, "README.md"), "staged change\n");
+    await git(target, "add", "README.md");
+    await writeFile(join(target, "README.md"), "unstaged change\n");
+    const { stdout: head } = await git(target, "rev-parse", "HEAD");
+    const { stdout: status } = await git(target, "status", "--porcelain");
+    const gitDirectory = await realpath(
+      (
+        await git(target, "rev-parse", "--path-format=absolute", "--git-dir")
+      ).stdout.trim(),
+    );
+    const rename = (expectedBranch: string, branch: string) =>
+      branchWorktree(
+        {
+          action: "RENAME",
+          codebaseId: "codebase-1",
+          rootFolder: folder,
+          folder: target,
+          gitDirectory,
+          expectedOrigin: "github.com/openai/codex",
+          expectedBranch,
+          branch,
+          baseBranch: null,
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      );
+
+    await expect(rename("main", "feature/new")).rejects.toThrow(
+      "The worktree branch changed after selection",
+    );
+    await git(folder, "branch", "taken");
+    await expect(rename("feature/old", "taken")).rejects.toThrow(
+      "already exists",
+    );
+    await expect(rename("feature/old", "feature/new")).resolves.toMatchObject({
+      renamedFrom: "feature/old",
+      worktree: {
+        gitDirectory,
+        branch: "feature/new",
+        headSha: head.trim(),
+        upstream: "origin/main",
+        hasStagedChanges: true,
+        hasUnstagedChanges: true,
+      },
+    });
+    expect((await git(target, "status", "--porcelain")).stdout).toBe(status);
+    expect((await git(folder, "branch", "--list", "feature/old")).stdout).toBe(
+      "",
+    );
+  });
+
   test("stashes and retries a branch switch after Git rejects dirty changes", async () => {
     const folder = await repository();
     await git(folder, "switch", "-c", "release");

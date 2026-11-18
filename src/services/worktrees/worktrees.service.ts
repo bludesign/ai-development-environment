@@ -22,6 +22,7 @@ import {
   validGitBranchName,
   WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY,
   WORKTREE_BRANCH_JOB_KIND,
+  WORKTREE_BRANCH_RENAME_CAPABILITY,
   WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
   worktreePostMergeSwitchJobPayload,
   WORKTREE_COMMIT_JOB_KIND,
@@ -3109,6 +3110,55 @@ export class WorktreesService {
     );
   }
 
+  async renameWorktreeBranch(input: {
+    worktreeId: string;
+    expectedBranch: string;
+    branchName: string;
+    requestId: string;
+  }) {
+    if (!input.requestId.trim()) throw new Error("requestId is required");
+    const branch = input.branchName.trim();
+    if (!validGitBranchName(branch))
+      throw new Error("Enter a valid Git branch name");
+    if (branch === input.expectedBranch)
+      throw new Error("Enter a different branch name");
+    const worktree = await this.requireRunnable(
+      input.worktreeId,
+      WORKTREE_BRANCH_RENAME_CAPABILITY,
+    );
+    const idempotencyKey = `worktree:branch:rename:${input.requestId}:${worktree.id}`;
+    if (!worktree.branch || worktree.branch !== input.expectedBranch) {
+      const existing = await this.agentControl.getJobByIdempotencyKey(
+        worktree.codebase.agentId,
+        idempotencyKey,
+      );
+      if (existing) return existing;
+      throw new Error("The worktree branch changed after selection");
+    }
+    if (worktree.rebaseInProgress)
+      throw new Error("Finish the rebase before renaming the branch");
+    return this.agentControl.createJob({
+      agentId: worktree.codebase.agentId,
+      codebaseId: worktree.codebaseId,
+      worktreeId: worktree.id,
+      kind: WORKTREE_BRANCH_JOB_KIND,
+      payload: {
+        action: "RENAME",
+        codebaseId: worktree.codebaseId,
+        rootFolder: worktree.codebase.folder,
+        folder: worktree.folder,
+        gitDirectory: worktree.gitDirectory,
+        expectedOrigin: worktree.codebase.repository.canonicalOrigin,
+        expectedBranch: worktree.branch,
+        branch,
+        baseBranch:
+          worktree.baseBranchOverride ?? worktree.codebase.defaultBranch,
+      },
+      idempotencyKey,
+      timeoutSeconds: 90,
+    });
+  }
+
   bulkBranchTargetIssue(
     worktree: BranchBatchTarget,
     selection: BranchBatchTargetSelection,
@@ -5270,40 +5320,80 @@ export class WorktreesService {
       return;
     }
     const result = resultObject({ ...job, error: null });
-    if (!result.worktree || typeof result.baseBranch !== "string") return;
+    const renamedFrom =
+      job.worktreeId && typeof result.renamedFrom === "string"
+        ? result.renamedFrom
+        : null;
+    if (
+      !result.worktree ||
+      (!renamedFrom && typeof result.baseBranch !== "string")
+    )
+      return;
     const item = parseWorktreeInventoryItem(result.worktree);
     const prisma = await getPrismaClient();
-    const codebase = await prisma.codebase.findUnique({
-      where: { id: job.codebaseId },
-      select: { localBranchesJson: true },
-    });
-    if (!codebase) return;
-    const branchSet = new Set(parseBranches(codebase.localBranchesJson));
-    if (item.branch) branchSet.add(item.branch);
     let worktreeId = job.worktreeId;
     let notification: NotificationRecord | null = null;
-    await prisma.$transaction(async (transaction) => {
+    const projected = await prisma.$transaction(async (transaction) => {
+      const codebase = await transaction.codebase.findUnique({
+        where: { id: job.codebaseId! },
+        select: { localBranchesJson: true },
+      });
+      if (!codebase) return false;
+      const branchSet = new Set(parseBranches(codebase.localBranchesJson));
+      if (renamedFrom) branchSet.delete(renamedFrom);
+      if (item.branch) branchSet.add(item.branch);
+      if (job.worktreeId) {
+        const updated = await transaction.worktree.updateMany({
+          where: {
+            id: job.worktreeId,
+            codebaseId: job.codebaseId!,
+            ...(renamedFrom
+              ? {
+                  gitDirectory: item.gitDirectory,
+                  missingAt: null,
+                  OR: [
+                    { lastCheckedAt: null },
+                    { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+                  ],
+                }
+              : {}),
+          },
+          data: {
+            ...this.inventoryData(item),
+            gitDirectory: item.gitDirectory,
+            ...(renamedFrom
+              ? {
+                  pullRequestLookupOrigin: null,
+                  pullRequestLookupBranch: null,
+                  pullRequestLookupAt: null,
+                }
+              : { baseBranchOverride: result.baseBranch as string }),
+            missingAt: null,
+          },
+        });
+        if (updated.count !== 1) {
+          if (renamedFrom) return false;
+          throw new Error("Worktree no longer exists");
+        }
+        if (renamedFrom) {
+          await transaction.worktreePullRequest.deleteMany({
+            where: { worktreeId: job.worktreeId },
+          });
+          await transaction.worktreeGitLabMergeRequest.deleteMany({
+            where: { worktreeId: job.worktreeId },
+          });
+        }
+      }
       await transaction.codebase.update({
         where: { id: job.codebaseId! },
         data: {
+          ...(renamedFrom && item.primary ? { branch: item.branch } : {}),
           localBranchesJson: JSON.stringify(
             [...branchSet].sort((first, second) => first.localeCompare(second)),
           ),
         },
       });
-      if (job.worktreeId) {
-        const updated = await transaction.worktree.updateMany({
-          where: { id: job.worktreeId, codebaseId: job.codebaseId! },
-          data: {
-            ...this.inventoryData(item),
-            gitDirectory: item.gitDirectory,
-            baseBranchOverride: result.baseBranch as string,
-            missingAt: null,
-          },
-        });
-        if (updated.count !== 1) throw new Error("Worktree no longer exists");
-        return;
-      }
+      if (job.worktreeId) return;
       const projected = await transaction.worktree.upsert({
         where: {
           codebaseId_gitDirectory: {
@@ -5371,6 +5461,7 @@ export class WorktreesService {
         highlightColor,
       );
     });
+    if (projected === false) return;
     this.notifications?.created(notification);
     this.publish(worktreeId ?? null, job.codebaseId);
     if (worktreeId) {

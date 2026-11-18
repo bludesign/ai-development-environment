@@ -2066,6 +2066,9 @@ export const branchWorktree: AgentJobHandler = async (
   context,
 ) => {
   const input = worktreeBranchJobPayload(payload);
+  if (input.action === "RENAME") {
+    return renameWorktreeBranch(input, timeoutMs, signal);
+  }
   if (input.aiNaming) {
     const branchName = await generateBranchName(input.aiNaming.naming, signal);
     input.candidates = jiraBranchNameCandidates(branchName).filter(
@@ -2146,8 +2149,56 @@ export const branchWorktree: AgentJobHandler = async (
     : execute();
 };
 
+async function renameWorktreeBranch(
+  input: Extract<
+    ReturnType<typeof worktreeBranchJobPayload>,
+    { action: "RENAME" }
+  >,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const folder = await validateWorktree(input, timeoutMs, signal);
+  const rootFolder = await realpath(input.rootFolder);
+  await withRepositoryMetadata(
+    folder,
+    async () => {
+      await branchChangeSource(folder, input.expectedBranch, timeoutMs, signal);
+      requireSuccess(
+        await git(
+          folder,
+          ["branch", "-m", "--", input.expectedBranch, input.branch],
+          timeoutMs,
+          signal,
+        ),
+        "Could not rename the worktree branch",
+      );
+    },
+    signal,
+  );
+  const worktree = await inspectWorktreeItem(
+    folder,
+    rootFolder,
+    input.baseBranch,
+    folder === rootFolder,
+    Math.min(timeoutMs, 30_000),
+    signal,
+  );
+  if (worktree.availability !== "AVAILABLE") {
+    throw new Error(worktree.error || "Could not inspect the renamed branch");
+  }
+  return {
+    ...successfulProcess,
+    worktree,
+    branch: input.branch,
+    renamedFrom: input.expectedBranch,
+  };
+}
+
 async function finishBranchWorktree(
-  input: ReturnType<typeof worktreeBranchJobPayload>,
+  input: Exclude<
+    ReturnType<typeof worktreeBranchJobPayload>,
+    { action: "RENAME" }
+  >,
   rootFolder: string,
   targetFolder: string,
   branch: string,

@@ -1405,6 +1405,18 @@ input ChangeWorktreeBranchInput {
   stashOnFailure: Boolean = false
 }
 
+"Values used to rename the checked-out local branch."
+input RenameWorktreeBranchInput {
+  "Identifier of the worktree."
+  worktreeId: ID!
+  "The branch that must still be checked out."
+  expectedBranch: String!
+  "The new local branch name."
+  branchName: String!
+  "Identifier of the request."
+  requestId: ID!
+}
+
 "Values used to move a worktree."
 input MoveWorktreeInput {
   "Identifier of the source worktree to use."
@@ -1586,6 +1598,11 @@ extend type Mutation {
   changeWorktreeBranch(
     "Values for the requested operation."
     input: ChangeWorktreeBranchInput!
+  ): AgentJob!
+  "Renames the checked-out local branch in place and returns an agent job."
+  renameWorktreeBranch(
+    "Values for the requested rename."
+    input: RenameWorktreeBranchInput!
   ): AgentJob!
   "Moves a worktree and returns a worktree move."
   moveWorktree(

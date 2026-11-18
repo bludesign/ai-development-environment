@@ -501,34 +501,39 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     Boolean(error) || (!loading && !entry),
   );
 
-  const updateWorktree = useCallback((next: Worktree) => {
-    setOverview((current) =>
-      current
-        ? {
-            ...current,
-            agents: current.agents.map((agentGroup) => ({
-              ...agentGroup,
-              codebases: agentGroup.codebases.map((group) => ({
-                ...group,
-                worktrees: group.worktrees.map((worktree) =>
-                  worktree.id === next.id
-                    ? {
-                        ...worktree,
-                        ...next,
-                        ticketKey: next.ticketKey ?? worktree.ticketKey,
-                        ticketTitle: next.ticketTitle ?? worktree.ticketTitle,
-                        ticketStatus:
-                          next.ticketStatus ?? worktree.ticketStatus,
-                        pullRequest: next.pullRequest ?? worktree.pullRequest,
-                      }
-                    : worktree,
-                ),
+  const updateWorktree = useCallback(
+    (next: Worktree, pullRequestRefreshed = false) => {
+      setOverview((current) =>
+        current
+          ? {
+              ...current,
+              agents: current.agents.map((agentGroup) => ({
+                ...agentGroup,
+                codebases: agentGroup.codebases.map((group) => ({
+                  ...group,
+                  worktrees: group.worktrees.map((worktree) =>
+                    worktree.id === next.id
+                      ? {
+                          ...worktree,
+                          ...next,
+                          ticketKey: next.ticketKey ?? worktree.ticketKey,
+                          ticketTitle: next.ticketTitle ?? worktree.ticketTitle,
+                          ticketStatus:
+                            next.ticketStatus ?? worktree.ticketStatus,
+                          pullRequest: pullRequestRefreshed
+                            ? next.pullRequest
+                            : (next.pullRequest ?? worktree.pullRequest),
+                        }
+                      : worktree,
+                  ),
+                })),
               })),
-            })),
-          }
-        : current,
-    );
-  }, []);
+            }
+          : current,
+      );
+    },
+    [],
+  );
 
   const updateJiraTicket = useCallback(
     (ticket: Parameters<typeof applyJiraTicketToWorktreeOverview>[1]) => {
@@ -633,7 +638,7 @@ function LoadedWorktreeDetail({
   onForceMetadata: () => void;
   onReload: () => Promise<void>;
   onTicketChange: (ticket: JiraTicketDetail) => void;
-  onUpdate: (worktree: Worktree) => void;
+  onUpdate: (worktree: Worktree, pullRequestRefreshed?: boolean) => void;
 }) {
   const t = useTranslations("worktreeDetail");
   const wt = useTranslations("worktrees");

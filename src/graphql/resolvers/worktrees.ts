@@ -501,6 +501,23 @@ export const createWorktreeResolvers = (
       requireControlPlane(context);
       return service.changeWorktreeBranch(input);
     },
+    renameWorktreeBranch: (
+      _root: unknown,
+      {
+        input,
+      }: {
+        input: {
+          worktreeId: string;
+          expectedBranch: string;
+          branchName: string;
+          requestId: string;
+        };
+      },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.renameWorktreeBranch(input);
+    },
     moveWorktree: (
       _root: unknown,
       {

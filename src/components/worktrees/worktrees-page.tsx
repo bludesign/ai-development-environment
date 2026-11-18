@@ -16,6 +16,7 @@ import {
   ANDROID_BUILD_JOB_KIND,
   IOS_BUILD_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
+import { WORKTREE_BRANCH_RENAME_CAPABILITY } from "@ai-development-environment/agent-contract/worktrees";
 import {
   Archive,
   ArrowDown,
@@ -1024,7 +1025,10 @@ export function WorktreesPage({
       ) ?? [],
     );
 
-  const updateLocalWorktree = (next: Worktree) => {
+  const updateLocalWorktree = (
+    next: Worktree,
+    pullRequestRefreshed = false,
+  ) => {
     setOverview((current) =>
       current
         ? {
@@ -1042,7 +1046,9 @@ export function WorktreesPage({
                         ticketTitle: next.ticketTitle ?? worktree.ticketTitle,
                         ticketStatus:
                           next.ticketStatus ?? worktree.ticketStatus,
-                        pullRequest: next.pullRequest ?? worktree.pullRequest,
+                        pullRequest: pullRequestRefreshed
+                          ? next.pullRequest
+                          : (next.pullRequest ?? worktree.pullRequest),
                       }
                     : worktree,
                 ),
@@ -1725,7 +1731,7 @@ type WorktreeSectionProps = {
   editorVariant: WorktreeOverview["settings"]["editorVariant"];
   inspectionRefreshToken: number;
   onReload: () => Promise<void>;
-  onUpdate: (worktree: Worktree) => void;
+  onUpdate: (worktree: Worktree, pullRequestRefreshed?: boolean) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
   overview: WorktreeOverview;
@@ -2099,7 +2105,7 @@ export type WorktreeItemProps = {
   inspectionRefreshToken: number;
   liveUpdatesEnabled: boolean;
   onReload: () => Promise<void>;
-  onUpdate: (worktree: Worktree) => void;
+  onUpdate: (worktree: Worktree, pullRequestRefreshed?: boolean) => void;
   onError: (error: string | null) => void;
   onManageTags: () => void;
   onOpenTicket: (issueKey: string) => void;
@@ -2830,6 +2836,7 @@ export function WorktreeMenus(
   } = props;
   const t = useTranslations("worktrees");
   const [changeOpen, setChangeOpen] = useState(false);
+  const [branchToRename, setBranchToRename] = useState<string | null>(null);
   const [commitOpen, setCommitOpen] = useState(false);
   const [moveOpen, setMoveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -2904,7 +2911,7 @@ export function WorktreeMenus(
         }`,
         { id: worktree.id },
       );
-      onUpdate(data.refreshWorktreePullRequest);
+      onUpdate(data.refreshWorktreePullRequest, true);
       onError(null);
     } catch (error) {
       onError(error instanceof Error ? error.message : String(error));
@@ -3048,6 +3055,18 @@ export function WorktreeMenus(
                 <MoveRight /> {t("moveToAgent")}
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              disabled={
+                branchChangeDisabled ||
+                !worktree.branch ||
+                !sourceAgent?.agent.capabilities.includes(
+                  WORKTREE_BRANCH_RENAME_CAPABILITY,
+                )
+              }
+              onSelect={() => setBranchToRename(worktree.branch)}
+            >
+              <Pencil /> {t("renameBranch")}
+            </DropdownMenuItem>
             <DropdownMenuItem
               disabled={branchChangeDisabled}
               onSelect={() => {
@@ -3255,6 +3274,14 @@ export function WorktreeMenus(
           />
         </PopoverContent>
       </Popover>
+      {branchToRename && (
+        <RenameWorktreeBranchDialog
+          expectedBranch={branchToRename}
+          onClose={() => setBranchToRename(null)}
+          onReload={props.onReload}
+          worktreeId={worktree.id}
+        />
+      )}
       {moveOpen && (
         <MoveWorktreeDialog
           onOpenChange={setMoveOpen}
@@ -3279,6 +3306,105 @@ export function WorktreeMenus(
         />
       )}
     </>
+  );
+}
+
+function RenameWorktreeBranchDialog({
+  expectedBranch,
+  onClose,
+  onReload,
+  worktreeId,
+}: {
+  expectedBranch: string;
+  onClose: () => void;
+  onReload: () => Promise<void>;
+  worktreeId: string;
+}) {
+  const t = useTranslations("worktrees");
+  const [name, setName] = useState(expectedBranch);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const branchName = name.trim();
+  const canSubmit =
+    !busy && Boolean(branchName) && branchName !== expectedBranch;
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await controlPlaneRequest<{
+        renameWorktreeBranch: { id: string };
+      }>(
+        `mutation RenameWorktreeBranch($input: RenameWorktreeBranchInput!) {
+          renameWorktreeBranch(input: $input) { id }
+        }`,
+        {
+          input: {
+            worktreeId,
+            expectedBranch,
+            branchName,
+            requestId: createClientId(),
+          },
+        },
+      );
+      await waitForWorktreeJob(data.renameWorktreeBranch.id);
+      onClose();
+      await onReload();
+    } catch (value) {
+      setError(value instanceof Error ? value.message : String(value));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose();
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("renameBranch")}</DialogTitle>
+          <DialogDescription>{t("renameBranchDescription")}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={(event) => void submit(event)}>
+          <div className="space-y-1.5">
+            <Label htmlFor="worktree-rename-branch">{t("branchName")}</Label>
+            <Input
+              autoCapitalize="none"
+              disabled={busy}
+              id="worktree-rename-branch"
+              onChange={(event) => setName(event.target.value)}
+              spellCheck={false}
+              value={name}
+            />
+          </div>
+          {error && (
+            <Alert variant="destructive">
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          <DialogFooter>
+            <Button
+              disabled={busy}
+              onClick={onClose}
+              type="button"
+              variant="outline"
+            >
+              {t("cancel")}
+            </Button>
+            <Button disabled={!canSubmit} type="submit">
+              {busy && <Spinner />}
+              {t("renameBranch")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 

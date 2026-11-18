@@ -159,10 +159,11 @@ export function worktreeOperationLabel(
     case worktrees.WORKTREE_BRANCH_JOB_KIND:
       return variant(
         payload.action,
-        { CREATE: "createWorktree", CHANGE: "changeBranch" } satisfies Record<
-          worktrees.WorktreeBranchAction,
-          string
-        >,
+        {
+          CREATE: "createWorktree",
+          CHANGE: "changeBranch",
+          RENAME: "renameBranch",
+        } satisfies Record<worktrees.WorktreeBranchAction, string>,
         "manageBranch",
       );
     case worktrees.WORKTREE_WATCH_JOB_KIND:
