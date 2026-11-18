@@ -1222,7 +1222,25 @@
     "deviceInactive": "Inactive",
     "removeDevice": "Remove {device}",
     "removeDeviceTitle": "Remove this registered device?",
-    "removeDeviceDescription": "This device will stop receiving native notifications. It can register again from the app."
+    "removeDeviceDescription": "This device will stop receiving native notifications. It can register again from the app.",
+    "liveActivity": {
+      "title": "Live Activities",
+      "description": "Choose which active work types contribute to the Live Activity total and summary on iPhone and iPad.",
+      "scope": "Changes save automatically and apply to every device connected to this control plane. All work types are included by default.",
+      "attention": "A Live Activity ends when no selected work is active. Items needing attention appear in a separate badge while work is active.",
+      "saving": "Saving Live Activity settings…",
+      "loading": "Loading Live Activity settings…",
+      "retry": "Retry",
+      "items": {
+        "includePlans": "Plans",
+        "includeSessions": "Sessions",
+        "includeBuilds": "Builds",
+        "includeWorkflows": "Workflow runs",
+        "includeCommands": "Command runs",
+        "includeGitHubActions": "GitHub Actions runs",
+        "includeGitLabPipelines": "GitLab pipelines"
+      }
+    }
   },
   "credentials": {
     "title": "Credentials",

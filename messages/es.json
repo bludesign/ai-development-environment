@@ -1222,7 +1222,25 @@
     "deviceInactive": "Inactivo",
     "removeDevice": "Eliminar {device}",
     "removeDeviceTitle": "¿Eliminar este dispositivo registrado?",
-    "removeDeviceDescription": "Este dispositivo dejará de recibir notificaciones nativas. Puede volver a registrarse desde la app."
+    "removeDeviceDescription": "Este dispositivo dejará de recibir notificaciones nativas. Puede volver a registrarse desde la app.",
+    "liveActivity": {
+      "title": "Actividades en directo",
+      "description": "Elige qué tipos de trabajo activo contribuyen al total y al resumen de la actividad en directo en el iPhone y el iPad.",
+      "scope": "Los cambios se guardan automáticamente y se aplican a todos los dispositivos conectados a este plano de control. Todos los tipos de trabajo se incluyen de forma predeterminada.",
+      "attention": "Una actividad en directo termina cuando no hay trabajo seleccionado activo. Los elementos que requieren atención aparecen en un indicador separado mientras hay trabajo activo.",
+      "saving": "Guardando los ajustes de actividades en directo…",
+      "loading": "Cargando los ajustes de actividades en directo…",
+      "retry": "Reintentar",
+      "items": {
+        "includePlans": "Planes",
+        "includeSessions": "Sesiones",
+        "includeBuilds": "Compilaciones",
+        "includeWorkflows": "Ejecuciones de flujos de trabajo",
+        "includeCommands": "Ejecuciones de comandos",
+        "includeGitHubActions": "Ejecuciones de GitHub Actions",
+        "includeGitLabPipelines": "Pipelines de GitLab"
+      }
+    }
   },
   "credentials": {
     "title": "Credenciales",

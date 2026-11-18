@@ -80,6 +80,12 @@ import {
   type WebPushStateView,
   type WebPushSubscriptionView,
 } from "./types";
+import {
+  LIVE_ACTIVITY_SETTINGS_FIELDS,
+  LiveActivitySettingsCard,
+  type LiveActivitySettingKey,
+  type LiveActivitySettingsView,
+} from "./live-activity-settings-card";
 
 const PAGE_SIZE = 100;
 const PREFERENCE_FIELDS = `
@@ -218,6 +224,22 @@ export function NotificationsPage() {
   const [excludedRanges, setExcludedRanges] = useState<TimeRange[]>([]);
   const [selectAll, setSelectAll] = useState(false);
   const [savingPreference, setSavingPreference] = useState<string | null>(null);
+  const [liveActivitySettings, setLiveActivitySettings] =
+    useState<LiveActivitySettingsView | null>(null);
+  const [liveActivityLoading, setLiveActivityLoading] = useState(true);
+  const [liveActivityLoadError, setLiveActivityLoadError] = useState<
+    string | null
+  >(null);
+  const [liveActivitySaveError, setLiveActivitySaveError] = useState<
+    string | null
+  >(null);
+  const [savingLiveActivity, setSavingLiveActivity] =
+    useState<LiveActivitySettingKey | null>(null);
+  const liveActivitySaving = useRef(false);
+  const failedLiveActivityChange = useRef<{
+    key: LiveActivitySettingKey;
+    enabled: boolean;
+  } | null>(null);
   const [permission, setPermission] = useState<
     NotificationPermission | "unsupported"
   >("unsupported");
@@ -256,9 +278,19 @@ export function NotificationsPage() {
     ]);
   }, []);
 
+  const applyLiveActivitySettings = useCallback(
+    (next: LiveActivitySettingsView) => {
+      setLiveActivitySettings((current) =>
+        current && current.updatedAt > next.updatedAt ? current : next,
+      );
+    },
+    [],
+  );
+
   useEffect(() => {
     if (tab !== "settings") return;
     const owner = createRefreshCoalescer(async (signal) => {
+      setLiveActivityLoading(true);
       try {
         const data = await controlPlaneRequest<{
           notificationPreferences: NotificationPreferenceView[];
@@ -266,6 +298,7 @@ export function NotificationsPage() {
           webPushSubscriptions: WebPushSubscriptionView[];
           notificationApnsState?: NotificationApnsStateView;
           notificationDevices?: NotificationDeviceView[];
+          liveActivitySettings: LiveActivitySettingsView;
         }>(
           `query NotificationSettings {
           notificationPreferences { ${PREFERENCE_FIELDS} }
@@ -273,6 +306,7 @@ export function NotificationsPage() {
           webPushSubscriptions { id endpoint expirationTime locale userAgent lastSeenAt createdAt updatedAt }
           notificationApnsState { configured deviceCount }
           notificationDevices { ${NOTIFICATION_DEVICE_FIELDS} }
+          liveActivitySettings { ${LIVE_ACTIVITY_SETTINGS_FIELDS} }
         }`,
           undefined,
           { signal },
@@ -283,18 +317,45 @@ export function NotificationsPage() {
         setWebPushSubscriptions(data.webPushSubscriptions);
         setApnsState(data.notificationApnsState ?? null);
         setDevices(data.notificationDevices ?? []);
+        applyLiveActivitySettings(data.liveActivitySettings);
+        setLiveActivityLoadError(null);
       } catch (value) {
-        if (!signal.aborted)
-          setError(value instanceof Error ? value.message : String(value));
+        if (!signal.aborted) {
+          setLiveActivityLoadError(
+            value instanceof Error ? value.message : String(value),
+          );
+        }
+      } finally {
+        if (!signal.aborted) setLiveActivityLoading(false);
       }
     });
     settingsOwner.current = owner;
     void owner.refresh();
+    const unsubscribe = controlPlaneSubscriptions().subscribe(
+      {
+        query: `subscription LiveActivitySettingsChanged {
+        liveActivitySettingsChanged { ${LIVE_ACTIVITY_SETTINGS_FIELDS} }
+      }`,
+      },
+      {
+        next: (result) => {
+          const next = (
+            result.data as {
+              liveActivitySettingsChanged?: LiveActivitySettingsView;
+            }
+          )?.liveActivitySettingsChanged;
+          if (next) applyLiveActivitySettings(next);
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
+      unsubscribe();
       owner.dispose();
       if (settingsOwner.current === owner) settingsOwner.current = null;
     };
-  }, [tab]);
+  }, [applyLiveActivitySettings, tab]);
 
   const readPage = useCallback(
     async (after: string | null, first: number, signal: AbortSignal) => {
@@ -674,6 +735,36 @@ export function NotificationsPage() {
       setError(value instanceof Error ? value.message : String(value));
     } finally {
       setSavingPreference(null);
+    }
+  };
+
+  const updateLiveActivitySetting = async (
+    key: LiveActivitySettingKey,
+    enabled: boolean,
+  ) => {
+    if (!liveActivitySettings || liveActivitySaving.current) return;
+    liveActivitySaving.current = true;
+    failedLiveActivityChange.current = null;
+    setSavingLiveActivity(key);
+    setLiveActivitySaveError(null);
+    try {
+      const result = await controlPlaneRequest<{
+        saveLiveActivitySettings: LiveActivitySettingsView;
+      }>(
+        `mutation SaveLiveActivitySettings($input: SaveLiveActivitySettingsInput!) {
+          saveLiveActivitySettings(input: $input) { ${LIVE_ACTIVITY_SETTINGS_FIELDS} }
+        }`,
+        { input: { [key]: enabled } },
+      );
+      applyLiveActivitySettings(result.saveLiveActivitySettings);
+    } catch (value) {
+      failedLiveActivityChange.current = { key, enabled };
+      setLiveActivitySaveError(
+        value instanceof Error ? value.message : String(value),
+      );
+    } finally {
+      liveActivitySaving.current = false;
+      setSavingLiveActivity(null);
     }
   };
 
@@ -1219,6 +1310,22 @@ export function NotificationsPage() {
         )
       ) : (
         <div className="space-y-5">
+          <LiveActivitySettingsCard
+            error={liveActivityLoadError ?? liveActivitySaveError}
+            loading={liveActivityLoading}
+            onChange={(key, enabled) =>
+              void updateLiveActivitySetting(key, enabled)
+            }
+            onRetry={() => {
+              const failed = failedLiveActivityChange.current;
+              if (liveActivityLoadError) void settingsOwner.current?.refresh();
+              else if (failed)
+                void updateLiveActivitySetting(failed.key, failed.enabled);
+              else void settingsOwner.current?.refresh();
+            }}
+            saving={savingLiveActivity}
+            settings={liveActivitySettings}
+          />
           <Card>
             <CardHeader>
               <CardTitle>{t("deliverySetup")}</CardTitle>

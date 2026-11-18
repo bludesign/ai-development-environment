@@ -10,6 +10,7 @@ import {
 } from "@/services/agent-control";
 import type { ActionCenterService } from "@/services/action-center";
 import type { UserPrincipal } from "@/services/auth/principal";
+import type { DiskSpaceService } from "@/services/disk-space";
 import {
   CREDENTIALS,
   apnsTokenConnectionSettings,
@@ -23,6 +24,11 @@ import {
   registrationId,
   registrationObject,
 } from "./registration";
+import {
+  DEFAULT_LIVE_ACTIVITY_SETTINGS,
+  liveActivitySettings,
+  type LiveActivityCategorySettings,
+} from "./live-activity-settings";
 
 const WIDGET_TTL_MS = 30 * 24 * 60 * 60_000;
 const ACTIVITY_TTL_MS = 8 * 60 * 60_000;
@@ -55,16 +61,19 @@ export function workActivityContent(
   needsAttentionCount: number,
   now = new Date(),
   integrationsKnown = true,
+  settings: LiveActivityCategorySettings = DEFAULT_LIVE_ACTIVITY_SETTINGS,
 ): WorkActivityContent {
-  const kinds = [
-    [counts.plans, "plan"],
-    [counts.sessions, "session"],
-    [counts.builds, "build"],
-    [counts.workflows, "workflow"],
-    [counts.commands, "command"],
-    [counts.actions ?? 0, "action"],
-    [counts.pipelines ?? 0, "pipeline"],
-  ] as const;
+  const kinds = (
+    [
+      [counts.plans, "plan", settings.includePlans],
+      [counts.sessions, "session", settings.includeSessions],
+      [counts.builds, "build", settings.includeBuilds],
+      [counts.workflows, "workflow", settings.includeWorkflows],
+      [counts.commands, "command", settings.includeCommands],
+      [counts.actions ?? 0, "action", settings.includeGitHubActions],
+      [counts.pipelines ?? 0, "pipeline", settings.includeGitLabPipelines],
+    ] as const
+  ).filter(([, , enabled]) => enabled);
   return {
     activeCount: kinds.reduce((sum, [count]) => sum + count, 0),
     needsAttentionCount,
@@ -105,6 +114,7 @@ export class IosStatusService {
     private readonly actionCenter: Pick<ActionCenterService, "list">,
     private readonly credentials: CredentialService,
     private readonly apns = new ApnsClient(),
+    private readonly diskSpace?: Pick<DiskSpaceService, "summary">,
   ) {}
 
   async snapshot() {
@@ -112,18 +122,56 @@ export class IosStatusService {
   }
 
   private async collectSnapshot() {
-    const [sidebar, actions] = await Promise.all([
-      this.systemStatus.status(false, { includeUnfinishedWork: true }),
+    const settings = await liveActivitySettings();
+    const [sidebar, actions, diskSummary] = await Promise.all([
+      this.systemStatus.status(false, {
+        includeUnfinishedWork: true,
+        liveActivityIntegrations: {
+          github: settings.includeGitHubActions,
+          gitlab: settings.includeGitLabPipelines,
+        },
+      }),
       this.actionCenter.list({ first: 8 }),
+      this.diskSpace?.summary() ?? Promise.resolve({ agents: [] }),
     ]);
     const now = new Date();
     const { unfinishedWork } = sidebar;
-    const integrationsKnown = unfinishedWork?.integrationsKnown ?? false;
+    const integrationsKnown =
+      (!settings.includeGitHubActions ||
+        (unfinishedWork?.githubKnown ??
+          unfinishedWork?.integrationsKnown ??
+          false)) &&
+      (!settings.includeGitLabPipelines ||
+        (unfinishedWork?.gitlabKnown ??
+          unfinishedWork?.integrationsKnown ??
+          false));
     const snapshot = {
       collectedAt: now.toISOString(),
       usageToday: sidebar.usageToday,
       activity: sidebar.activity,
+      diskSpace: diskSummary.agents
+        .filter(({ enabled }) => enabled)
+        .flatMap(({ agent, status, volumes }) => {
+          // Match the sidebar: one ring per agent, using its least-free monitored volume.
+          const volume = volumes
+            .filter(({ monitored }) => monitored)
+            .sort((first, second) => first.freeBytes - second.freeBytes)[0];
+          return volume
+            ? [
+                {
+                  id: agent.id,
+                  agentName: agent.name,
+                  volumeId: volume.id,
+                  totalBytes: volume.totalBytes,
+                  freeBytes: volume.freeBytes,
+                  status,
+                },
+              ]
+            : [];
+        })
+        .slice(0, 4),
       actionCenter: {
+        totalCount: actions.totalCount,
         needsAttentionCount: actions.needsAttentionCount,
         activeCount: actions.activeCount,
         items: actions.items.map((item) => ({
@@ -143,6 +191,7 @@ export class IosStatusService {
         actions.needsAttentionCount,
         now,
         integrationsKnown,
+        settings,
       ),
     };
     return { snapshot, integrationsKnown };
@@ -328,6 +377,7 @@ export class IosStatusService {
         usageToday: snapshot.usageToday,
         activity: snapshot.activity,
         actionCenter: snapshot.actionCenter,
+        diskSpace: snapshot.diskSpace,
       });
       const activityHash = hash(work);
       // Wait for configured providers to report before treating an empty count as completion.

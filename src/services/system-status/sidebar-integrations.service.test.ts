@@ -136,6 +136,8 @@ describe("sidebar integration request counts", () => {
       actions: null,
       pipelines: null,
       activeRunsKnown: false,
+      githubActiveRunsKnown: false,
+      gitlabActiveRunsKnown: false,
     });
     // Reading status never scans providers.
     await service.counts();
@@ -178,6 +180,8 @@ describe("sidebar integration request counts", () => {
       mergeRequests: 0,
       pipelines: null,
       activeRunsKnown: false,
+      githubActiveRunsKnown: true,
+      gitlabActiveRunsKnown: false,
     });
   });
 
@@ -192,9 +196,38 @@ describe("sidebar integration request counts", () => {
       mergeRequests: null,
       pipelines: null,
       activeRunsKnown: true,
+      githubActiveRunsKnown: true,
+      gitlabActiveRunsKnown: true,
     });
     expect(github.getSettings).not.toHaveBeenCalled();
     expect(gitlab.getSettings).not.toHaveBeenCalled();
+  });
+
+  test("native Live Activity reads refresh selected hidden CI without enabling sidebar polling", async () => {
+    const { service, github, gitlab, polling } = dependencies();
+    await prisma.actionCenterSettings.create({
+      data: { id: "default", showIntegrationCountsInSidebar: false },
+    });
+    expect((await service.counts()).actions).toBeNull();
+    const selected = {
+      includeHiddenActivity: true,
+      selectedActivityProviders: { github: true, gitlab: false },
+    };
+    expect(await service.counts(selected)).toMatchObject({
+      actions: 4,
+      pipelines: null,
+      githubActiveRunsKnown: true,
+      gitlabActiveRunsKnown: false,
+    });
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    expect(gitlab.activePipelinesCount).not.toHaveBeenCalled();
+    await Promise.all([service.counts(selected), service.counts(selected)]);
+    expect(github.activeActionsCount).toHaveBeenCalledOnce();
+    vi.setSystemTime(new Date(Date.now() + 60_001));
+    await service.counts(selected);
+    expect(github.activeActionsCount).toHaveBeenCalledTimes(2);
+    expect((await service.counts()).actions).toBeNull();
+    expect(polling.schedule).not.toHaveBeenCalled();
   });
 
   test("never counts rows from a previous account or an unresolved new account", async () => {
@@ -304,6 +337,8 @@ describe("sidebar CI refresh lifecycle", () => {
       mergeRequests: null,
       pipelines: null,
       activeRunsKnown: true,
+      githubActiveRunsKnown: true,
+      gitlabActiveRunsKnown: true,
     });
   });
 

@@ -176,13 +176,20 @@ describe("SystemStatusService", () => {
       actions: null,
       pipelines: null,
       integrationsKnown: true,
+      githubKnown: true,
+      gitlabKnown: true,
     });
     expect(agentRuns).toHaveBeenCalledWith({
       by: ["kind"],
       where: {
         kind: { in: ["PLAN", "SESSION"] },
         archivedAt: null,
-        status: { in: ["QUEUED", "IN_PROGRESS", "PAUSED"] },
+        status: { in: ["QUEUED", "IN_PROGRESS"] },
+        questionBatches: { none: { status: "PENDING" } },
+        NOT: [
+          { phase: { endsWith: "_FAILED" } },
+          { phase: "IMPORTED_ACTIVE_COLLISION" },
+        ],
       },
       _count: { _all: true },
     });
@@ -193,7 +200,13 @@ describe("SystemStatusService", () => {
       where: {
         archivedAt: null,
         status: {
-          in: ["QUEUED", "RUNNING", "PAUSING", "PAUSED", "WAITING", "BLOCKED"],
+          in: ["QUEUED", "RUNNING", "PAUSING"],
+        },
+        attempts: {
+          none: {
+            supersededAt: null,
+            questionBatches: { some: { status: "PENDING" } },
+          },
         },
       },
     });

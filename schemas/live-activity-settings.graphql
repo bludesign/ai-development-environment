@@ -1,0 +1,55 @@
+"Shared work categories included in native Live Activities. All categories default to enabled."
+type LiveActivitySettings {
+  "Whether active plans contribute to the Live Activity."
+  includePlans: Boolean!
+  "Whether active sessions contribute to the Live Activity."
+  includeSessions: Boolean!
+  "Whether active builds contribute to the Live Activity."
+  includeBuilds: Boolean!
+  "Whether active workflows contribute to the Live Activity."
+  includeWorkflows: Boolean!
+  "Whether active commands contribute to the Live Activity."
+  includeCommands: Boolean!
+  "Whether active GitHub Actions contribute to the Live Activity."
+  includeGitHubActions: Boolean!
+  "Whether active GitLab pipelines contribute to the Live Activity."
+  includeGitLabPipelines: Boolean!
+  "ISO 8601 timestamp when these shared settings last changed."
+  updatedAt: String!
+}
+
+"Partial changes to the shared Live Activity categories. Omitted or null fields remain unchanged."
+input SaveLiveActivitySettingsInput {
+  "Whether to include active plans."
+  includePlans: Boolean
+  "Whether to include active sessions."
+  includeSessions: Boolean
+  "Whether to include active builds."
+  includeBuilds: Boolean
+  "Whether to include active workflows."
+  includeWorkflows: Boolean
+  "Whether to include active commands."
+  includeCommands: Boolean
+  "Whether to include active GitHub Actions."
+  includeGitHubActions: Boolean
+  "Whether to include active GitLab pipelines."
+  includeGitLabPipelines: Boolean
+}
+
+extend type Query {
+  "Returns the shared categories that contribute to native Live Activities."
+  liveActivitySettings: LiveActivitySettings!
+}
+
+extend type Mutation {
+  "Saves partial Live Activity category changes and reconciles existing activities."
+  saveLiveActivitySettings(
+    "Category flags to change; omitted or null flags retain their saved values."
+    input: SaveLiveActivitySettingsInput!
+  ): LiveActivitySettings!
+}
+
+extend type Subscription {
+  "Emits the saved settings whenever Live Activity categories change."
+  liveActivitySettingsChanged: LiveActivitySettings!
+}

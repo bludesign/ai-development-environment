@@ -38,6 +38,19 @@ const request = vi.mocked(controlPlaneRequest);
 const subscriptions = vi.mocked(controlPlaneSubscriptions);
 const now = "2026-07-22T02:00:00.000Z";
 let nextChange: ((change: Record<string, unknown>) => void) | null = null;
+let nextLiveActivitySettingsChange:
+  ((change: Record<string, unknown>) => void) | null = null;
+const defaultLiveActivitySettings = {
+  includePlans: true,
+  includeSessions: true,
+  includeBuilds: true,
+  includeWorkflows: true,
+  includeCommands: true,
+  includeGitHubActions: true,
+  includeGitLabPipelines: true,
+  updatedAt: now,
+};
+let serverLiveActivitySettings = { ...defaultLiveActivitySettings };
 
 const notification = {
   id: "notification-1",
@@ -136,6 +149,8 @@ function installServiceWorker(value: ServiceWorkerContainer) {
 
 beforeEach(() => {
   nextChange = null;
+  nextLiveActivitySettingsChange = null;
+  serverLiveActivitySettings = { ...defaultLiveActivitySettings };
   serverPushSubscriptions = [webPushSubscription];
   serverDevices = [notificationDevice];
   Object.defineProperty(window, "matchMedia", {
@@ -143,9 +158,14 @@ beforeEach(() => {
     value: vi.fn(() => ({ matches: false })),
   });
   subscriptions.mockReturnValue({
-    subscribe: vi.fn((_operation, sink) => {
-      nextChange = (change) =>
-        sink.next({ data: { notificationsChanged: change } } as never);
+    subscribe: vi.fn((operation, sink) => {
+      if (String(operation.query).includes("LiveActivitySettingsChanged")) {
+        nextLiveActivitySettingsChange = (change) =>
+          sink.next({ data: { liveActivitySettingsChanged: change } } as never);
+      } else {
+        nextChange = (change) =>
+          sink.next({ data: { notificationsChanged: change } } as never);
+      }
       return vi.fn();
     }),
   } as never);
@@ -170,6 +190,7 @@ beforeEach(() => {
         webPushSubscriptions: serverPushSubscriptions,
         notificationApnsState: { configured: true, deviceCount: 1 },
         notificationDevices: serverDevices,
+        liveActivitySettings: serverLiveActivitySettings,
       } as never;
     }
     if (operation.includes("mutation SaveNotificationPreference")) {
@@ -181,6 +202,15 @@ beforeEach(() => {
           key: input.typeKey,
         },
       } as never;
+    }
+    if (operation.includes("mutation SaveLiveActivitySettings")) {
+      const input = (variables as { input: Record<string, boolean> }).input;
+      serverLiveActivitySettings = {
+        ...serverLiveActivitySettings,
+        ...input,
+        updatedAt: "2026-07-22T02:00:01.000Z",
+      };
+      return { saveLiveActivitySettings: serverLiveActivitySettings } as never;
     }
     if (operation.includes("mutation DeleteNotifications")) {
       return { deleteNotifications: 1 } as never;
@@ -234,6 +264,214 @@ afterEach(() => {
 });
 
 describe("NotificationsPage", () => {
+  test("does not show invented inclusion values after a failed settings load and retries loading", async () => {
+    const implementation = request.getMockImplementation()!;
+    let fail = true;
+    request.mockImplementation(async (query, variables, options) => {
+      if (String(query).includes("query NotificationSettings") && fail) {
+        throw new Error("Notification settings could not be loaded");
+      }
+      return implementation(query, variables, options);
+    });
+    renderPage();
+    await screen.findByText("Example · Debug · main");
+    fireEvent.click(screen.getByRole("tab", { name: "Settings" }));
+    expect(
+      await screen.findByText("Notification settings could not be loaded"),
+    ).toBeDefined();
+    expect(screen.queryAllByRole("switch")).toHaveLength(0);
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/ }));
+    const plans = await screen.findByRole("switch", {
+      name: /^Plans$/,
+    });
+    expect(plans.getAttribute("aria-checked")).toBe("true");
+    expect(
+      screen.queryByText("Notification settings could not be loaded"),
+    ).toBeNull();
+  });
+
+  test("saves only the changed Live Activity category and allows every category to be excluded", async () => {
+    serverLiveActivitySettings = {
+      ...defaultLiveActivitySettings,
+      includePlans: false,
+      includeSessions: false,
+      includeBuilds: false,
+      includeWorkflows: false,
+      includeCommands: false,
+      includeGitLabPipelines: false,
+    };
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const actions = await screen.findByRole("switch", {
+      name: "GitHub Actions runs",
+    });
+    expect(screen.getAllByRole("switch")).toHaveLength(7);
+    expect(actions.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(actions);
+    await waitFor(() =>
+      expect(actions.getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation SaveLiveActivitySettings"),
+      { input: { includeGitHubActions: false } },
+    );
+    expect(
+      screen
+        .getAllByRole("switch")
+        .every((toggle) => toggle.getAttribute("aria-checked") === "false"),
+    ).toBe(true);
+  });
+
+  test("keeps persisted values after a failed Live Activity save and retries the exact change", async () => {
+    const implementation = request.getMockImplementation()!;
+    let fail = true;
+    request.mockImplementation(async (query, variables, options) => {
+      if (String(query).includes("mutation SaveLiveActivitySettings") && fail) {
+        throw new Error("Unable to save Live Activity settings");
+      }
+      return implementation(query, variables, options);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const actions = await screen.findByRole("switch", {
+      name: "GitHub Actions runs",
+    });
+    fireEvent.click(actions);
+    expect(
+      await screen.findByText("Unable to save Live Activity settings"),
+    ).toBeDefined();
+    expect(actions.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() => expect(actions.hasAttribute("disabled")).toBe(false));
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/ }));
+    await waitFor(() =>
+      expect(actions.getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(
+      screen.queryByText("Unable to save Live Activity settings"),
+    ).toBeNull();
+  });
+
+  test("retries settings reload errors separately without discarding a failed Live Activity save", async () => {
+    const implementation = request.getMockImplementation()!;
+    let failLoad = false;
+    let failSave = true;
+    request.mockImplementation(async (query, variables, options) => {
+      if (String(query).includes("query NotificationSettings") && failLoad)
+        throw new Error("Notification settings could not be loaded");
+      if (
+        String(query).includes("mutation SaveLiveActivitySettings") &&
+        failSave
+      )
+        throw new Error("Unable to save Live Activity settings");
+      return implementation(query, variables, options);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const actions = await screen.findByRole("switch", {
+      name: "GitHub Actions runs",
+    });
+    fireEvent.click(actions);
+    await screen.findByText("Unable to save Live Activity settings");
+
+    failLoad = true;
+    await act(async () => nextChange?.({ kind: "DEVICES_CHANGED" }));
+    await screen.findByText("Notification settings could not be loaded");
+    failLoad = false;
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/ }));
+    await screen.findByText("Unable to save Live Activity settings");
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("mutation SaveLiveActivitySettings"),
+      ),
+    ).toHaveLength(1);
+    expect(actions.getAttribute("aria-checked")).toBe("true");
+
+    failSave = false;
+    fireEvent.click(screen.getByRole("button", { name: /^Retry$/ }));
+    await waitFor(() =>
+      expect(actions.getAttribute("aria-checked")).toBe("false"),
+    );
+    expect(
+      screen.queryByText("Unable to save Live Activity settings"),
+    ).toBeNull();
+  });
+
+  test("disables category toggles while saving and keeps newer subscribed settings over a late save response", async () => {
+    const implementation = request.getMockImplementation()!;
+    let finishSave: ((value: never) => void) | undefined;
+    request.mockImplementation(async (query, variables, options) => {
+      if (String(query).includes("mutation SaveLiveActivitySettings")) {
+        return new Promise<never>((resolve) => {
+          finishSave = resolve;
+        });
+      }
+      return implementation(query, variables, options);
+    });
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const actions = await screen.findByRole("switch", {
+      name: "GitHub Actions runs",
+    });
+    fireEvent.click(actions);
+    await waitFor(() =>
+      expect(
+        screen
+          .getAllByRole("switch")
+          .every((toggle) => toggle.hasAttribute("disabled")),
+      ).toBe(true),
+    );
+    await act(async () =>
+      nextLiveActivitySettingsChange?.({
+        ...defaultLiveActivitySettings,
+        includePlans: false,
+        updatedAt: "2026-07-22T02:00:02.000Z",
+      }),
+    );
+    await act(async () =>
+      finishSave?.({
+        saveLiveActivitySettings: {
+          ...defaultLiveActivitySettings,
+          includeGitHubActions: false,
+          updatedAt: "2026-07-22T02:00:01.000Z",
+        },
+      } as never),
+    );
+    await waitFor(() => expect(actions.hasAttribute("disabled")).toBe(false));
+    expect(actions.getAttribute("aria-checked")).toBe("true");
+    expect(
+      screen
+        .getByRole("switch", { name: /^Plans$/ })
+        .getAttribute("aria-checked"),
+    ).toBe("false");
+  });
+
+  test("refreshes Live Activity settings from external changes and ignores older events", async () => {
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Settings" }));
+    const actions = await screen.findByRole("switch", {
+      name: "GitHub Actions runs",
+    });
+    await act(async () =>
+      nextLiveActivitySettingsChange?.({
+        ...defaultLiveActivitySettings,
+        includeGitHubActions: false,
+        updatedAt: "2026-07-22T02:00:02.000Z",
+      }),
+    );
+    expect(actions.getAttribute("aria-checked")).toBe("false");
+    await act(async () =>
+      nextLiveActivitySettingsChange?.(defaultLiveActivitySettings),
+    );
+    expect(actions.getAttribute("aria-checked")).toBe("false");
+    expect(
+      request.mock.calls.filter(([query]) =>
+        String(query).includes("mutation SaveLiveActivitySettings"),
+      ),
+    ).toHaveLength(0);
+  });
+
   test("renders channel preferences and saves independent changes", async () => {
     renderPage();
 
@@ -441,6 +679,7 @@ describe("NotificationsPage", () => {
           webPushSubscriptions: [],
           notificationApnsState: { configured: false, deviceCount: 0 },
           notificationDevices: [],
+          liveActivitySettings: serverLiveActivitySettings,
         } as never;
       }
       throw new Error(`Unexpected request: ${operation}`);

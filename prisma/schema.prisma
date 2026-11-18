@@ -1429,6 +1429,19 @@ model IosStatusSubscription {
   @@index([sessionId])
 }
 
+// Shared categories that contribute to the native app's Live Activity.
+model LiveActivitySettings {
+  id                     String   @id @default("default")
+  includePlans           Boolean  @default(true)
+  includeSessions        Boolean  @default(true)
+  includeBuilds          Boolean  @default(true)
+  includeWorkflows       Boolean  @default(true)
+  includeCommands        Boolean  @default(true)
+  includeGitHubActions   Boolean  @default(true)
+  includeGitLabPipelines Boolean  @default(true)
+  updatedAt              DateTime @updatedAt
+}
+
 model WebPushSettings {
   id               String    @id
   vapidPublicKey   String?

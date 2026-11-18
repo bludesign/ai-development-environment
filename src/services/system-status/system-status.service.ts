@@ -276,7 +276,12 @@ export class SystemStatusService {
         where: {
           kind: { in: ["PLAN", "SESSION"] },
           archivedAt: null,
-          status: { in: ["QUEUED", "IN_PROGRESS", "PAUSED"] },
+          status: { in: ["QUEUED", "IN_PROGRESS"] },
+          questionBatches: { none: { status: "PENDING" } },
+          NOT: [
+            { phase: { endsWith: "_FAILED" } },
+            { phase: "IMPORTED_ACTIVE_COLLISION" },
+          ],
         },
         _count: { _all: true },
       }),
@@ -286,15 +291,12 @@ export class SystemStatusService {
       prisma.workflowRun.count({
         where: {
           archivedAt: null,
-          status: {
-            in: [
-              "QUEUED",
-              "RUNNING",
-              "PAUSING",
-              "PAUSED",
-              "WAITING",
-              "BLOCKED",
-            ],
+          status: { in: ["QUEUED", "RUNNING", "PAUSING"] },
+          attempts: {
+            none: {
+              supersededAt: null,
+              questionBatches: { some: { status: "PENDING" } },
+            },
           },
         },
       }),
@@ -317,7 +319,13 @@ export class SystemStatusService {
 
   async status(
     includeDiskSpace = true,
-    { includeUnfinishedWork = false }: { includeUnfinishedWork?: boolean } = {},
+    {
+      includeUnfinishedWork = false,
+      liveActivityIntegrations,
+    }: {
+      includeUnfinishedWork?: boolean;
+      liveActivityIntegrations?: { github: boolean; gitlab: boolean };
+    } = {},
   ) {
     const prisma = await getPrismaClient();
     const settings = await actionCenterSettings();
@@ -330,7 +338,12 @@ export class SystemStatusService {
       workflows,
       commands,
       diskSpace,
-      { activeRunsKnown, ...integrations },
+      {
+        activeRunsKnown,
+        githubActiveRunsKnown,
+        gitlabActiveRunsKnown,
+        ...integrations
+      },
       worktrees,
       unfinishedLocalWork,
     ] = await Promise.all([
@@ -371,7 +384,10 @@ export class SystemStatusService {
         where: { archivedAt: null, status: "RUNNING" },
       }),
       includeDiskSpace ? this.diskSpace.overview() : Promise.resolve(undefined),
-      this.integrations?.counts() ?? Promise.resolve(EMPTY_INTEGRATION_COUNTS),
+      this.integrations?.counts({
+        includeHiddenActivity: includeUnfinishedWork,
+        selectedActivityProviders: liveActivityIntegrations,
+      }) ?? Promise.resolve(EMPTY_INTEGRATION_COUNTS),
       settings.showWorktreeCountsInSidebar
         ? prisma.$queryRaw<
             Array<{
@@ -439,7 +455,14 @@ export class SystemStatusService {
         builds,
         workflows,
         commands,
-        ...integrations,
+        ...(settings.showIntegrationCountsInSidebar
+          ? integrations
+          : {
+              pullRequests: null,
+              actions: null,
+              mergeRequests: null,
+              pipelines: null,
+            }),
         dirtyWorktrees: worktreeCounts?.dirtyWorktrees ?? null,
         offMainWorktrees: worktreeCounts?.offMainWorktrees ?? null,
       },
@@ -451,6 +474,8 @@ export class SystemStatusService {
           actions: integrations.actions,
           pipelines: integrations.pipelines,
           integrationsKnown: activeRunsKnown,
+          githubKnown: githubActiveRunsKnown,
+          gitlabKnown: gitlabActiveRunsKnown,
         },
       }),
     };

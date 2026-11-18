@@ -57,6 +57,7 @@ import type { PushNotificationsService } from "@/services/push-notifications";
 import type { CredentialService } from "@/services/credentials";
 import { createCredentialResolvers } from "./resolvers/credentials";
 import { createNotificationsResolvers } from "./resolvers/notifications";
+import { createLiveActivitySettingsResolvers } from "./resolvers/live-activity-settings";
 import type { NotificationsService } from "@/services/notifications";
 import type { PollingService } from "@/services/polling";
 import { createPollingResolvers } from "./resolvers/polling";
@@ -164,6 +165,7 @@ export const createSchema = (
     createCacheServerResolvers(cacheServerService),
     createCredentialResolvers(credentialService),
     createNotificationsResolvers(notificationsService),
+    createLiveActivitySettingsResolvers(),
     createPollingResolvers(pollingService),
     createModelCostResolvers(modelCostsService),
     createRunResolvers(runsService),
