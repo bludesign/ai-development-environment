@@ -1990,27 +1990,29 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
     >
       <CardHeader className="grid-cols-1! @md/card-header:grid-cols-[minmax(0,1fr)_auto]!">
         <CardTitle className="min-w-0">
-          <Button
-            aria-expanded={expanded}
-            className="h-auto w-full max-w-full justify-start gap-1 p-1 text-left"
-            onClick={() => void toggle()}
-            variant="ghost"
-          >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-            <span className="truncate font-mono">
-              {worktree.branch ??
-                worktree.headSha?.slice(0, 10) ??
-                t("detached")}
-            </span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              aria-expanded={expanded}
+              className="h-auto min-w-0 flex-1 justify-start gap-1 p-1 text-left"
+              onClick={() => void toggle()}
+              variant="ghost"
+            >
+              {expanded ? <ChevronDown /> : <ChevronRight />}
+              <span className="truncate font-mono">
+                {worktree.branch ??
+                  worktree.headSha?.slice(0, 10) ??
+                  t("detached")}
+              </span>
+            </Button>
+            <WorktreeRunBadges
+              counts={props.overview.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} />
           )}
-          <WorktreeRunBadges
-            counts={props.overview.inProgressRunCounts?.find(
-              (count) => count.worktreeId === worktree.id,
-            )}
-          />
         </CardTitle>
         <CardAction className="col-start-1 row-span-1 row-start-auto flex max-w-full flex-wrap items-center justify-start gap-1 justify-self-start @md/card-header:col-start-2 @md/card-header:row-span-2 @md/card-header:row-start-1 @md/card-header:justify-end @md/card-header:justify-self-end">
           {isDefault && <Badge variant="outline">{t("defaultBranch")}</Badge>}
@@ -4616,23 +4618,27 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
         }}
       >
         <TableCell>
-          <Button
-            aria-expanded={expanded}
-            className="max-w-full px-0 font-mono"
-            onClick={() => void expand()}
-            variant="ghost"
-          >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-            <span className="truncate">{worktree.branch ?? t("detached")}</span>
-          </Button>
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              aria-expanded={expanded}
+              className="min-w-0 max-w-full px-0 font-mono"
+              onClick={() => void expand()}
+              variant="ghost"
+            >
+              {expanded ? <ChevronDown /> : <ChevronRight />}
+              <span className="truncate">
+                {worktree.branch ?? t("detached")}
+              </span>
+            </Button>
+            <WorktreeRunBadges
+              counts={props.overview.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} compact />
           )}
-          <WorktreeRunBadges
-            counts={props.overview.inProgressRunCounts?.find(
-              (count) => count.worktreeId === worktree.id,
-            )}
-          />
         </TableCell>
         <TableCell className="font-mono text-xs">
           {displayedWorktreePath(worktree.folder, baseRepoDirectory)}

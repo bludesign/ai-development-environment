@@ -25,7 +25,11 @@ async function waitForVisualSettle(page: Page): Promise<void> {
   });
 }
 
-async function scrollToLazyTarget(page: Page, selector: string) {
+async function scrollToLazyTarget(
+  page: Page,
+  selector: string,
+  block: ScrollLogicalPosition = "center",
+) {
   const target = page.locator(selector);
   const scroller = page.locator("main");
   for (
@@ -45,9 +49,22 @@ async function scrollToLazyTarget(page: Page, selector: string) {
     if (!moved) break;
   }
   await target.waitFor({ state: "attached", timeout: 5_000 });
-  await target.evaluate((element) =>
-    element.scrollIntoView({ behavior: "instant", block: "center" }),
-  );
+  await target.evaluate((element, block) => {
+    element.scrollIntoView({ behavior: "instant", block });
+    if (block === "start") {
+      const main = element.closest("main");
+      const header = main?.parentElement?.querySelector(":scope > header");
+      if (header) {
+        main?.scrollBy({
+          top:
+            element.getBoundingClientRect().top -
+            header.getBoundingClientRect().bottom -
+            8,
+          behavior: "instant",
+        });
+      }
+    }
+  }, block);
 }
 
 /**
@@ -161,16 +178,25 @@ test.describe("app screenshots", () => {
         ).toBeEnabled({ timeout: 30_000 });
       }
       if (route.scrollTo) {
-        await scrollToLazyTarget(page, route.scrollTo);
+        await scrollToLazyTarget(
+          page,
+          route.scrollTo,
+          route.name === "worktree-failing-pipeline" &&
+            testInfo.project.name.startsWith("mobile")
+            ? "start"
+            : "center",
+        );
       }
       if (route.name === "worktree-failing-pipeline") {
         const card = page.locator(route.scrollTo!);
-        await expect(
-          card.getByText("1 session in progress", { exact: true }),
-        ).toBeVisible();
-        await expect(
-          card.getByText("1 plan in progress", { exact: true }),
-        ).toBeVisible();
+        const sessionBadge = card.getByTitle("1 session in progress", {
+          exact: true,
+        });
+        const planBadge = card.getByTitle("1 plan in progress", {
+          exact: true,
+        });
+        await expect(sessionBadge).toBeVisible();
+        await expect(planBadge).toBeVisible();
         await expect(
           card.getByText("Pipeline failing", { exact: true }),
         ).toBeVisible();
@@ -180,6 +206,31 @@ test.describe("app screenshots", () => {
             exact: true,
           }),
         ).toBeVisible();
+        const badges = await sessionBadge.evaluate((badge) => {
+          const group = badge.parentElement!;
+          const row = group.parentElement!;
+          const title = row.querySelector("button")!.getBoundingClientRect();
+          const badgeRect = badge.getBoundingClientRect();
+          const planBadge = group.lastElementChild!;
+          const card = badge.closest('[data-slot="card"]')!;
+          const heightWithBadges = card.getBoundingClientRect().height;
+          group.style.display = "none";
+          const heightWithoutBadges = card.getBoundingClientRect().height;
+          group.style.removeProperty("display");
+          return {
+            onTitleRow:
+              badgeRect.top >= title.top && badgeRect.bottom <= title.bottom,
+            equalHeight: heightWithBadges === heightWithoutBadges,
+            distinctColors:
+              getComputedStyle(badge).backgroundColor !==
+              getComputedStyle(planBadge).backgroundColor,
+          };
+        });
+        expect(badges).toEqual({
+          onTitleRow: true,
+          equalHeight: true,
+          distinctColors: true,
+        });
       }
       if (route.sessionAgents) {
         const agents = page.getByTestId("run-agents-card");

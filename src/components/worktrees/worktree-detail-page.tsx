@@ -818,11 +818,18 @@ function LoadedWorktreeDetail({
           <p className="text-sm text-muted-foreground">
             {entry.group.repository.name} · {entry.agentGroup.agent.name}
           </p>
-          <h1 className="mt-1 truncate font-mono text-2xl font-semibold tracking-tight">
-            {worktree.branch ??
-              worktree.headSha?.slice(0, 10) ??
-              wt("detached")}
-          </h1>
+          <div className="mt-1 flex items-center gap-2">
+            <h1 className="min-w-0 truncate font-mono text-2xl font-semibold tracking-tight">
+              {worktree.branch ??
+                worktree.headSha?.slice(0, 10) ??
+                wt("detached")}
+            </h1>
+            <WorktreeRunBadges
+              counts={overview?.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           <p
             className="mt-1 truncate font-mono text-xs text-muted-foreground"
             title={worktree.folder}
@@ -847,11 +854,6 @@ function LoadedWorktreeDetail({
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...managementProps} />
           )}
-          <WorktreeRunBadges
-            counts={overview?.inProgressRunCounts?.find(
-              (count) => count.worktreeId === worktree.id,
-            )}
-          />
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
