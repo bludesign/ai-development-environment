@@ -920,6 +920,87 @@ describe("WorktreeDetailPage", () => {
     await waitFor(() => expect(overviewRequestCount()).toBe(beforeEvents + 1));
   });
 
+  test("scopes GitLab updates to the checkout and keeps build pagination in flight", async () => {
+    const data = overview();
+    const worktree = data.agents[0]!.codebases[0]!.worktrees[0]!;
+    worktree.gitLabProjectId = "project-1";
+    let pipelineSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (
+          operation: { query: string },
+          sink: { next: (value: unknown) => void },
+        ) => {
+          if (operation.query.includes("WorktreeDetailGitLabPipelinesChanged"))
+            pipelineSink = sink;
+          return vi.fn();
+        },
+      ),
+    } as never);
+
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({
+      ...buildHistoryItem,
+      id: `build-${index + 1}`,
+      artifacts: [],
+    }));
+    const olderBuild = {
+      ...firstPage[0]!,
+      id: "build-older",
+      snapshot: { configuration: { name: "Older paginated build" } },
+    };
+    const olderPage = { items: [olderBuild], nextCursor: null };
+    const pagination = Promise.withResolvers<typeof olderPage>();
+    let paginationSignal: AbortSignal | undefined;
+    request.mockImplementation(async (query, variables, options) => {
+      if (query.includes("WorktreeDetailOverview")) {
+        const expanded = (variables?.buildFirst as number) > 50;
+        return {
+          worktreeOverview: data,
+          builds: {
+            items: expanded ? [...firstPage, olderBuild] : firstPage,
+            nextCursor: expanded ? null : "cursor-older",
+          },
+        } as never;
+      }
+      if (query.includes("WorktreeDetailBuilds")) {
+        paginationSignal = options?.signal;
+        return { builds: await pagination.promise } as never;
+      }
+      if (query.includes("InspectWorktree")) {
+        return { inspectWorktree: initialDetail } as never;
+      }
+      throw new Error(`Unexpected request: ${query}`);
+    });
+    const notifyPipeline = (projectId: string, sha: string) =>
+      pipelineSink!.next({
+        data: { gitlabPipelineStatusChanged: { projectId, sha } },
+      });
+    const overviewRequestCount = () =>
+      request.mock.calls.filter(([query]) =>
+        query.includes("WorktreeDetailOverview"),
+      ).length;
+
+    render(<WorktreeDetailPage worktreeId={worktree.id} />);
+    const loadMore = await screen.findByRole("button", { name: "Load more" });
+    const initialRequests = overviewRequestCount();
+    notifyPipeline("other-project", worktree.headSha!);
+    notifyPipeline(worktree.gitLabProjectId, "older-commit");
+    expect(overviewRequestCount()).toBe(initialRequests);
+
+    fireEvent.click(loadMore);
+    await waitFor(() => expect(paginationSignal).toBeDefined());
+    notifyPipeline(worktree.gitLabProjectId, worktree.headSha!);
+    expect(paginationSignal?.aborted).toBe(false);
+    expect(overviewRequestCount()).toBe(initialRequests);
+
+    await act(async () => pagination.resolve(olderPage));
+    expect(await screen.findByText("Older paginated build")).toBeDefined();
+    await waitFor(() =>
+      expect(overviewRequestCount()).toBe(initialRequests + 1),
+    );
+    expect(screen.getByText("Older paginated build")).toBeDefined();
+  });
+
   test("adds and removes Android in the build picker when repository settings change", async () => {
     const response = overview({ iosBuildConfigured: true });
     const { agent, codebases } = response.agents[0]!;

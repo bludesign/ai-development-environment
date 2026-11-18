@@ -46,6 +46,17 @@ import {
   autoMergeTicketTransitionWarning,
 } from "./merge-follow-ups";
 import type { WorktreesService } from "./worktrees.service";
+import type { GitLabService } from "@/services/gitlab";
+import {
+  advancePipelineRepair,
+  cancelPipelineRepair,
+  pipelineWorkflowSelection,
+  PipelineRepairError,
+  requirePipelineRepairCapability,
+  validatePipelineWorkflow,
+  type PipelineWorkflowInput,
+  type PipelineRepair,
+} from "./pipeline-repair";
 import {
   advanceMergeSync,
   cancelMergeSync,
@@ -94,6 +105,11 @@ function repositoryParts(nameWithOwner: string): {
   return { owner, name };
 }
 
+function repositoryBranchParts(origin: string, branch: string) {
+  const { owner, name } = repositoryParts(origin.slice("github.com/".length));
+  return [owner, name, branch] as const;
+}
+
 function resultOutcome(resultJson: string | null): string | null {
   if (!resultJson) return null;
   try {
@@ -131,6 +147,8 @@ function syncView(rule: {
   state: string;
   conflictWorkflowId: string | null;
   conflictWorkflowChoice: string | null;
+  pipelineWorkflowId?: string | null;
+  pipelineWorkflowChoice?: string | null;
   lastError: string | null;
   pauseReason: string | null;
   lastSyncedAt: Date | null;
@@ -141,6 +159,8 @@ function syncView(rule: {
     state: rule.state,
     conflictWorkflowId: rule.conflictWorkflowId,
     conflictWorkflowChoice: rule.conflictWorkflowChoice,
+    pipelineWorkflowId: rule.pipelineWorkflowId ?? null,
+    pipelineWorkflowChoice: rule.pipelineWorkflowChoice ?? null,
     lastError: rule.lastError,
     pauseReason: rule.pauseReason,
     lastSyncedAt: rule.lastSyncedAt?.toISOString() ?? null,
@@ -247,6 +267,7 @@ export class WorktreeAutomationService {
     private readonly workflows: WorkflowsService,
     private readonly agentControl: AgentControlService,
     private readonly polling?: PollingService,
+    private readonly gitlab?: GitLabService,
   ) {
     this.agentControl.registerCompletionObserver(async (job) => {
       if (job.codebaseId) this.changed();
@@ -293,8 +314,15 @@ export class WorktreeAutomationService {
     rule: {
       activeJobId: string | null;
       workflowRunId: string | null;
+      pipelineRepairJson?: string | null;
     } | null,
   ): Promise<void> {
+    if (rule?.pipelineRepairJson)
+      await cancelPipelineRepair(
+        JSON.parse(rule.pipelineRepairJson),
+        this.workflows,
+        this.agentControl,
+      );
     if (rule?.activeJobId) {
       await this.agentControl.cancelJob(rule.activeJobId).catch(() => null);
     }
@@ -313,11 +341,23 @@ export class WorktreeAutomationService {
     return rule ? syncView(rule) : null;
   }
 
-  async configureAutoSync(input: {
-    worktreeId: string;
-    conflictWorkflowId?: string | null;
-    conflictWorkflowChoice?: string | null;
-  }) {
+  async configureAutoSync(
+    input: PipelineWorkflowInput & {
+      worktreeId: string;
+      conflictWorkflowId?: string | null;
+      conflictWorkflowChoice?: string | null;
+    },
+  ) {
+    return withMergeSyncLock(input.worktreeId, () => this.saveAutoSync(input));
+  }
+
+  private async saveAutoSync(
+    input: PipelineWorkflowInput & {
+      worktreeId: string;
+      conflictWorkflowId?: string | null;
+      conflictWorkflowChoice?: string | null;
+    },
+  ) {
     const prisma = await getPrismaClient();
     const worktree = await prisma.worktree.findFirst({
       where: { id: input.worktreeId, missingAt: null },
@@ -330,6 +370,7 @@ export class WorktreeAutomationService {
             repositoryId: true,
             defaultBranch: true,
             repository: { select: { defaultBranchPatternsJson: true } },
+            agent: { select: { capabilitiesJson: true } },
           },
         },
       },
@@ -339,12 +380,25 @@ export class WorktreeAutomationService {
       throw new Error(
         "Default branches use the repository keep up to date setting instead of Auto Sync",
       );
-    await this.stopAutoSyncWork(
-      await prisma.worktreeAutoSync.findUnique({
-        where: { worktreeId: worktree.id },
-        select: { activeJobId: true, workflowRunId: true },
-      }),
+    const previous = await prisma.worktreeAutoSync.findUnique({
+      where: { worktreeId: worktree.id },
+    });
+    const pipelineWorkflow = pipelineWorkflowSelection(
+      input,
+      previous?.pipelineWorkflowId
+        ? {
+            id: previous.pipelineWorkflowId,
+            choice: previous.pipelineWorkflowChoice,
+          }
+        : undefined,
     );
+    if (pipelineWorkflow) {
+      requirePipelineRepairCapability(worktree.codebase.agent);
+      await validatePipelineWorkflow(
+        worktree.codebase.repositoryId,
+        pipelineWorkflow,
+      );
+    }
     const workflowId = input.conflictWorkflowId?.trim() || null;
     if (workflowId) {
       const workflow = await prisma.workflow.findUnique({
@@ -380,6 +434,7 @@ export class WorktreeAutomationService {
         );
       }
     }
+    await this.stopAutoSyncWork(previous);
     const rule = await prisma.worktreeAutoSync.upsert({
       where: { worktreeId: worktree.id },
       create: {
@@ -387,12 +442,18 @@ export class WorktreeAutomationService {
         branch: worktree.branch,
         conflictWorkflowId: workflowId,
         conflictWorkflowChoice: input.conflictWorkflowChoice?.trim() || null,
+        pipelineWorkflowId: pipelineWorkflow?.id ?? null,
+        pipelineWorkflowChoice: pipelineWorkflow?.choice ?? null,
+        pipelineRepairJson: null,
       },
       update: {
         state: "ACTIVE",
         branch: worktree.branch,
         conflictWorkflowId: workflowId,
         conflictWorkflowChoice: input.conflictWorkflowChoice?.trim() || null,
+        pipelineWorkflowId: pipelineWorkflow?.id ?? null,
+        pipelineWorkflowChoice: pipelineWorkflow?.choice ?? null,
+        pipelineRepairJson: null,
         activeJobId: null,
         workflowRunId: null,
         lastError: null,
@@ -405,10 +466,18 @@ export class WorktreeAutomationService {
   }
 
   async cancelAutoSync(worktreeId: string): Promise<boolean> {
+    return withMergeSyncLock(worktreeId, () => this.removeAutoSync(worktreeId));
+  }
+
+  private async removeAutoSync(worktreeId: string) {
     const prisma = await getPrismaClient();
     const rule = await prisma.worktreeAutoSync.findUnique({
       where: { worktreeId },
-      select: { activeJobId: true, workflowRunId: true },
+      select: {
+        activeJobId: true,
+        workflowRunId: true,
+        pipelineRepairJson: true,
+      },
     });
     await this.stopAutoSyncWork(rule);
     const removed = await prisma.worktreeAutoSync.deleteMany({
@@ -419,13 +488,22 @@ export class WorktreeAutomationService {
   }
 
   async retryAutoSync(worktreeId: string) {
+    return withMergeSyncLock(worktreeId, () => this.resetAutoSync(worktreeId));
+  }
+
+  private async resetAutoSync(worktreeId: string) {
     const prisma = await getPrismaClient();
+    const previous = await prisma.worktreeAutoSync.findUnique({
+      where: { worktreeId },
+    });
+    if (previous?.pipelineRepairJson) await this.stopAutoSyncWork(previous);
     const rule = await prisma.worktreeAutoSync.update({
       where: { worktreeId },
       data: {
         state: "ACTIVE",
         activeJobId: null,
         workflowRunId: null,
+        pipelineRepairJson: null,
         lastError: null,
         pauseReason: null,
       },
@@ -911,10 +989,13 @@ export class WorktreeAutomationService {
   ) {
     if (
       !input.autoSync &&
-      (input.conflictWorkflowId || input.conflictWorkflowChoice)
+      (input.conflictWorkflowId ||
+        input.conflictWorkflowChoice ||
+        input.pipelineWorkflowId ||
+        input.pipelineWorkflowChoice)
     )
       throw new Error(
-        "Automatic conflict resolution requires Auto sync branch.",
+        "Automatic workflow resolution requires Auto sync branch.",
       );
     return this.withMergeLock(
       this.mergeKey(input.repositoryNameWithOwner, input.pullRequestNumber),
@@ -1074,6 +1155,7 @@ export class WorktreeAutomationService {
                 id: worktree.id,
               },
               input,
+              !retargeting ? existing?.syncStateJson : null,
             );
             const data = {
               autoSync: true,
@@ -1732,12 +1814,76 @@ export class WorktreeAutomationService {
     return updated.count ? data : null;
   }
 
+  private async repairAutoSyncPipeline(rule: WorktreeAutoSync) {
+    const prisma = await getPrismaClient();
+    const worktree = await prisma.worktree.findUnique({
+      where: { id: rule.worktreeId },
+      include: {
+        gitLabMergeRequest: { select: { projectId: true, iid: true } },
+        codebase: {
+          include: {
+            repository: true,
+            agent: { select: { capabilitiesJson: true } },
+          },
+        },
+      },
+    });
+    if (!worktree || !worktree.branch || !rule.pipelineWorkflowId) return;
+    const origin = worktree.codebase.repository.canonicalOrigin;
+    let observed;
+    try {
+      observed = origin.toLowerCase().startsWith("github.com/")
+        ? await this.github.branchPipelineCI(
+            ...repositoryBranchParts(origin, worktree.branch),
+          )
+        : await this.gitlab?.branchPipelineCI(
+            origin,
+            worktree.branch,
+            worktree.gitLabMergeRequest,
+          );
+    } catch {
+      // Provider reads for the repair path allow no stale fallback. Wait for a fresh result.
+    }
+    await advancePipelineRepair({
+      worktree,
+      selection: {
+        id: rule.pipelineWorkflowId,
+        choice: rule.pipelineWorkflowChoice,
+      },
+      repair: rule.pipelineRepairJson
+        ? (JSON.parse(rule.pipelineRepairJson) as PipelineRepair)
+        : undefined,
+      headSha: observed?.headSha ?? null,
+      ci: observed?.ci,
+      workflows: this.workflows,
+      save: async (repair) => {
+        await prisma.worktreeAutoSync.updateMany({
+          where: {
+            worktreeId: rule.worktreeId,
+            state: rule.state,
+            pipelineRepairJson: rule.pipelineRepairJson,
+          },
+          data: {
+            state: repair ? "RESOLVING_PIPELINE" : "ACTIVE",
+            pipelineRepairJson: repair ? JSON.stringify(repair) : null,
+            lastError: null,
+            pauseReason: null,
+          },
+        });
+      },
+    });
+  }
+
   private async reconcileAutoSync(): Promise<void> {
     const prisma = await getPrismaClient();
     const rules = await prisma.worktreeAutoSync.findMany({
       where: {
         OR: [
-          { state: { in: ["ACTIVE", "SYNCING", "RESOLVING"] } },
+          {
+            state: {
+              in: ["ACTIVE", "SYNCING", "RESOLVING", "RESOLVING_PIPELINE"],
+            },
+          },
           { state: "PAUSED" },
         ],
       },
@@ -1746,12 +1892,17 @@ export class WorktreeAutomationService {
     });
     for (const savedRule of rules) {
       await withMergeSyncLock(savedRule.worktreeId, async () => {
-        let rule = savedRule;
+        let rule = await prisma.worktreeAutoSync.findUnique({
+          where: { worktreeId: savedRule.worktreeId },
+          include: { worktree: { select: { codebaseId: true } } },
+        });
+        if (!rule) return;
         try {
           const current = await prisma.worktree.findUnique({
             where: { id: rule.worktreeId },
             select: {
               branch: true,
+              missingAt: true,
               codebase: {
                 select: {
                   defaultBranch: true,
@@ -1773,10 +1924,18 @@ export class WorktreeAutomationService {
             rule = { ...rule, ...recovered };
           }
           if (await managedMergeOwnsWorktree(rule.worktreeId)) return;
+          if (rule.pipelineWorkflowId && current?.missingAt)
+            throw new PipelineRepairError(
+              "The worktree is missing. Restore it before resuming Auto Sync.",
+            );
           if (current?.branch !== rule.branch) {
             throw new Error(
               "Auto Sync paused because the worktree branch changed",
             );
+          }
+          if (rule.pipelineWorkflowId && rule.state === "RESOLVING_PIPELINE") {
+            await this.repairAutoSyncPipeline(rule);
+            return;
           }
           if (rule.state === "ACTIVE") {
             const recent = await prisma.agentJob.findMany({
@@ -1797,8 +1956,11 @@ export class WorktreeAutomationService {
                   resultOutcome(job.resultJson) ?? "",
                 ),
               )
-            )
+            ) {
+              if (rule.pipelineWorkflowId)
+                await this.repairAutoSyncPipeline(rule);
               return;
+            }
             const job = await this.worktrees.createAutoSyncJob(
               rule.worktreeId,
               "SYNC",
@@ -1924,6 +2086,7 @@ export class WorktreeAutomationService {
               ...(outcome === "SYNCED" ? { lastSyncedAt: new Date() } : {}),
             },
           });
+          if (rule.pipelineWorkflowId) this.rerunRequested = true;
         } catch (error) {
           // No job was dispatched. Keep the phase and workflow identity so the
           // next completion or polling pass can take the newly available slot.
@@ -1939,17 +2102,23 @@ export class WorktreeAutomationService {
           const transient =
             /offline|busy|already has an active job|temporarily/i.test(message);
           if (transient && rule.state === "RESOLVING") return;
-          const pauseReason = /branch changed/i.test(message)
-            ? "BRANCH_CHANGED"
-            : "ERROR";
+          const pipelineError = error instanceof PipelineRepairError;
+          const pauseReason = pipelineError
+            ? "PIPELINE_REPAIR"
+            : /branch changed/i.test(message)
+              ? "BRANCH_CHANGED"
+              : "ERROR";
+          if (rule.pipelineRepairJson) {
+            await this.stopAutoSyncWork(rule);
+          }
           await prisma.worktreeAutoSync.updateMany({
             where: { worktreeId: rule.worktreeId },
             data: {
-              state: transient ? "ACTIVE" : "PAUSED",
+              state: transient && !pipelineError ? "ACTIVE" : "PAUSED",
               activeJobId: null,
               workflowRunId: null,
               lastError: message,
-              pauseReason: transient ? null : pauseReason,
+              pauseReason: transient && !pipelineError ? null : pauseReason,
             },
           });
         } finally {
@@ -2202,7 +2371,12 @@ export class WorktreeAutomationService {
                       repository.name,
                       rule.pullRequestNumber,
                     ),
-                  save: async ({ acceptedHeadSha, ...data }) => {
+                  save: async ({
+                    acceptedHeadSha,
+                    expectedSyncStateJson,
+                    expectedState,
+                    ...data
+                  }) => {
                     if (acceptedHeadSha && rule.postMergeSwitchJson) {
                       rule = {
                         ...rule,
@@ -2213,7 +2387,15 @@ export class WorktreeAutomationService {
                       };
                     }
                     return prisma.worktreeAutoMerge.update({
-                      where: { worktreeId: rule.worktreeId },
+                      where: {
+                        worktreeId: rule.worktreeId,
+                        ...(expectedState
+                          ? {
+                              state: expectedState,
+                              syncStateJson: expectedSyncStateJson,
+                            }
+                          : {}),
+                      },
                       data: {
                         ...data,
                         ...(acceptedHeadSha

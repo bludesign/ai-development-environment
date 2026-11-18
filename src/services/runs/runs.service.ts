@@ -236,15 +236,15 @@ function runHref(run: { id: string; kind: string }): string {
  * A working run reports this every few seconds, so it stays off the topics
  * every open tab rereads for.
  */
-function publishRunActivity(runId: string): void {
+function publishRunActivity(runId: string, stateChanged = false): void {
   const payload = { runChanged: { id: runId } };
   agentEventBus.publish(runChangedTopic(runId), payload);
-  agentEventBus.publish(RUNS_CHANGED_TOPIC, payload);
+  agentEventBus.publish(RUNS_CHANGED_TOPIC, { ...payload, stateChanged });
 }
 
 /** A run changed state, which the sidebar totals and Action Center count. */
 function publishRun(runId: string): void {
-  publishRunActivity(runId);
+  publishRunActivity(runId, true);
   agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
     sidebarStatusChanged: true,
   });
@@ -3937,9 +3937,14 @@ export class RunsService {
     appId?: string | null;
     provider?: string | null;
     origin?: string | null;
+    stateOnly?: boolean | null;
   }) {
-    const source = agentEventBus.iterate<{ runChanged: { id: string } }>(
+    const source = agentEventBus.iterate<{
+      runChanged: { id: string };
+      stateChanged?: boolean;
+    }>(
       RUNS_CHANGED_TOPIC,
+      (payload) => !input.stateOnly || !!payload.stateChanged,
     );
     return filterAsyncIterator(source, async (payload) => {
       if (payload.runChanged.id === "drafts") return false;

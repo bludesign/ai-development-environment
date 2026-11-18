@@ -114,11 +114,17 @@ export type WorkflowSummary = {
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   overlapScope: "WORKTREE" | "GLOBAL";
   maxConcurrentRuns: number;
+  maxPipelineRepairRetries?: number;
   completionNotificationsEnabled: boolean;
   exclusiveWorktree: boolean;
   worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";
   blocksGitOperations: boolean;
-  quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE";
+  quickActionKind:
+    | "STANDARD"
+    | "MERGE_CONFLICT"
+    | "FAILING_PIPELINE"
+    | "GITHUB_ACTIONS"
+    | "NONE";
   quickActionIconKey: string;
   quickActionButtonVariant: "default" | "outline" | "secondary" | "destructive";
   quickActionRepositories: Array<{

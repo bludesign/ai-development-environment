@@ -36,6 +36,14 @@ const mergeOptions = {
       triggerChoices: [{ key: "reviewed", label: "Resolve and verify" }],
     },
   ],
+  failingPipelineWorkflows: [
+    {
+      id: "repair-search-pipeline",
+      name: "Repair search pipeline",
+      hasPlainTrigger: false,
+      triggerChoices: [{ key: "diagnose", label: "Diagnose and fix" }],
+    },
+  ],
   defaultConflictWorkflowId: null,
   defaultConflictWorkflowChoice: null,
   conflictWorkflowBlockedReason: null,
@@ -131,6 +139,25 @@ for (const automatic of [false, true]) {
         .getByRole("combobox", { name: "Merge conflict workflow trigger" })
         .click();
       await page.getByRole("option", { name: "Resolve and verify" }).click();
+      await expect(submit).toBeEnabled();
+      await dialog
+        .getByRole("checkbox", { name: "Auto resolve failing pipelines" })
+        .check();
+      await expect(submit).toBeDisabled();
+      await dialog
+        .getByRole("combobox", {
+          name: "Failing pipeline workflow",
+          exact: true,
+        })
+        .click();
+      await page
+        .getByRole("option", { name: "Repair search pipeline" })
+        .click();
+      await expect(submit).toBeDisabled();
+      await dialog
+        .getByRole("combobox", { name: "Failing pipeline workflow trigger" })
+        .click();
+      await page.getByRole("option", { name: "Diagnose and fix" }).click();
       await expect(submit).toBeEnabled();
     }
     await expect(dialog.getByText("Update targeting worktrees")).toBeVisible();

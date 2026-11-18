@@ -71,6 +71,7 @@ function fixture() {
       findMany: vi.fn(async () => []),
     },
     gitHubRepository: { findMany: vi.fn(async () => []) },
+    workflow: { findMany: vi.fn(async () => []) },
     jiraProject: { findUnique: vi.fn(async () => ({ doneStatusId: "done" })) },
     worktreeAutoMerge: {
       findFirst: vi.fn(async () => attached()),

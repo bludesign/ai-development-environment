@@ -7,10 +7,14 @@ vi.mock("@/services/operation-locks/operation-locks.service", () => ({
 const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
-import { WORKTREE_AUTO_SYNC_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_AUTO_SYNC_JOB_KIND,
+  WORKTREE_PUSH_EVIDENCE_CAPABILITY,
+} from "@ai-development-environment/agent-contract/worktrees";
 import type { WorktreeAutoMerge } from "@/generated/prisma/client";
 import type { AgentControlService } from "@/services/agent-control";
 import type { GitHubService } from "@/services/github";
+import type { GitLabService } from "@/services/gitlab";
 import type { JiraService } from "@/services/jira";
 import type { PollingService } from "@/services/polling";
 import type { WorkflowsService } from "@/services/workflows";
@@ -76,6 +80,7 @@ function retargetFixture() {
     headSha: "a".repeat(40),
     codebase: {
       defaultBranch: "main",
+      agent: { capabilitiesJson: "[]" },
       repository: {
         canonicalOrigin: "github.com/acme/widgets",
         defaultBranchPatternsJson: "[]",
@@ -120,6 +125,7 @@ function retargetFixture() {
       findFirst: vi.fn().mockResolvedValue(worktree),
       findUnique: vi.fn().mockResolvedValue(worktree),
     },
+    worktreeAutoSync: { findUnique: vi.fn().mockResolvedValue(null) },
     worktreeAutoMerge: {
       findUnique: vi.fn(async () => ({ ...rule })),
       findMany: vi.fn(async () => [{ ...rule, worktree }]),
@@ -214,6 +220,16 @@ describe("WorktreeAutomationService", () => {
   });
 
   afterEach(() => vi.useRealTimers());
+
+  test("rejects Auto Sync repair setup when the agent cannot verify pushes", async () => {
+    const f = retargetFixture();
+    await expect(
+      f.automation.configureAutoSync({
+        worktreeId: f.worktree.id,
+        pipelineWorkflowId: "pipeline-workflow",
+      }),
+    ).rejects.toThrow("Update the agent to use automatic pipeline repair");
+  });
 
   test.each([
     ["MERGING", "main"],
@@ -743,6 +759,9 @@ function syncFixture() {
     branch: "feature",
     conflictWorkflowId: null as string | null,
     conflictWorkflowChoice: null,
+    pipelineWorkflowId: null as string | null,
+    pipelineWorkflowChoice: null,
+    pipelineRepairJson: null as string | null,
     activeJobId: null as string | null,
     workflowRunId: null as string | null,
     lastError: null as string | null,
@@ -766,10 +785,15 @@ function syncFixture() {
   }> = [];
   const database = {
     worktreeAutoSync: {
+      findUnique: vi.fn(async ({ where }) =>
+        rules.find((rule) => rule.worktreeId === where.worktreeId),
+      ),
       findMany: vi.fn(async () =>
         rules.filter(
           (row) =>
-            ["ACTIVE", "SYNCING", "RESOLVING"].includes(row.state) ||
+            ["ACTIVE", "SYNCING", "RESOLVING", "RESOLVING_PIPELINE"].includes(
+              row.state,
+            ) ||
             (row.state === "PAUSED" &&
               row.pauseReason === "ERROR" &&
               row.lastError === LEGACY_CODEBASE_BUSY_MESSAGE),
@@ -796,16 +820,38 @@ function syncFixture() {
     },
     worktree: {
       findUnique: vi.fn(async () => ({
+        id: "wt-1",
         branch: "feature",
         codebaseId: "cb",
         folder: "/wt",
         gitDirectory: "/git/wt",
-        codebase: { repository: { canonicalOrigin: "github.com/team/repo" } },
+        headSha: "head",
+        availability: "AVAILABLE",
+        missingAt: null as Date | null,
+        gitLabMergeRequest: null as { projectId: string; iid: number } | null,
+        codebase: {
+          agentId: "agent",
+          repositoryId: "repo",
+          agent: {
+            capabilitiesJson: JSON.stringify([
+              WORKTREE_PUSH_EVIDENCE_CAPABILITY,
+            ]),
+          },
+          repository: { canonicalOrigin: "github.com/team/repo" },
+        },
       })),
     },
     worktreeAutoMerge: { findFirst: vi.fn(async () => null) },
     gitLabMergeOperation: { findFirst: vi.fn(async () => null) },
-    workflowRun: { findMany: vi.fn(async () => [{ id: "resolver" }]) },
+    workflow: { findMany: vi.fn() },
+    workflowRun: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(async ({ where }) =>
+        where.parentRunId ? [] : [{ id: "resolver" }],
+      ),
+    },
+    workflowRunResourceLink: { findMany: vi.fn(async () => []) },
+    workflowWait: { findMany: vi.fn(async () => []) },
     agentJob: {
       findFirst: vi.fn(async () => jobs.at(-1) ?? null),
       findMany: vi.fn(async ({ where }) =>
@@ -838,11 +884,17 @@ function syncFixture() {
     jobs.push(job);
     return job;
   });
-  const workflows = { run: vi.fn(async () => ({ status: "SUCCEEDED" })) };
+  const workflows = {
+    lifecycle: vi.fn(),
+    run: vi.fn(async () => ({ status: "SUCCEEDED" })),
+    trigger: vi.fn().mockResolvedValue({ id: "pipeline-run" }),
+  };
+  const github = { branchPipelineCI: vi.fn() };
+  const gitlab = { branchPipelineCI: vi.fn() };
   const worktrees = { createAutoSyncJob, publishAutomationChange: vi.fn() };
   const service = new WorktreeAutomationService(
     worktrees as unknown as WorktreesService,
-    {} as GitHubService,
+    github as unknown as GitHubService,
     {} as JiraService,
     workflows as unknown as WorkflowsService,
     {
@@ -850,6 +902,8 @@ function syncFixture() {
       registerConnectionHandler: vi.fn(),
       getJob: vi.fn(async (id: string) => jobs.find((job) => job.id === id)),
     } as unknown as AgentControlService,
+    undefined,
+    gitlab as unknown as GitLabService,
   );
   const tick = () =>
     (
@@ -870,6 +924,8 @@ function syncFixture() {
     rules,
     jobs,
     database,
+    github,
+    gitlab,
     createAutoSyncJob,
     workflows,
     service,
@@ -887,6 +943,127 @@ describe("Auto Sync contention and recovery", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
   });
+
+  test("repairs the synced remote head and pauses when the initial attempt leaves CI failing", async () => {
+    const f = syncFixture();
+    f.rule.pipelineWorkflowId = "repair-workflow";
+    const ci = {
+      passed: false,
+      failures: [
+        {
+          provider: "GITHUB",
+          status: "FAILURE",
+          headSha: "head",
+          id: "ci",
+          url: null,
+        },
+      ],
+    };
+    f.github.branchPipelineCI.mockResolvedValue({ headSha: "outdated", ci });
+    f.database.workflow.findMany.mockResolvedValue([
+      {
+        id: "repair-workflow",
+        maxPipelineRepairRetries: 0,
+        activeVersion: {
+          triggers: [
+            {
+              kind: "RESOURCE_MANUAL",
+              configJson: '{"resourceKind":"WORKTREE"}',
+            },
+          ],
+        },
+      },
+    ]);
+    await f.tick();
+    f.finish();
+    await f.tick();
+    await f.tick();
+    expect(f.rule.state).toBe("ACTIVE");
+    expect(f.workflows.trigger).not.toHaveBeenCalled();
+    f.github.branchPipelineCI.mockResolvedValue({ headSha: "head", ci });
+    await f.tick();
+    expect(f.rule.state).toBe("RESOLVING_PIPELINE");
+    await f.tick();
+    expect(f.workflows.trigger).toHaveBeenCalledOnce();
+    f.database.workflowRun.findUnique.mockResolvedValue({
+      id: "pipeline-run",
+      finishedAt: new Date(),
+      status: "SUCCEEDED",
+    });
+    await f.tick();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await f.tick();
+    expect(f.rule).toMatchObject({
+      state: "PAUSED",
+      pauseReason: "PIPELINE_REPAIR",
+    });
+    expect(f.createAutoSyncJob).toHaveBeenCalledOnce();
+  });
+
+  test("includes the linked merge request when reading GitLab CI", async () => {
+    const f = syncFixture();
+    const worktree = await f.database.worktree.findUnique();
+    const mergeRequest = { projectId: "714", iid: 52 };
+    const origin = "gitlab.com/team/repo";
+    f.rule.pipelineWorkflowId = "repair-workflow";
+    f.database.worktree.findUnique.mockResolvedValue({
+      ...worktree,
+      gitLabMergeRequest: mergeRequest,
+      codebase: {
+        ...worktree.codebase,
+        repository: { canonicalOrigin: origin },
+      },
+    });
+    await f.tick();
+    f.finish();
+    await f.tick();
+    await f.tick();
+    expect(f.gitlab.branchPipelineCI).toHaveBeenCalledWith(
+      origin,
+      "feature",
+      mergeRequest,
+    );
+  });
+
+  test.each([false, true])(
+    "pauses on a missing checkout with pipeline repair in flight = %s",
+    async (repairing) => {
+      const f = syncFixture();
+      const worktree = await f.database.worktree.findUnique();
+      f.rule.pipelineWorkflowId = "repair-workflow";
+      if (repairing) {
+        f.rule.state = "RESOLVING_PIPELINE";
+        f.rule.pipelineRepairJson = JSON.stringify({
+          id: "repair",
+          retryCount: 0,
+        });
+        f.database.workflowRun.findUnique.mockResolvedValue({
+          id: "pipeline-run",
+          status: "RUNNING",
+        });
+      }
+      f.database.worktree.findUnique.mockResolvedValue({
+        ...worktree,
+        missingAt: new Date(),
+      });
+      await f.tick();
+      expect(f.rule).toMatchObject({
+        state: "PAUSED",
+        pauseReason: "PIPELINE_REPAIR",
+        lastError: expect.stringContaining("worktree is missing"),
+      });
+      expect(f.createAutoSyncJob).not.toHaveBeenCalled();
+      expect(f.github.branchPipelineCI).not.toHaveBeenCalled();
+      expect(f.workflows.trigger).not.toHaveBeenCalled();
+      if (repairing)
+        expect(f.workflows.lifecycle).toHaveBeenCalledWith(
+          "pipeline-run",
+          "CANCEL",
+          { ignoreMissing: true },
+        );
+      else expect(f.workflows.lifecycle).not.toHaveBeenCalled();
+    },
+  );
 
   test("waits for another Git operation without pausing or losing its phase", async () => {
     const f = syncFixture();
@@ -1418,6 +1595,14 @@ test("default branch classification stops and removes existing auto sync work", 
   const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
   getPrismaClient.mockResolvedValue({
     worktreeAutoSync: {
+      findUnique: vi.fn().mockResolvedValue({
+        worktreeId: "wt",
+        branch: "feature",
+        state: "SYNCING",
+        activeJobId: "sync-job",
+        workflowRunId: "conflict-workflow",
+        worktree: { codebaseId: "cb" },
+      }),
       findMany: vi.fn().mockResolvedValue([
         {
           worktreeId: "wt",

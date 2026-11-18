@@ -315,6 +315,7 @@ type PullRequestTarget = {
   pullRequestLookupAt: Date | null;
   pullRequest: GitHubPullRequestView | null;
   gitLabMergeRequest: GitLabMergeRequestView | null;
+  gitLabProjectId: string | null;
   gitLabPipelines: GitLabPipelineView[];
   codebase: { repository: { canonicalOrigin: string } };
 };
@@ -1125,8 +1126,14 @@ export class WorktreesService {
       ticketTitle: null as string | null,
       ticketStatus: null as string | null,
       pullRequest,
+      gitHubHeadPipelineStatus: null as GitHubPipelineStatusSnapshotView | null,
+      gitHubPipelineRepositoryId:
+        pullRequest && pullRequest.headRefOid === worktree.headSha
+          ? pullRequest.repositoryGithubId
+          : null,
       gitLabMergeRequest,
       sourceControlRequest: gitLabMergeRequest ?? pullRequest,
+      gitLabProjectId: null as string | null,
       gitLabPipelines: [] as GitLabPipelineView[],
       latestBuild: worktree.builds?.[0]
         ? {
@@ -1466,6 +1473,89 @@ export class WorktreesService {
     }
   }
 
+  private async hydrateGitHubHeadPipelines(
+    worktrees: Array<ReturnType<WorktreesService["view"]>>,
+  ): Promise<void> {
+    const targets = worktrees.flatMap((worktree) => {
+      const { headSha, pullRequest } = worktree;
+      const origin = worktree.codebase.repository.canonicalOrigin;
+      const name = /^github\.com\/([^/]+\/[^/]+)$/i.exec(origin)?.[1];
+      if (!headSha || !name || pullRequest?.headRefOid === headSha) return [];
+      const repositoryName = name.toLowerCase();
+      const pullRequestRepositoryId =
+        pullRequest?.repositoryNameWithOwner.toLowerCase() === repositoryName
+          ? pullRequest.repositoryGithubId
+          : null;
+      return [{ worktree, repositoryName, headSha, pullRequestRepositoryId }];
+    });
+    if (!targets.length) return;
+
+    const trackedRepositories = new Map<string, string>();
+    if (
+      targets.some(({ pullRequestRepositoryId }) => !pullRequestRepositoryId)
+    ) {
+      const prisma = await getPrismaClient();
+      const repositories = await prisma.gitHubRepository.findMany({
+        select: { githubId: true, nameWithOwner: true },
+      });
+      for (const { githubId, nameWithOwner } of repositories)
+        trackedRepositories.set(nameWithOwner.toLowerCase(), githubId);
+    }
+
+    const keys = new Map<
+      string,
+      { repositoryGithubId: string; headSha: string }
+    >();
+    const unknownHeads = new Map<string, Set<string>>();
+    for (const {
+      worktree,
+      repositoryName,
+      headSha,
+      pullRequestRepositoryId,
+    } of targets) {
+      const repositoryGithubId =
+        trackedRepositories.get(repositoryName) ?? pullRequestRepositoryId;
+      if (repositoryGithubId) {
+        worktree.gitHubPipelineRepositoryId = repositoryGithubId;
+        keys.set(`${repositoryGithubId}\0${headSha}`, {
+          repositoryGithubId,
+          headSha,
+        });
+      } else {
+        const repositoryHeads =
+          unknownHeads.get(repositoryName) ?? new Set<string>();
+        repositoryHeads.add(headSha);
+        unknownHeads.set(repositoryName, repositoryHeads);
+      }
+    }
+    const [knownSnapshots, untrackedSnapshots] = await Promise.all([
+      this.pipelineStatus.snapshots([...keys.values()]),
+      this.pipelineStatus.snapshotsForRepositoryHeads(unknownHeads),
+    ]);
+    const byKey = new Map(
+      knownSnapshots.map((snapshot) => [
+        `${snapshot.repositoryGithubId}\0${snapshot.headSha}`,
+        snapshot,
+      ]),
+    );
+    const byName = new Map(
+      untrackedSnapshots.map((snapshot) => [
+        `${snapshot.repositoryNameWithOwner.toLowerCase()}\0${snapshot.headSha}`,
+        snapshot,
+      ]),
+    );
+    for (const { worktree, repositoryName, headSha } of targets) {
+      const repositoryGithubId = worktree.gitHubPipelineRepositoryId;
+      const snapshot =
+        (repositoryGithubId
+          ? byKey.get(`${repositoryGithubId}\0${headSha}`)
+          : byName.get(`${repositoryName}\0${headSha}`)) ?? null;
+      worktree.gitHubHeadPipelineStatus = snapshot;
+      worktree.gitHubPipelineRepositoryId =
+        snapshot?.repositoryGithubId ?? repositoryGithubId;
+    }
+  }
+
   private async hydrateGitLabPipelines(
     worktrees: PullRequestTarget[],
     warn?: EnrichmentReporter,
@@ -1482,6 +1572,7 @@ export class WorktreesService {
       const project = projects.get(
         worktree.codebase.repository.canonicalOrigin,
       );
+      worktree.gitLabProjectId = project?.id ?? null;
       if (!project || !worktree.headSha) continue;
       const key = `${project.id}\0${worktree.headSha}`;
       const group = groups.get(key) ?? {
@@ -1640,6 +1731,7 @@ export class WorktreesService {
           const project = projects.get(
             view.codebase.repository.canonicalOrigin,
           );
+          view.gitLabProjectId = project?.id ?? null;
           view.gitLabPipelines = (
             stored.get(`${project?.id}\0${view.headSha}`) ?? []
           ).map((pipeline) => ({
@@ -1927,7 +2019,9 @@ export class WorktreesService {
         enabled: true,
         archivedAt: null,
         activeVersionId: { not: null },
-        quickActionKind: { in: ["STANDARD", "MERGE_CONFLICT"] },
+        quickActionKind: {
+          in: ["STANDARD", "MERGE_CONFLICT", "FAILING_PIPELINE"],
+        },
         OR: [
           { quickActionRepositories: { none: {} } },
           {
@@ -1983,6 +2077,7 @@ export class WorktreesService {
       androidBuildConfigured: boolean;
       quickActions: typeof eligibleQuickActions;
       mergeConflictQuickActions: typeof eligibleQuickActions;
+      failingPipelineQuickActions: typeof eligibleQuickActions;
     };
     type AgentGroup = {
       agent: View["codebase"]["agent"];
@@ -2002,6 +2097,14 @@ export class WorktreesService {
         const androidProject = worktree.codebase.repository.projects?.find(
           (project) => project.type === "ANDROID_APP",
         );
+        const repositoryActions = eligibleQuickActions.filter(
+          (workflow) =>
+            workflow.quickActionRepositories.length === 0 ||
+            workflow.quickActionRepositories.some(
+              ({ repositoryId }) =>
+                repositoryId === worktree.codebase.repository.id,
+            ),
+        );
         codebaseGroup = {
           codebase: worktree.codebase,
           repository: worktree.codebase.repository,
@@ -2019,23 +2122,14 @@ export class WorktreesService {
           androidBuildConfigured: Boolean(
             androidProject?.androidConfigurations.length,
           ),
-          quickActions: eligibleQuickActions.filter(
-            (workflow) =>
-              workflow.quickActionKind === "STANDARD" &&
-              (workflow.quickActionRepositories.length === 0 ||
-                workflow.quickActionRepositories.some(
-                  ({ repositoryId }) =>
-                    repositoryId === worktree.codebase.repository.id,
-                )),
+          quickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "STANDARD",
           ),
-          mergeConflictQuickActions: eligibleQuickActions.filter(
-            (workflow) =>
-              workflow.quickActionKind === "MERGE_CONFLICT" &&
-              (workflow.quickActionRepositories.length === 0 ||
-                workflow.quickActionRepositories.some(
-                  ({ repositoryId }) =>
-                    repositoryId === worktree.codebase.repository.id,
-                )),
+          mergeConflictQuickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "MERGE_CONFLICT",
+          ),
+          failingPipelineQuickActions: repositoryActions.filter(
+            (workflow) => workflow.quickActionKind === "FAILING_PIPELINE",
           ),
         };
         agentGroup.codebaseMap.set(worktree.codebase.id, codebaseGroup);
@@ -2043,6 +2137,13 @@ export class WorktreesService {
       }
       codebaseGroup.worktrees.push(worktree);
     }
+    await this.hydrateGitHubHeadPipelines(
+      [...agentGroups.values()].flatMap(({ codebases }) =>
+        codebases.flatMap(({ failingPipelineQuickActions, worktrees }) =>
+          failingPipelineQuickActions.length ? worktrees : [],
+        ),
+      ),
+    );
     return {
       agents: [...agentGroups.values()].map((group) => ({
         agent: group.agent,
@@ -2061,6 +2162,37 @@ export class WorktreesService {
       syncScope: { appId, worktreeId },
       durationMs: performance.now() - started,
     };
+  }
+
+  async inProgressRunCounts(worktreeIds: string[]) {
+    if (!worktreeIds.length) return [];
+    const prisma = await getPrismaClient();
+    const groups = await prisma.agentRun.groupBy({
+      by: ["worktreeId", "kind"],
+      where: {
+        worktreeId: { in: worktreeIds },
+        kind: { in: ["PLAN", "SESSION"] },
+        status: "IN_PROGRESS",
+        archivedAt: null,
+      },
+      _count: { _all: true },
+    });
+    const counts = new Map<
+      string,
+      { worktreeId: string; planCount: number; sessionCount: number }
+    >();
+    for (const { worktreeId, kind, _count } of groups) {
+      if (!worktreeId) continue;
+      const count = counts.get(worktreeId) ?? {
+        worktreeId,
+        planCount: 0,
+        sessionCount: 0,
+      };
+      if (kind === "PLAN") count.planCount = _count._all;
+      if (kind === "SESSION") count.sessionCount = _count._all;
+      counts.set(worktreeId, count);
+    }
+    return [...counts.values()];
   }
 
   async hidden(appId?: string | null) {
@@ -3896,8 +4028,12 @@ export class WorktreesService {
     operation: WorktreeOperation,
     requestId: string,
     forcePreparations = false,
-    expectedBranch?: string | null,
+    options?: {
+      expectedBranch?: string | null;
+      pipelineRepairAttemptId?: string;
+    },
   ) {
+    const { expectedBranch, pipelineRepairAttemptId } = options ?? {};
     if (!WORKTREE_OPERATIONS.includes(operation))
       throw new Error("Unknown worktree operation");
     const worktree = await this.requireRunnable(
@@ -3945,6 +4081,7 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:operation:${requestId}:${id}`,
       timeoutSeconds: operation === "OPEN_EDITOR" ? 30 : 600,
+      ...(pipelineRepairAttemptId ? { pipelineRepairAttemptId } : {}),
     });
   }
 
@@ -3955,6 +4092,7 @@ export class WorktreesService {
     stageAll?: boolean | null;
     paths?: string[] | null;
     requestId: string;
+    pipelineRepairAttemptId?: string;
   }) {
     if (!input.requestId.trim()) throw new Error("requestId is required");
     if (!input.message.trim()) throw new Error("Commit message is required");
@@ -3981,6 +4119,9 @@ export class WorktreesService {
       },
       idempotencyKey: `worktree:commit:${input.requestId}:${input.worktreeId}`,
       timeoutSeconds: 120,
+      ...(input.pipelineRepairAttemptId
+        ? { pipelineRepairAttemptId: input.pipelineRepairAttemptId }
+        : {}),
     });
   }
 

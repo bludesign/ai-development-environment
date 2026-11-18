@@ -296,7 +296,54 @@ describe("workflow run adapters", () => {
       "SYNC",
       "workflow-run:attempt:sync",
       true,
+      undefined,
     );
+  });
+
+  test("dispatches repair commit and push jobs with their workflow attempt owner", async () => {
+    const commitWorktree = vi.fn().mockResolvedValue({ id: "commit-job" });
+    const runOperation = vi.fn().mockResolvedValue({ id: "push-job" });
+    const executor = new WorkflowStepExecutor();
+    registerWorkflowAdapters(
+      { registerWaitPoller: vi.fn() } as unknown as WorkflowsService,
+      executor,
+      {
+        worktrees: { commitWorktree, runOperation },
+      } as unknown as WorkflowAdapterServices,
+    );
+    const input = context("actual-worktree");
+    input.run.idempotencyKey = "auto-pipeline-repair:repair:0";
+    const commit = await executor.execute({
+      ...input,
+      node: {
+        ...input.node,
+        kind: "WORKTREE_COMMIT",
+        config: { message: "Fix CI" },
+      },
+    });
+    const push = await executor.execute({
+      ...input,
+      node: {
+        ...input.node,
+        kind: "WORKTREE_OPERATION",
+        config: { operation: "PUSH" },
+      },
+    });
+
+    expect(commitWorktree).toHaveBeenCalledWith(
+      expect.objectContaining({ pipelineRepairAttemptId: "attempt" }),
+    );
+    expect(runOperation).toHaveBeenCalledWith(
+      "actual-worktree",
+      "PUSH",
+      "workflow-run:attempt:push",
+      false,
+      { pipelineRepairAttemptId: "attempt" },
+    );
+    expect(commit.wait?.externalKey).toBe("commit-job");
+    expect(push.wait?.externalKey).toBe("push-job");
+    expect(commit.links?.map(({ kind }) => kind)).toEqual(["WORKTREE"]);
+    expect(push.links?.map(({ kind }) => kind)).toEqual(["WORKTREE"]);
   });
 
   test("forces preparation-paused Auto Sync and waits for the job", async () => {

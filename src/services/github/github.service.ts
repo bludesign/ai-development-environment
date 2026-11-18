@@ -94,6 +94,7 @@ import {
   type GitHubPipelineObservation,
 } from "./github-pipeline-status.service";
 import { normalizePipelineState } from "./pipeline-status";
+import type { PipelineCI } from "@/services/worktrees/pipeline-repair";
 import type { PollingService } from "@/services/polling";
 import { GitHubCache } from "./github-cache";
 import { GitHubWorkflowRunCache } from "./github-workflow-run-cache";
@@ -365,7 +366,7 @@ type RawPipelineContext =
       detailsUrl: string | null;
       startedAt: string | null;
       completedAt: string | null;
-      checkSuite: RawCheckSuite;
+      checkSuite: RawCheckSuite & { repository?: { id: string } | null };
     }
   | {
       __typename: "StatusContext";
@@ -506,6 +507,7 @@ const PIPELINE_CONTEXT_FIELDS = `
       conclusion
       url
       app { name slug }
+      repository { id }
       workflowRun {
         databaseId
         url
@@ -1017,7 +1019,7 @@ function checkSuitePipeline(
   return {
     id: checkSuite.id,
     name:
-      workflowRun?.workflow.name ??
+      workflowRun?.workflow?.name ??
       checkSuite.app?.name ??
       `Check suite ${checkSuite.id}`,
     status: pipelineState(checkSuite.status, checkSuite.conclusion),
@@ -1071,6 +1073,88 @@ function pipelineObservationFromContext(
     source: "GRAPHQL",
     githubUpdatedAt: new Date(context.updatedAt),
     sourceFetchedAt,
+  };
+}
+
+function freshPipelineCI(
+  fallbackRepositoryId: string,
+  headSha: string,
+  rollup: string | null | undefined,
+  contexts: RawPipelineContext[],
+): PipelineCI {
+  const statuses = contexts.map((value) =>
+    value.__typename === "CheckRun"
+      ? normalizePipelineState(value.status, value.conclusion)
+      : normalizePipelineState(value.state),
+  );
+  const passed =
+    rollup === "SUCCESS" &&
+    statuses.includes("SUCCESS") &&
+    statuses.every((status) =>
+      ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(status),
+    );
+  const terminalFailure = (state: string | null | undefined) =>
+    ["FAILURE", "ERROR", "STARTUP_FAILURE", "TIMED_OUT"].includes(state ?? "");
+  if (
+    rollup === "PENDING" ||
+    rollup === "EXPECTED" ||
+    statuses.some((status) =>
+      ["IN_PROGRESS", "PENDING", "QUEUED", "EXPECTED"].includes(status),
+    )
+  )
+    return { passed, failures: [] };
+
+  const terminalStatus = (
+    ["ACTION_REQUIRED", "CANCELLED", "STALE", "SKIPPED", "NEUTRAL"] as const
+  ).find((status) => statuses.includes(status));
+  if (!terminalFailure(rollup) || terminalStatus === "ACTION_REQUIRED")
+    return {
+      passed,
+      failures: [],
+      ...(!passed && terminalStatus ? { terminalStatus } : {}),
+    };
+
+  const fetchedAt = new Date();
+  const records = new Map(
+    contexts
+      .filter((_, index) => terminalFailure(statuses[index]))
+      .map((context) => {
+        const pipeline = pipelineObservationFromContext(
+          context,
+          false,
+          fetchedAt,
+        );
+        const repositoryGithubId =
+          (context.__typename === "CheckRun" &&
+            context.checkSuite.repository?.id) ||
+          fallbackRepositoryId;
+        return [pipeline.id, { ...pipeline, repositoryGithubId }] as const;
+      }),
+  );
+  const pipelines = [...records.values()];
+  return {
+    passed,
+    failures: pipelines.map((pipeline) => ({
+      provider: "GITHUB",
+      id: pipeline.id,
+      repositoryGithubId: pipeline.repositoryGithubId,
+      headSha,
+      status: terminalFailure(pipeline.status) ? pipeline.status : "FAILURE",
+      url: pipeline.url ?? null,
+      ...(pipeline.workflowRunId
+        ? { workflowRunId: pipeline.workflowRunId }
+        : {}),
+    })),
+    ...(!pipelines.length && terminalStatus ? { terminalStatus } : {}),
+    failureKey: JSON.stringify(
+      pipelines
+        .map((pipeline) => [
+          pipeline.id,
+          pipeline.runAttempt,
+          pipeline.githubUpdatedAt?.getTime(),
+        ])
+        .sort(),
+    ),
   };
 }
 
@@ -5892,6 +5976,7 @@ export class GitHubService {
     includeSyncReadiness = false,
   ): Promise<{
     pullRequest: RawPullRequestMergeState;
+    repositoryId: string;
     availableMethods: GitHubMergeMethod[];
     viewerEmail: string | null;
     viewerPermission: RepositoryPermission | null;
@@ -5899,6 +5984,7 @@ export class GitHubService {
     const data = await this.request<{
       viewer: { email: string };
       repository: {
+        id: string;
         mergeCommitAllowed: boolean;
         rebaseMergeAllowed: boolean;
         squashMergeAllowed: boolean;
@@ -5913,6 +5999,7 @@ export class GitHubService {
       ) {
         viewer { email }
         repository(owner: $owner, name: $name) {
+          id
           mergeCommitAllowed
           rebaseMergeAllowed
           squashMergeAllowed
@@ -5932,17 +6019,18 @@ export class GitHubService {
       token,
       { requestSource, force, allowStaleOnError: !force },
     );
-    const pullRequest = data.repository?.pullRequest;
-    if (!pullRequest) throw new Error("Pull request was not found");
+    const repository = data.repository;
+    if (!repository?.pullRequest) throw new Error("Pull request was not found");
     const availableMethods: GitHubMergeMethod[] = [];
-    if (data.repository?.squashMergeAllowed) availableMethods.push("SQUASH");
-    if (data.repository?.mergeCommitAllowed) availableMethods.push("MERGE");
-    if (data.repository?.rebaseMergeAllowed) availableMethods.push("REBASE");
+    if (repository.squashMergeAllowed) availableMethods.push("SQUASH");
+    if (repository.mergeCommitAllowed) availableMethods.push("MERGE");
+    if (repository.rebaseMergeAllowed) availableMethods.push("REBASE");
     return {
-      pullRequest,
+      pullRequest: repository.pullRequest,
+      repositoryId: repository.id,
       availableMethods,
       viewerEmail: data.viewer.email.trim() || null,
-      viewerPermission: data.repository?.viewerPermission ?? null,
+      viewerPermission: repository.viewerPermission ?? null,
     };
   }
 
@@ -6111,6 +6199,79 @@ export class GitHubService {
     return this.automationStateView(pullRequest);
   }
 
+  async branchPipelineCI(owner: string, name: string, branch: string) {
+    const token = await this.requireToken();
+    const contexts: RawPipelineContext[] = [];
+    let headSha: string | null = null;
+    let cursor: string | null = null;
+    let repositoryId: string | null = null;
+    let rollup: string | null = null;
+    do {
+      const response: {
+        repository: {
+          id: string;
+          ref: {
+            target: {
+              oid?: string;
+              statusCheckRollup: {
+                state: string;
+                contexts: RawConnection<RawPipelineContext>;
+              } | null;
+            };
+          } | null;
+        } | null;
+      } = await this.request(
+        `query WorktreeBranchPipelineCI($owner: String!, $name: String!, $ref: String!, $after: String) {
+          repository(owner: $owner, name: $name) {
+            id
+            ref(qualifiedName: $ref) {
+              target {
+                ... on Commit {
+                  oid
+                  statusCheckRollup {
+                    state
+                    contexts(first: 100, after: $after) {
+                      nodes { ${PIPELINE_CONTEXT_FIELDS} }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }`,
+        { owner, name, ref: `refs/heads/${branch}`, after: cursor },
+        token,
+        {
+          requestSource: "WORKTREE_AUTOMATION",
+          force: true,
+          allowStaleOnError: false,
+        },
+      );
+      const target = response.repository?.ref?.target;
+      if (!target?.oid || (headSha && target.oid !== headSha))
+        return { headSha: null };
+      headSha = target.oid;
+      repositoryId = response.repository!.id;
+      rollup = target.statusCheckRollup?.state ?? null;
+      const connection = target.statusCheckRollup?.contexts;
+      if (!connection) break;
+      contexts.push(...connectionNodes(connection));
+      const next = connection.pageInfo.hasNextPage
+        ? connection.pageInfo.endCursor
+        : null;
+      if (next && next === cursor) return { headSha: null };
+      cursor = next;
+    } while (cursor);
+    return {
+      headSha,
+      ci:
+        headSha && repositoryId
+          ? freshPipelineCI(repositoryId, headSha, rollup, contexts)
+          : undefined,
+    };
+  }
+
   async managedMergeReadiness(
     owner: string,
     name: string,
@@ -6143,17 +6304,12 @@ export class GitHubService {
           { force: true, allowStaleOnError: false },
         )),
       );
-    const statuses = contexts.map((value) =>
-      value.__typename === "CheckRun"
-        ? normalizePipelineState(value.status, value.conclusion)
-        : normalizePipelineState(value.state),
+    const ci = freshPipelineCI(
+      state.repositoryId,
+      pr.headRefOid,
+      pr.statusCheckRollup?.state,
+      contexts,
     );
-    const ciPassed =
-      pr.statusCheckRollup?.state === "SUCCESS" &&
-      statuses.includes("SUCCESS") &&
-      statuses.every((status) =>
-        ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(status),
-      );
     const permanent = pr.isDraft
       ? "Mark this pull request ready before merging."
       : !state.viewerPermission ||
@@ -6169,7 +6325,8 @@ export class GitHubService {
       targetUrl: `https://github.com/${owner}/${name}.git`,
       targetBranch: pr.baseRefName ?? "",
       targetSha: pr.baseRefOid ?? "",
-      ciPassed,
+      ciPassed: ci.passed,
+      pipelineCI: ci,
       canMerge:
         !this.mergeBlockedReason(pr, state.viewerPermission) &&
         state.availableMethods.length > 0,

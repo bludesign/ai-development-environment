@@ -1248,6 +1248,12 @@ type GitHubPullRequestMergeOptions {
   defaultAutoSync: Boolean!
   "Enabled merge conflict workflows available to the linked worktree."
   mergeConflictWorkflows: [Workflow!]!
+  "Eligible worktree quick actions for repairing failed CI."
+  failingPipelineWorkflows: [Workflow!]!
+  "Previously selected failing pipeline workflow, if any."
+  defaultPipelineWorkflowId: ID
+  "Previously selected trigger choice for the failing pipeline workflow."
+  defaultPipelineWorkflowChoice: String
   "Previously selected merge conflict workflow."
   defaultConflictWorkflowId: ID
   "Previously selected merge conflict workflow trigger choice."

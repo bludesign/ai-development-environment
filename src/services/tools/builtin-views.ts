@@ -149,6 +149,7 @@ export function workflowView(value: Record<string, unknown>) {
     overlapPolicy: String(value.overlapPolicy),
     overlapScope: String(value.overlapScope ?? "WORKTREE"),
     maxConcurrentRuns: Number(value.maxConcurrentRuns),
+    maxPipelineRepairRetries: Number(value.maxPipelineRepairRetries ?? 0),
     completionNotificationsEnabled:
       value.completionNotificationsEnabled !== false,
     exclusiveWorktree: value.exclusiveWorktree === true,

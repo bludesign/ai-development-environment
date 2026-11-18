@@ -8,7 +8,10 @@ import type {
   Codebase,
   CodebaseRepository,
 } from "@/components/codebases/types";
-import type { GitHubPullRequestView } from "@/services/github/types";
+import type {
+  GitHubPipelineStatusSnapshotView,
+  GitHubPullRequestView,
+} from "@/services/github/types";
 import type {
   GitLabMergeOperationView,
   GitLabPipelineView,
@@ -62,11 +65,14 @@ export type WorktreeAutoSync = {
   state: string;
   conflictWorkflowId: string | null;
   conflictWorkflowChoice: string | null;
+  pipelineWorkflowId?: string | null;
+  pipelineWorkflowChoice?: string | null;
   lastError: string | null;
   pauseReason?:
     | "PREPARATION_CONFLICT"
     | "REBASE_CONFLICT"
     | "BRANCH_CHANGED"
+    | "PIPELINE_REPAIR"
     | "ERROR"
     | null;
   lastSyncedAt: string | null;
@@ -129,7 +135,10 @@ export type Worktree = {
   ticketTitle: string | null;
   ticketStatus: string | null;
   pullRequest: GitHubPullRequestView | null;
+  gitHubHeadPipelineStatus?: GitHubPipelineStatusSnapshotView | null;
+  gitHubPipelineRepositoryId?: string | null;
   sourceControlRequest: WorktreeSourceControlRequest | null;
+  gitLabProjectId?: string | null;
   gitLabPipelines: GitLabPipelineView[];
   latestBuild?: WorktreeLatestBuild | null;
   tags: WorktreeTag[];
@@ -175,6 +184,7 @@ export type WorktreeCodebaseGroup = {
   androidBuildConfigured?: boolean;
   quickActions?: WorktreeQuickAction[];
   mergeConflictQuickActions?: WorktreeQuickAction[];
+  failingPipelineQuickActions?: WorktreeQuickAction[];
 };
 
 export type WorktreeAgentGroup = {
@@ -184,6 +194,7 @@ export type WorktreeAgentGroup = {
 
 export type WorktreeOverview = {
   durationMs?: number;
+  inProgressRunCounts?: WorktreeInProgressRunCount[];
   agents: WorktreeAgentGroup[];
   tags: WorktreeTag[];
   settings: {
@@ -193,6 +204,12 @@ export type WorktreeOverview = {
   hiddenCount: number;
   activeMoves: WorktreeMove[];
   activeSyncBatches?: WorktreeSyncBatch[];
+};
+
+export type WorktreeInProgressRunCount = {
+  worktreeId: string;
+  planCount: number;
+  sessionCount: number;
 };
 
 export type WorktreeSyncItemStatus =

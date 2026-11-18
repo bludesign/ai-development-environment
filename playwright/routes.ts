@@ -280,6 +280,11 @@ export const routes: RouteEntry[] = [
   },
   { name: "worktrees", path: "/dashboard/worktrees" },
   {
+    name: "worktree-failing-pipeline",
+    path: "/dashboard/worktrees",
+    scrollTo: '[data-slot="card"]:has(button:has-text("feature/quick-search"))',
+  },
+  {
     name: "worktrees-default-branches",
     path: "/dashboard/worktrees",
     scrollTo: '[data-slot="card"]:has(button:has-text("release/1.0"))',

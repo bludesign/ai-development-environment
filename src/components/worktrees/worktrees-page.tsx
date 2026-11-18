@@ -195,6 +195,8 @@ import { useWorktreeFetch } from "./use-worktree-fetch";
 import {
   CODEBASE_FIELDS,
   WORKTREE_FIELDS,
+  WORKTREE_HEAD_PIPELINE_FIELDS,
+  WORKTREE_QUICK_ACTION_FIELDS,
   WORKTREE_LIST_FIELDS,
   WORKTREE_SYNC_BATCH_FIELDS,
 } from "./worktree-graphql";
@@ -211,6 +213,8 @@ import {
   waitForWorktreeOperationJob,
 } from "./worktree-jobs";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
+import { WorktreeRunBadges } from "./worktree-run-badges";
+import { WorktreeFailingPipelineItem } from "./worktree-failing-pipeline-item";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import { WorktreeBulkBranch } from "./worktree-bulk-branch";
 import { WorktreeBulkMerge } from "./worktree-bulk-merge";
@@ -791,6 +795,7 @@ export function WorktreesPage({
           worktreeOverview(appId: $appId, savedOnly: true) {
             durationMs
             hiddenCount
+            inProgressRunCounts { worktreeId sessionCount planCount }
             settings { editorVariant updatedAt }
             tags { id name color createdAt updatedAt }
             activeMoves {
@@ -804,19 +809,12 @@ export function WorktreesPage({
               codebases {
                 hasPreparations iosBuildConfigured androidProjectEnabled androidBuildConfigured
                 blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
-                quickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
-                mergeConflictQuickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
+                quickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+                mergeConflictQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+                failingPipelineQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
                 repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
                 codebase { ${CODEBASE_FIELDS} }
-                worktrees { ${WORKTREE_LIST_FIELDS} }
+                worktrees { ${WORKTREE_HEAD_PIPELINE_FIELDS} ${WORKTREE_LIST_FIELDS} }
               }
             }
           }
@@ -931,6 +929,29 @@ export function WorktreesPage({
         complete: () => undefined,
       },
     );
+    const unsubscribeAgentRuns = subscriptions.subscribe(
+      {
+        query:
+          "subscription WorktreeAgentRunsChanged($appId: ID) { agentRunListChanged(appId: $appId, stateOnly: true) }",
+        variables: { appId: appId ?? null },
+      },
+      {
+        next: () => live.invalidate(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
+    const unsubscribeGitLabPipelines = subscriptions.subscribe(
+      {
+        query:
+          "subscription WorktreeGitLabPipelinesChanged { gitlabPipelineStatusChanged { id } }",
+      },
+      {
+        next: () => live.invalidate(),
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       live.dispose();
@@ -939,6 +960,8 @@ export function WorktreesPage({
       unsubscribeBuilds();
       unsubscribeRepositorySettings();
       unsubscribeWorkflows();
+      unsubscribeAgentRuns();
+      unsubscribeGitLabPipelines();
     };
   }, [load, appId]);
 
@@ -1968,19 +1991,26 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
     >
       <CardHeader className="grid-cols-1! @md/card-header:grid-cols-[minmax(0,1fr)_auto]!">
         <CardTitle className="min-w-0">
-          <Button
-            aria-expanded={expanded}
-            className="h-auto w-full max-w-full justify-start gap-1 p-1 text-left"
-            onClick={() => void toggle()}
-            variant="ghost"
-          >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-            <span className="truncate font-mono">
-              {worktree.branch ??
-                worktree.headSha?.slice(0, 10) ??
-                t("detached")}
-            </span>
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              aria-expanded={expanded}
+              className="h-auto min-w-0 flex-1 justify-start gap-1 p-1 text-left"
+              onClick={() => void toggle()}
+              variant="ghost"
+            >
+              {expanded ? <ChevronDown /> : <ChevronRight />}
+              <span className="truncate font-mono">
+                {worktree.branch ??
+                  worktree.headSha?.slice(0, 10) ??
+                  t("detached")}
+              </span>
+            </Button>
+            <WorktreeRunBadges
+              counts={props.overview.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} />
           )}
@@ -2000,6 +2030,10 @@ function WorktreeCard(props: Omit<WorktreeItemProps, "onError">) {
           showPullRequest={!isDefault}
           detailsExpanded={expanded}
           onToggleDetails={toggle}
+        />
+        <WorktreeFailingPipelineItem
+          worktree={worktree}
+          workflows={props.group.failingPipelineQuickActions}
         />
         <WorktreeRebaseConflictItem
           group={props.group}
@@ -4160,6 +4194,7 @@ export function ActionRow(
       {!isDefault && (
         <AutoSyncButton
           conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+          pipelineWorkflows={props.group.failingPipelineQuickActions}
           disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
           onCompleted={props.onCompleted}
           onError={props.onError}
@@ -4585,15 +4620,24 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
         }}
       >
         <TableCell>
-          <Button
-            aria-expanded={expanded}
-            className="max-w-full px-0 font-mono"
-            onClick={() => void expand()}
-            variant="ghost"
-          >
-            {expanded ? <ChevronDown /> : <ChevronRight />}
-            <span className="truncate">{worktree.branch ?? t("detached")}</span>
-          </Button>
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              aria-expanded={expanded}
+              className="min-w-0 max-w-full px-0 font-mono"
+              onClick={() => void expand()}
+              variant="ghost"
+            >
+              {expanded ? <ChevronDown /> : <ChevronRight />}
+              <span className="truncate">
+                {worktree.branch ?? t("detached")}
+              </span>
+            </Button>
+            <WorktreeRunBadges
+              counts={props.overview.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           {(worktree.ticketKey || worktree.ticketTitle) && (
             <WorktreeTicketLink {...liveProps} compact />
           )}
@@ -4638,6 +4682,10 @@ function WorktreeTableRows(props: Omit<WorktreeItemProps, "onError">) {
       </TableRow>
       <TableRow className={cn(highlight)}>
         <TableCell className="space-y-2" colSpan={8}>
+          <WorktreeFailingPipelineItem
+            worktree={worktree}
+            workflows={props.group.failingPipelineQuickActions}
+          />
           <WorktreeRebaseConflictItem
             group={props.group}
             onCompleted={props.onReload}

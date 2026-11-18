@@ -1388,10 +1388,40 @@ export async function seedRuns(prisma: PrismaClient): Promise<void> {
     );
   }
 
+  await prisma.agentRun.createMany({
+    data: [
+      {
+        id: "run-ci-plan",
+        kind: "PLAN",
+        displayNumber: 1004,
+        phase: "PLANNING",
+      },
+      {
+        id: "run-ci-session",
+        kind: "SESSION",
+        displayNumber: 2003,
+        phase: "EXECUTING",
+      },
+    ].map((run) => ({
+      ...run,
+      status: "IN_PROGRESS",
+      provider: "CODEX",
+      worktreeId: WEB_FEATURE,
+      repositoryId: ids.repositories.web,
+      agentId: ids.agents.studio,
+      repositoryName: "acme/web-app",
+      branch: "feature/quick-search",
+      model: "gpt-5-codex",
+      initialPrompt: "Investigate the failing quick-search CI checks.",
+      createdAt: minutesAgo(5),
+      startedAt: minutesAgo(5),
+    })),
+  });
+
   await prisma.runNumberSequence.createMany({
     data: [
-      { kind: "PLAN", nextValue: 1004 },
-      { kind: "SESSION", nextValue: 2003 },
+      { kind: "PLAN", nextValue: 1005 },
+      { kind: "SESSION", nextValue: 2004 },
     ],
   });
 

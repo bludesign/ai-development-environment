@@ -8,6 +8,10 @@ import {
 } from "@ai-development-environment/agent-contract/operation-resources";
 import { jobOperationDescriptor } from "@/services/operation-locks/job-resources";
 import {
+  findPipelineRepairRoot,
+  PIPELINE_REPAIR_DISPATCH_STATUSES,
+} from "@/services/worktrees/pipeline-repair";
+import {
   admitOperation,
   requestOperation,
   releaseOperation,
@@ -1256,6 +1260,7 @@ export class AgentControlService {
     worktreeId?: string | null;
     visibility?: "USER" | "SYSTEM";
     blocksGitOperations?: boolean;
+    pipelineRepairAttemptId?: string;
   }) {
     validateJob(input.kind, input.payload);
     if (!input.idempotencyKey.trim())
@@ -1317,6 +1322,43 @@ export class AgentControlService {
     const descriptor = await jobOperationDescriptor(input, capable);
     try {
       job = await prisma.$transaction(async (transaction) => {
+        const repairAttempt = input.pipelineRepairAttemptId
+          ? await transaction.workflowStepAttempt.findFirst({
+              where: {
+                id: input.pipelineRepairAttemptId,
+                status: "RUNNING",
+                supersededAt: null,
+                run: { status: { in: PIPELINE_REPAIR_DISPATCH_STATUSES } },
+              },
+              select: {
+                id: true,
+                runId: true,
+                run: {
+                  select: {
+                    id: true,
+                    idempotencyKey: true,
+                    parentRunId: true,
+                    status: true,
+                  },
+                },
+              },
+            })
+          : null;
+        if (input.pipelineRepairAttemptId && !repairAttempt) {
+          throw new Error("The pipeline repair attempt is no longer active");
+        }
+        if (repairAttempt) {
+          const root = await findPipelineRepairRoot(
+            transaction,
+            repairAttempt.run,
+          );
+          if (
+            !root ||
+            !PIPELINE_REPAIR_DISPATCH_STATUSES.includes(root.status)
+          ) {
+            throw new Error("The parent pipeline repair is no longer active");
+          }
+        }
         const created = await transaction.agentJob.create({
           data: {
             id: randomUUID(),
@@ -1335,6 +1377,21 @@ export class AgentControlService {
             operationResourcesJson: capable ? JSON.stringify(descriptor) : null,
           },
         });
+        // Store ownership as part of dispatch so cancellation can find this job
+        // even if the workflow has not yet parked its wait.
+        if (repairAttempt) {
+          await transaction.workflowRunResourceLink.create({
+            data: {
+              id: randomUUID(),
+              runId: repairAttempt.runId,
+              attemptId: repairAttempt.id,
+              kind: "AGENT_JOB",
+              resourceId: created.id,
+              label: "Agent job",
+              url: `/dashboard/jobs/${created.id}`,
+            },
+          });
+        }
         await requestOperation(
           transaction,
           "AGENT_JOB",

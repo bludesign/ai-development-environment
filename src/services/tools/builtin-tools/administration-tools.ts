@@ -1,3 +1,4 @@
+import { WORKFLOW_QUICK_ACTION_KINDS } from "@/lib/workflows/quick-action-kinds";
 import * as z from "zod/v4";
 import type { AgentControlService } from "@/services/agent-control";
 import type { CacheServerService } from "@/services/cache-server";
@@ -1137,13 +1138,7 @@ export function createWorkflowQuickActionTools(
       "Configure a workflow's quick-action placement and repository scope.",
       z.object({
         id,
-        kind: z.enum([
-          "STANDARD",
-          "MERGE_CONFLICT",
-          "GITHUB_ACTIONS",
-          "GITLAB_PIPELINES",
-          "NONE",
-        ]),
+        kind: z.enum(WORKFLOW_QUICK_ACTION_KINDS),
         quickActionIconKey: id,
         quickActionButtonVariant: id,
         repositoryIds: ids,

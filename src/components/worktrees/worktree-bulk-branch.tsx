@@ -458,13 +458,15 @@ export function WorktreeBulkBranch({
                     ? "sameCheckout"
                     : null);
                 const label = worktree.branch ?? worktree.relativePath;
+                const checkboxId = `bulk-branch-${worktree.id}`;
                 return (
-                  <li className="flex gap-3 p-3" key={worktree.id}>
+                  <li className="relative" key={worktree.id}>
                     <Checkbox
                       aria-label={t("selectWorktree", { branch: label })}
                       checked={checked}
+                      className="absolute start-3 top-3 enabled:cursor-pointer"
                       disabled={disabled || submitting || Boolean(reason)}
-                      id={`bulk-branch-${worktree.id}`}
+                      id={checkboxId}
                       onCheckedChange={(next) =>
                         setSelected((current) => {
                           const items = new Map(
@@ -476,30 +478,30 @@ export function WorktreeBulkBranch({
                         })
                       }
                     />
-                    <div className="min-w-0 space-y-1">
-                      <Label
-                        className="break-all leading-snug"
-                        htmlFor={`bulk-branch-${worktree.id}`}
-                      >
+                    <label
+                      className="block space-y-1 p-3 ps-10 peer-enabled:cursor-pointer"
+                      htmlFor={checkboxId}
+                    >
+                      <span className="block break-all text-sm leading-snug font-medium">
                         {label}
-                      </Label>
-                      <p className="break-words text-sm text-muted-foreground">
+                      </span>
+                      <span className="block break-words text-sm text-muted-foreground">
                         {row.repositoryName} · {row.agentName}
-                      </p>
-                      <p className="break-all font-mono text-xs text-muted-foreground">
+                      </span>
+                      <span className="block break-all font-mono text-xs text-muted-foreground">
                         {worktree.folder}
-                      </p>
+                      </span>
                       {row.baseBranch && (
-                        <p className="text-xs text-muted-foreground">
+                        <span className="block text-xs text-muted-foreground">
                           {t("rowBase", { branch: row.baseBranch })}
-                        </p>
+                        </span>
                       )}
                       {reason && (
-                        <p className="text-xs text-amber-700 dark:text-amber-300">
+                        <span className="block text-xs text-amber-700 dark:text-amber-300">
                           {t(`blocked.${reason}`)}
-                        </p>
+                        </span>
                       )}
-                    </div>
+                    </label>
                   </li>
                 );
               })}

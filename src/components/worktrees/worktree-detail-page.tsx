@@ -90,7 +90,12 @@ import {
 } from "./worktree-detail-panel";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
 import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
-import { CODEBASE_FIELDS, WORKTREE_FIELDS } from "./worktree-graphql";
+import {
+  CODEBASE_FIELDS,
+  WORKTREE_FIELDS,
+  WORKTREE_HEAD_PIPELINE_FIELDS,
+  WORKTREE_QUICK_ACTION_FIELDS,
+} from "./worktree-graphql";
 import {
   inspectWorktree,
   useLiveWorktree,
@@ -98,6 +103,8 @@ import {
   useWorktreeActivitySubscription,
   type WorktreeActivity,
 } from "./worktree-inspection";
+import { WorktreeRunBadges } from "./worktree-run-badges";
+import { WorktreeFailingPipelineItem } from "./worktree-failing-pipeline-item";
 import { WorktreeRebaseConflictItem } from "./worktree-rebase-conflict-item";
 import { useIntegrationAvailability } from "./use-integration-availability";
 import { useWorktreeLoading } from "./use-worktree-loading";
@@ -123,6 +130,7 @@ import {
 export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($worktreeId: ID!, $buildFirst: Int = 50, $includeCoverage: Boolean = true, $includeQueue: Boolean = true) {
   worktreeOverview(worktreeId: $worktreeId, savedOnly: true) {
     hiddenCount
+    inProgressRunCounts { worktreeId sessionCount planCount }
     settings { editorVariant updatedAt }
     tags { id name color createdAt updatedAt }
     activeMoves {
@@ -135,19 +143,12 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
       codebases {
         iosBuildConfigured androidProjectEnabled androidBuildConfigured
         blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
-        quickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
-        mergeConflictQuickActions {
-            id name description quickActionIconKey quickActionButtonVariant
-            hasPlainTrigger(resourceKind: "WORKTREE")
-            triggerChoices(resourceKind: "WORKTREE") { key label description }
-          }
+        quickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+        mergeConflictQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
+        failingPipelineQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
         repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
         codebase { ${CODEBASE_FIELDS} }
-        worktrees { ${WORKTREE_FIELDS} }
+        worktrees { gitLabProjectId ${WORKTREE_FIELDS} ${WORKTREE_HEAD_PIPELINE_FIELDS} }
       }
     }
   }
@@ -206,11 +207,14 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const [pipelinesError, setPipelinesError] = useState<string | null>(null);
   const latestOverviewLoad = useRef(0);
   const buildPagination = useRef<AbortController | null>(null);
+  const deferredGitLabRefresh = useRef<(() => void) | null>(null);
   const loadedBuildCount = useRef(50);
   const latestPipelinesLoad = useRef(0);
-  const displayedGroup = useRef<{
+  const displayedWorktree = useRef<{
     codebaseId: string;
     repositoryId: string;
+    headSha: string | null;
+    gitLabProjectId?: string | null;
   } | null>(null);
 
   // The saved overview answers at once. Pull requests, pipelines and tickets
@@ -230,6 +234,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
     async (signal: AbortSignal) => {
       buildPagination.current?.abort();
       buildPagination.current = null;
+      deferredGitLabRefresh.current = null;
       setBuildsLoadingMore(false);
       const requestId = ++latestOverviewLoad.current;
       try {
@@ -244,12 +249,17 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           { signal },
         );
         if (requestId !== latestOverviewLoad.current || signal.aborted) return;
-        const group = findWorktreeOverviewEntry(
+        const entry = findWorktreeOverviewEntry(
           data.worktreeOverview,
           worktreeId,
-        )?.group;
-        displayedGroup.current = group
-          ? { codebaseId: group.codebase.id, repositoryId: group.repository.id }
+        );
+        displayedWorktree.current = entry
+          ? {
+              codebaseId: entry.group.codebase.id,
+              repositoryId: entry.group.repository.id,
+              headSha: entry.worktree.headSha,
+              gitLabProjectId: entry.worktree.gitLabProjectId,
+            }
           : null;
         const history = await readWorktreeBuildWindow(
           worktreeId,
@@ -351,6 +361,13 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   }, [buildsNextCursor, worktreeId]);
 
   useEffect(() => {
+    if (buildsLoadingMore) return;
+    const refresh = deferredGitLabRefresh.current;
+    deferredGitLabRefresh.current = null;
+    refresh?.();
+  }, [buildsLoadingMore]);
+
+  useEffect(() => {
     loadedBuildCount.current = 50;
     const owner = createRefreshCoalescer(fetchOverview);
     overviewOwner.current = owner;
@@ -371,13 +388,23 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   }, [fetchOverview]);
 
   useEffect(() => {
-    displayedGroup.current = null;
+    displayedWorktree.current = null;
     const initial = window.setTimeout(() => void load(), 0);
     // A burst of events costs one saved read, and a hidden tab reads nothing.
     const live = createLiveRefresh(() => loadOverview(), {
       minIntervalMs: DETAIL_EVENT_REFRESH_INTERVAL_MS,
     });
-    // Pipelines have no event of their own here; reconcile both while visible.
+    const gitLabLive = createLiveRefresh(
+      () => {
+        if (buildPagination.current) {
+          deferredGitLabRefresh.current = gitLabLive.invalidate;
+          return;
+        }
+        return loadOverview();
+      },
+      { minIntervalMs: DETAIL_EVENT_REFRESH_INTERVAL_MS },
+    );
+    // Reconcile periodically while visible in case an invalidation was missed.
     const reconcile = createLiveRefresh(() => load(), {
       pollMs: DETAIL_RECONCILE_INTERVAL_MS,
     });
@@ -402,7 +429,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             (changed.worktreeId === null && changed.codebaseId === null) ||
             changed.worktreeId === worktreeId ||
             (changed.codebaseId !== null &&
-              changed.codebaseId === displayedGroup.current?.codebaseId)
+              changed.codebaseId === displayedWorktree.current?.codebaseId)
           ) {
             live.invalidate();
           }
@@ -440,7 +467,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
           const change = value.data?.codebaseOverviewChanged;
           if (
             change?.codebaseId === null &&
-            change.repositoryId === displayedGroup.current?.repositoryId
+            change.repositoryId === displayedWorktree.current?.repositoryId
           ) {
             live.invalidate();
           }
@@ -478,9 +505,33 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
         complete: () => undefined,
       },
     );
+    const unsubscribeGitLabPipelines = subscriptions.subscribe<{
+      gitlabPipelineStatusChanged: { projectId: string; sha: string };
+    }>(
+      {
+        query:
+          "subscription WorktreeDetailGitLabPipelinesChanged { gitlabPipelineStatusChanged { projectId sha } }",
+      },
+      {
+        next: ({ data }) => {
+          const pipeline = data?.gitlabPipelineStatusChanged;
+          const checkout = displayedWorktree.current;
+          if (
+            pipeline &&
+            checkout?.gitLabProjectId === pipeline.projectId &&
+            checkout.headSha === pipeline.sha
+          )
+            gitLabLive.invalidate();
+        },
+        error: () => undefined,
+        complete: () => undefined,
+      },
+    );
     return () => {
       window.clearTimeout(initial);
       live.dispose();
+      gitLabLive.dispose();
+      deferredGitLabRefresh.current = null;
       reconcile.dispose();
       latestOverviewLoad.current += 1;
       latestPipelinesLoad.current += 1;
@@ -489,6 +540,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       unsubscribeRepositorySettings();
       unsubscribeWorkflows();
       unsubscribeAgentRuns();
+      unsubscribeGitLabPipelines();
     };
   }, [load, loadOverview, worktreeId]);
 
@@ -806,11 +858,18 @@ function LoadedWorktreeDetail({
           <p className="text-sm text-muted-foreground">
             {entry.group.repository.name} · {entry.agentGroup.agent.name}
           </p>
-          <h1 className="mt-1 truncate font-mono text-2xl font-semibold tracking-tight">
-            {worktree.branch ??
-              worktree.headSha?.slice(0, 10) ??
-              wt("detached")}
-          </h1>
+          <div className="mt-1 flex items-center gap-2">
+            <h1 className="min-w-0 truncate font-mono text-2xl font-semibold tracking-tight">
+              {worktree.branch ??
+                worktree.headSha?.slice(0, 10) ??
+                wt("detached")}
+            </h1>
+            <WorktreeRunBadges
+              counts={overview?.inProgressRunCounts?.find(
+                (count) => count.worktreeId === worktree.id,
+              )}
+            />
+          </div>
           <p
             className="mt-1 truncate font-mono text-xs text-muted-foreground"
             title={worktree.folder}
@@ -861,6 +920,10 @@ function LoadedWorktreeDetail({
         </Alert>
       )}
 
+      <WorktreeFailingPipelineItem
+        worktree={worktree}
+        workflows={entry.group.failingPipelineQuickActions}
+      />
       <WorktreeRebaseConflictItem
         group={entry.group}
         onCompleted={reloadEverything}

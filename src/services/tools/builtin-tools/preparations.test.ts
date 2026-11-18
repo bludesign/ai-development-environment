@@ -223,6 +223,8 @@ describe("worktree preparation MCP tools", () => {
       state: "PAUSED",
       conflictWorkflowId: null,
       conflictWorkflowChoice: null,
+      pipelineWorkflowId: null,
+      pipelineWorkflowChoice: null,
       lastError: "Preparations block the rebase",
       pauseReason: "PREPARATION_CONFLICT",
       lastSyncedAt: null,

@@ -42,6 +42,7 @@ type WorkflowQuickActionsProps = {
   workflows: QuickActionWorkflow[];
   className?: string;
   activeOnly?: boolean;
+  canLaunch?: boolean;
 };
 
 export function WorkflowQuickActions(props: WorkflowQuickActionsProps) {
@@ -55,6 +56,7 @@ function WorkflowQuickActionButtons({
   workflows,
   className,
   activeOnly = false,
+  canLaunch = true,
 }: WorkflowQuickActionsProps) {
   const t = useTranslations("workflows");
   const summary = useWorkflowTargetSummary({
@@ -119,11 +121,13 @@ function WorkflowQuickActionButtons({
   };
 
   const displayedError = error ?? summary.error;
-  const visibleWorkflows = activeOnly
-    ? workflows.filter(
-        (workflow) => active[workflow.id]?.length || triggering === workflow.id,
-      )
-    : workflows;
+  const visibleWorkflows =
+    activeOnly || !canLaunch
+      ? workflows.filter(
+          (workflow) =>
+            active[workflow.id]?.length || triggering === workflow.id,
+        )
+      : workflows;
   if (!visibleWorkflows.length) return null;
 
   return (
@@ -139,11 +143,12 @@ function WorkflowQuickActionButtons({
                   <DropdownMenuTrigger asChild>
                     <Button
                       aria-label={t("manageRuns", { name: workflow.name })}
-                      className="rounded-r-none"
+                      className={canLaunch ? "rounded-r-none" : undefined}
                       size="sm"
                       variant="outline"
                     >
                       <Spinner />
+                      {!canLaunch && <span>{workflow.name}</span>}
                       {runs.length > 1 && (
                         <span className="text-xs tabular-nums">
                           {runs.length}
@@ -189,35 +194,37 @@ function WorkflowQuickActionButtons({
                   </DropdownMenuContent>
                 </DropdownMenu>
               )}
-              <WorkflowChoiceMenu
-                button={
-                  <Button
-                    className={
-                      runs.length > 0 ? "-ml-px rounded-l-none" : undefined
-                    }
-                    disabled={triggering !== null}
-                    size="sm"
-                    title={
-                      busy
-                        ? t("startAnotherRun", { name: workflow.name })
-                        : workflow.description || workflow.name
-                    }
-                    variant={workflow.quickActionButtonVariant}
-                  >
-                    {triggering === workflow.id ? (
-                      <Spinner />
-                    ) : (
-                      <ConfigurationIcon
-                        iconKey={workflow.quickActionIconKey}
-                      />
-                    )}
-                    {workflow.name}
-                  </Button>
-                }
-                choices={workflow.triggerChoices ?? []}
-                hasPlainTrigger={workflow.hasPlainTrigger ?? false}
-                onRun={(choice) => void trigger(workflow, choice)}
-              />
+              {canLaunch && (
+                <WorkflowChoiceMenu
+                  button={
+                    <Button
+                      className={
+                        runs.length > 0 ? "-ml-px rounded-l-none" : undefined
+                      }
+                      disabled={triggering !== null}
+                      size="sm"
+                      title={
+                        busy
+                          ? t("startAnotherRun", { name: workflow.name })
+                          : workflow.description || workflow.name
+                      }
+                      variant={workflow.quickActionButtonVariant}
+                    >
+                      {triggering === workflow.id ? (
+                        <Spinner />
+                      ) : (
+                        <ConfigurationIcon
+                          iconKey={workflow.quickActionIconKey}
+                        />
+                      )}
+                      {workflow.name}
+                    </Button>
+                  }
+                  choices={workflow.triggerChoices ?? []}
+                  hasPlainTrigger={workflow.hasPlainTrigger ?? false}
+                  onRun={(choice) => void trigger(workflow, choice)}
+                />
+              )}
             </div>
           );
         })}

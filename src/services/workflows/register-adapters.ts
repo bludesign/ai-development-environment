@@ -45,6 +45,10 @@ import type {
   WorktreeAutomationService,
   WorktreesService,
 } from "@/services/worktrees";
+import {
+  findPipelineRepairRoot,
+  isPipelineRepairRun,
+} from "@/services/worktrees/pipeline-repair";
 import type { RunConfigurationInput } from "@/services/runs";
 import { pullRequestResourceId } from "@/lib/workflows/resources";
 import { getSessionValue, mergeSessionData } from "@/lib/workflows/session";
@@ -124,6 +128,12 @@ const configuredId = (
 const requestId = (context: WorkflowExecutionContext, suffix = "operation") =>
   `${context.run.id}:${context.attempt.id}:${suffix}`;
 
+async function pipelineRepairOwnsRun({ run }: WorkflowExecutionContext) {
+  return run.parentRunId
+    ? Boolean(await findPipelineRepairRoot(await getPrismaClient(), run))
+    : isPipelineRepairRun(run.idempotencyKey);
+}
+
 const runResult = (
   context: WorkflowExecutionContext,
   run: Record<string, unknown>,
@@ -159,17 +169,22 @@ const jobResult = (
   job: { id: string; timeoutSeconds?: number | null },
   sessionPatch?: Record<string, unknown>,
   resourceLinks: WorkflowResourceLinkInput[] = [],
+  linkedAtDispatch = false,
 ): WorkflowExecutionResult => ({
   output: { jobId: job.id },
   sessionPatch,
   links: [
     ...resourceLinks,
-    {
-      kind: "AGENT_JOB",
-      resourceId: job.id,
-      label: "Agent job",
-      url: `/dashboard/jobs/${job.id}`,
-    },
+    ...(linkedAtDispatch
+      ? []
+      : [
+          {
+            kind: "AGENT_JOB",
+            resourceId: job.id,
+            label: "Agent job",
+            url: `/dashboard/jobs/${job.id}`,
+          },
+        ]),
   ],
   wait: {
     kind: "AGENT_JOB",
@@ -2444,6 +2459,7 @@ function registerWorktreeAdapters(
   });
   executor.register("WORKTREE_COMMIT", async (context) => {
     const id = worktreeId(context);
+    const repair = await pipelineRepairOwnsRun(context);
     const stageAll = context.node.config.stageAll !== false;
     const configuredPaths = context.node.config.paths;
     const paths = Array.isArray(configuredPaths)
@@ -2459,8 +2475,9 @@ function registerWorktreeAdapters(
       stageAll,
       paths,
       requestId: requestId(context, "commit"),
+      ...(repair ? { pipelineRepairAttemptId: context.attempt.id } : {}),
     });
-    return jobResult(context, job, undefined, [worktreeLink(id)]);
+    return jobResult(context, job, undefined, [worktreeLink(id)], repair);
   });
   executor.register("WORKTREE_REFRESH_PULL_REQUEST", async (context) => {
     const id = worktreeId(context);
@@ -2498,13 +2515,15 @@ function registerWorktreeAdapters(
       throw new Error("Worktree operation is invalid for workflow execution");
     }
     const id = worktreeId(context);
+    const repair = await pipelineRepairOwnsRun(context);
     const job = await services.worktrees.runOperation(
       id,
       operation as WorktreeOperation,
       requestId(context, operation.toLowerCase()),
       context.node.config.forcePreparations === true,
+      repair ? { pipelineRepairAttemptId: context.attempt.id } : undefined,
     );
-    return jobResult(context, job, undefined, [worktreeLink(id)]);
+    return jobResult(context, job, undefined, [worktreeLink(id)], repair);
   });
   executor.register("WORKTREE_PREPARATION", async (context) => {
     const id = worktreeId(context);
@@ -2559,6 +2578,14 @@ function registerWorktreeAdapters(
                   context.node.config.conflictWorkflowChoice,
                   500,
                 ),
+                pipelineWorkflowId:
+                  optionalText(context.node.config.pipelineWorkflowId, 500) ??
+                  undefined,
+                pipelineWorkflowChoice:
+                  optionalText(
+                    context.node.config.pipelineWorkflowChoice,
+                    500,
+                  ) ?? undefined,
               })
             : null;
     if (!autoSync) throw new Error("Unknown Auto Sync action");
@@ -2596,6 +2623,12 @@ function registerWorktreeAdapters(
         ...(context.node.config.autoSync === true
           ? {
               autoSync: true,
+              pipelineWorkflowId:
+                optionalText(context.node.config.pipelineWorkflowId, 500) ??
+                undefined,
+              pipelineWorkflowChoice:
+                optionalText(context.node.config.pipelineWorkflowChoice, 500) ??
+                undefined,
               expectedHeadSha: optionalText(
                 context.node.config.expectedHeadSha ??
                   getSessionValue(context.sessionData, "pr.headRefOid"),

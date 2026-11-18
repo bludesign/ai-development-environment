@@ -48,8 +48,11 @@ const github = {
   pullRequestLiveStatuses: vi.fn(),
   effectiveCacheTtlSeconds: vi.fn(),
 };
-const snapshot = { snapshots: vi.fn() };
+const snapshot = { snapshots: vi.fn(), snapshotsForRepositoryHeads: vi.fn() };
 const findMany = vi.fn();
+const findWorkflows = vi.fn();
+const findGitHubRepositories = vi.fn();
+const groupRuns = vi.fn();
 const mergeRequest: GitLabMergeRequestView = {
   id: "mr-1",
   iid: 1,
@@ -95,6 +98,8 @@ function service() {
 beforeEach(() => {
   vi.resetAllMocks();
   findMany.mockResolvedValue([row()]);
+  findWorkflows.mockResolvedValue([]);
+  findGitHubRepositories.mockResolvedValue([]);
   const transaction = {
     worktree: { update: vi.fn() },
     worktreePullRequest: { deleteMany: vi.fn() },
@@ -116,7 +121,9 @@ beforeEach(() => {
     },
     codebaseSettings: { findUnique: vi.fn().mockResolvedValue(null) },
     worktreeMove: { findMany: vi.fn().mockResolvedValue([]) },
-    workflow: { findMany: vi.fn().mockResolvedValue([]) },
+    workflow: { findMany: findWorkflows },
+    gitHubRepository: { findMany: findGitHubRepositories },
+    agentRun: { groupBy: groupRuns },
   });
   gitlab.projectForCanonicalOrigin.mockResolvedValue({ id: "42" });
   gitlab.storedPipelines.mockResolvedValue(
@@ -131,6 +138,7 @@ beforeEach(() => {
   );
   jira.summary.mockResolvedValue({ summary: "Current ticket", status: "Done" });
   snapshot.snapshots.mockResolvedValue([]);
+  snapshot.snapshotsForRepositoryHeads.mockResolvedValue([]);
 });
 
 test.each([
@@ -186,6 +194,15 @@ test("does not clear client metadata when merge request discovery itself fails",
   expect(result.warnings).toHaveLength(1);
 });
 
+test("saved-only overview identifies the GitLab project before it has a pipeline", async () => {
+  gitlab.storedPipelines.mockResolvedValue(new Map());
+  const overview = await service().overview(undefined, "worktree-1", true);
+  expect(overview.agents[0]?.codebases[0]?.worktrees[0]).toMatchObject({
+    gitLabProjectId: "42",
+    gitLabPipelines: [],
+  });
+});
+
 test("saved-only overview reads saved pipeline and Jira data without any external calls", async () => {
   const overview = await service().overview("app-1", undefined, true);
   const worktree = overview.agents[0]!.codebases[0]!.worktrees[0]!;
@@ -210,6 +227,129 @@ test("saved-only overview reads saved pipeline and Jira data without any externa
       }),
     }),
   );
+});
+
+test("batches exact GitHub heads for pipeline actions without relying on a linked PR", async () => {
+  const githubRow = (id: string, sha: string, name = "app") => {
+    const worktree = row(id, sha);
+    const codebaseId = `codebase-${name}`;
+    return {
+      ...worktree,
+      codebaseId,
+      codebase: {
+        ...worktree.codebase,
+        id: codebaseId,
+        repository: {
+          ...worktree.codebase.repository,
+          id: `repo-${name}`,
+          name,
+          canonicalOrigin: `github.com/acme/${name}`,
+        },
+      },
+    };
+  };
+  const stalePullRequest = {
+    githubId: "pr-1",
+    repositoryGithubId: "gh-repo-1",
+    repositoryNameWithOwner: "Acme/App",
+    labelsJson: "[]",
+    headRefOid: "old-pr-head",
+    githubCreatedAt: new Date(),
+  };
+  findMany.mockResolvedValue([
+    githubRow("no-pr", "no-pr-head"),
+    {
+      ...githubRow("fork", "fork-head", "fork"),
+      pullRequest: stalePullRequest,
+    },
+    githubRow("tracked-no-pr", "new-head", "tracked"),
+    {
+      ...githubRow("stale-pr", "local-head"),
+      pullRequest: stalePullRequest,
+    },
+  ]);
+  findWorkflows.mockResolvedValue([
+    {
+      id: "failing-workflow",
+      quickActionKind: "FAILING_PIPELINE",
+      quickActionRepositories: [],
+      activeVersion: {
+        triggers: [
+          {
+            kind: "RESOURCE_MANUAL",
+            configJson: '{"resourceKind":"WORKTREE"}',
+          },
+        ],
+      },
+    },
+  ]);
+  const failedSnapshot = {
+    repositoryGithubId: "gh-repo-1",
+    repositoryNameWithOwner: "Acme/App",
+    pipelineStatus: "FAILURE",
+    pipelines: [{ id: "failed-check", status: "FAILURE" }],
+  };
+  findGitHubRepositories.mockResolvedValue([
+    { githubId: "gh-repo-2", nameWithOwner: "Acme/Tracked" },
+  ]);
+  snapshot.snapshots
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ ...failedSnapshot, headSha: "local-head" }]);
+  snapshot.snapshotsForRepositoryHeads.mockResolvedValue([
+    { ...failedSnapshot, headSha: "no-pr-head" },
+    {
+      ...failedSnapshot,
+      repositoryGithubId: "gh-fork",
+      repositoryNameWithOwner: "Acme/Fork",
+      headSha: "fork-head",
+    },
+  ]);
+
+  const overview = await service().overview(undefined, undefined, true);
+  expect(snapshot.snapshotsForRepositoryHeads).toHaveBeenCalledExactlyOnceWith(
+    new Map([
+      ["acme/app", new Set(["no-pr-head"])],
+      ["acme/fork", new Set(["fork-head"])],
+    ]),
+  );
+  expect(snapshot.snapshots).toHaveBeenNthCalledWith(2, [
+    { repositoryGithubId: "gh-repo-1", headSha: "local-head" },
+    { repositoryGithubId: "gh-repo-2", headSha: "new-head" },
+  ]);
+  expect(
+    overview.agents[0]?.codebases.flatMap(({ worktrees }) => worktrees),
+  ).toMatchObject([
+    {
+      id: "no-pr",
+      pullRequest: null,
+      gitHubHeadPipelineStatus: { ...failedSnapshot, headSha: "no-pr-head" },
+    },
+    {
+      id: "stale-pr",
+      pullRequest: { headRefOid: "old-pr-head" },
+      gitHubHeadPipelineStatus: { ...failedSnapshot, headSha: "local-head" },
+    },
+    {
+      id: "fork",
+      pullRequest: {
+        repositoryGithubId: "gh-repo-1",
+        headRefOid: "old-pr-head",
+      },
+      gitHubHeadPipelineStatus: {
+        repositoryGithubId: "gh-fork",
+        headSha: "fork-head",
+        pipelineStatus: "FAILURE",
+      },
+      gitHubPipelineRepositoryId: "gh-fork",
+    },
+    {
+      id: "tracked-no-pr",
+      pullRequest: null,
+      gitHubHeadPipelineStatus: null,
+      gitHubPipelineRepositoryId: "gh-repo-2",
+    },
+  ]);
+  expect(github.pullRequestsForBranches).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -355,4 +495,71 @@ test("reports stale pipeline fallback and does not overwrite the last good clien
       include: expect.anything(),
     }),
   );
+});
+
+test("projects published failing pipeline workflows with a worktree trigger and matching repository", async () => {
+  const workflow = (
+    id: string,
+    repositoryId?: string,
+    resourceKind = "WORKTREE",
+  ) => ({
+    id,
+    quickActionKind: "FAILING_PIPELINE",
+    quickActionRepositories: repositoryId ? [{ repositoryId }] : [],
+    activeVersion: {
+      triggers: [
+        {
+          kind: "RESOURCE_MANUAL",
+          configJson: JSON.stringify({ resourceKind }),
+        },
+      ],
+    },
+  });
+  findWorkflows.mockResolvedValue([
+    workflow("global"),
+    workflow("local", "repo-1"),
+    workflow("different-repo", "repo-2"),
+    workflow("wrong-trigger", undefined, "GITLAB_PIPELINE"),
+  ]);
+  const overview = await service().overview(undefined, undefined, true);
+  expect(findWorkflows).toHaveBeenCalledWith(
+    expect.objectContaining({
+      where: expect.objectContaining({
+        enabled: true,
+        archivedAt: null,
+        activeVersionId: { not: null },
+        quickActionKind: { in: expect.arrayContaining(["FAILING_PIPELINE"]) },
+      }),
+    }),
+  );
+  const group = overview.agents[0]?.codebases[0];
+  expect(group?.quickActions).toEqual([]);
+  expect(group?.failingPipelineQuickActions.map(({ id }) => id)).toEqual([
+    "global",
+    "local",
+  ]);
+});
+
+test("batches the in-progress run counts by worktree and kind", async () => {
+  groupRuns.mockResolvedValue([
+    { worktreeId: "worktree-1", kind: "SESSION", _count: { _all: 2 } },
+    { worktreeId: "worktree-1", kind: "PLAN", _count: { _all: 1 } },
+    { worktreeId: "worktree-2", kind: "PLAN", _count: { _all: 3 } },
+  ]);
+  expect(
+    await service().inProgressRunCounts(["worktree-1", "worktree-2"]),
+  ).toEqual([
+    { worktreeId: "worktree-1", sessionCount: 2, planCount: 1 },
+    { worktreeId: "worktree-2", sessionCount: 0, planCount: 3 },
+  ]);
+  expect(groupRuns).toHaveBeenCalledExactlyOnceWith({
+    by: ["worktreeId", "kind"],
+    where: {
+      worktreeId: { in: ["worktree-1", "worktree-2"] },
+      kind: { in: ["PLAN", "SESSION"] },
+      status: "IN_PROGRESS",
+      archivedAt: null,
+    },
+    _count: { _all: true },
+  });
 });

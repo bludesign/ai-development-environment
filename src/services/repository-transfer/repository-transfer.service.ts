@@ -1,6 +1,7 @@
 import { validateTransferReferences } from "./integrity";
 import "server-only";
 import { randomUUID } from "node:crypto";
+import { WORKFLOW_QUICK_ACTION_KINDS } from "@/lib/workflows/quick-action-kinds";
 import { z } from "zod";
 import {
   normalizeGitOrigin,
@@ -101,6 +102,7 @@ const workflowFields = [
   "overlapPolicy",
   "overlapScope",
   "maxConcurrentRuns",
+  "maxPipelineRepairRetries",
   "completionNotificationsEnabled",
   "exclusiveWorktree",
   "worktreeConcurrency",
@@ -1966,6 +1968,12 @@ export class RepositoryTransferService {
             .min(1)
             .max(32)
             .parse(f.maxConcurrentRuns ?? 1),
+          maxPipelineRepairRetries: z
+            .number()
+            .int()
+            .min(0)
+            .max(10)
+            .parse(f.maxPipelineRepairRetries ?? 0),
           worktreeConcurrency: concurrency,
           exclusiveWorktree: concurrency === "EXCLUSIVE",
           blocksGitOperations:
@@ -1975,7 +1983,7 @@ export class RepositoryTransferService {
             .boolean()
             .parse(f.completionNotificationsEnabled ?? true),
           quickActionKind: z
-            .enum(["NONE", "STANDARD", "MERGE_CONFLICT", "GITHUB_ACTIONS"])
+            .enum(WORKFLOW_QUICK_ACTION_KINDS)
             .parse(f.quickActionKind ?? "NONE"),
         };
       }

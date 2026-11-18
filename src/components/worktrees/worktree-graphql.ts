@@ -1,7 +1,24 @@
 import { POST_MERGE_SWITCH_FIELDS } from "@/components/github/post-merge-switch-client";
 
 export const PULL_REQUEST_FIELDS =
-  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision requestedReviewerCount unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
+  "id number title url repositoryGithubId repositoryNameWithOwner repositoryUrl labels jiraKey pipelineStatus pipelineRevision pipelines { id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId jobs { id name status url canRetry retryUnavailableReason steps { number name status } } } reviewDecision requestedReviewerCount unresolvedReviewThreadCount state isDraft mergeable mergeStateStatus autoMergeEnabled viewerCanEnableAutoMerge viewerCanDisableAutoMerge headRefOid headRefName createdAt";
+
+export const WORKTREE_QUICK_ACTION_FIELDS = `
+  id name description quickActionIconKey quickActionButtonVariant
+  hasPlainTrigger(resourceKind: "WORKTREE")
+  triggerChoices(resourceKind: "WORKTREE") { key label description }
+`;
+
+export const WORKTREE_HEAD_PIPELINE_FIELDS = `
+  gitHubPipelineRepositoryId
+  gitHubHeadPipelineStatus {
+    repositoryGithubId repositoryNameWithOwner repositoryUrl headSha pipelineStatus revision updatedAt
+    pipelines {
+      id name status url checkSuiteId canRetry retryUnavailableReason workflowRunId workflowId runNumber runAttempt
+      jobs { id name status url canRetry retryUnavailableReason steps { number name status } runAttempt }
+    }
+  }
+`;
 
 export const SOURCE_CONTROL_REQUEST_FIELDS = `
   provider id number title url isDraft headRefName headRefOid createdAt
@@ -26,7 +43,7 @@ const worktreeFields = (pipelineFields: string) => `
   activeJob { id agentId kind commandName payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
   activeJobs { id agentId kind commandName payload status error createdAt startedAt finishedAt updatedAt }
-  autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
+  autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice pipelineWorkflowId pipelineWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
   autoMerge { ${POST_MERGE_SWITCH_FIELDS} autoSync worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
   sourceControlRequest { ${SOURCE_CONTROL_REQUEST_FIELDS} }

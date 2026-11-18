@@ -139,7 +139,11 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
     Array<{ id: string; name: string; displayOrigin: string }>
   >([]);
   const [quickActionKind, setQuickActionKind] = useState<
-    "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS" | "NONE"
+    | "STANDARD"
+    | "MERGE_CONFLICT"
+    | "FAILING_PIPELINE"
+    | "GITHUB_ACTIONS"
+    | "NONE"
   >("NONE");
   const [quickActionIconKey, setQuickActionIconKey] = useState("play");
   const [quickActionButtonVariant, setQuickActionButtonVariant] = useState<
@@ -651,13 +655,17 @@ export function WorkflowDetailPage({ workflowId }: { workflowId: string }) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {["STANDARD", "MERGE_CONFLICT", "GITHUB_ACTIONS", "NONE"].map(
-                  (kind) => (
-                    <SelectItem key={kind} value={kind}>
-                      {t(`quickActionKinds.${kind}` as never)}
-                    </SelectItem>
-                  ),
-                )}
+                {[
+                  "STANDARD",
+                  "MERGE_CONFLICT",
+                  "FAILING_PIPELINE",
+                  "GITHUB_ACTIONS",
+                  "NONE",
+                ].map((kind) => (
+                  <SelectItem key={kind} value={kind}>
+                    {t(`quickActionKinds.${kind}` as never)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <p className="text-xs text-muted-foreground">

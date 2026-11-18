@@ -1258,6 +1258,8 @@ extend type Subscription {
     provider: String
     "Only emit changes for runs with this origin."
     origin: RunOrigin
+    "Only emit run lifecycle and archive changes, skipping incremental output and usage updates."
+    stateOnly: Boolean = false
   ): Boolean!
 
   "Emits an agent run whenever agent runs change."

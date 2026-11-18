@@ -1,3 +1,4 @@
+import { WORKFLOW_QUICK_ACTION_KINDS } from "./quick-action-kinds";
 import type { ConfigFieldDescriptor } from "./config-descriptor-types";
 
 const label = (key: string) =>
@@ -24,7 +25,7 @@ const field = (
 });
 const choice = (
   key: string,
-  values: string[],
+  values: readonly string[],
   required = false,
 ): ConfigFieldDescriptor => ({
   ...field(key, "enum", required),
@@ -932,17 +933,7 @@ export const WORKFLOW_CAPABILITY_ACTIONS = [
   ]),
   action("SET_WORKFLOW_QUICK_ACTION", "Tools", "set_workflow_quick_action", [
     field("id", "text", true),
-    choice(
-      "kind",
-      [
-        "STANDARD",
-        "MERGE_CONFLICT",
-        "GITHUB_ACTIONS",
-        "GITLAB_PIPELINES",
-        "NONE",
-      ],
-      true,
-    ),
+    choice("kind", WORKFLOW_QUICK_ACTION_KINDS, true),
     field("quickActionIconKey", "text", true),
     field("quickActionButtonVariant", "text", true),
     field("repositoryIds", "stringList", true),

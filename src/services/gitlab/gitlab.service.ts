@@ -56,7 +56,12 @@ import {
   type GitLabCommentsInput,
 } from "./gitlab-comments";
 import type { NotificationsService } from "@/services/notifications";
-import { ACTIVE_GITLAB_PIPELINE_STATUSES } from "./pipeline-status";
+import {
+  ACTIVE_GITLAB_PIPELINE_STATUSES,
+  isActiveGitLabPipeline,
+} from "./pipeline-status";
+import { latestGitLabPipelines } from "@/lib/worktree-failing-pipelines";
+import type { PipelineCI } from "@/services/worktrees/pipeline-repair";
 
 import type {
   GitLabApiCallView,
@@ -401,6 +406,43 @@ function mapPipeline(pipeline: RawGitLabPipeline): GitLabPipelineView {
     finishedAt: pipeline.finished_at ?? null,
     duration: pipeline.duration ?? null,
     queuedDuration: pipeline.queued_duration ?? null,
+  };
+}
+
+function gitLabPipelineCI(pipelines: GitLabPipelineView[]): PipelineCI {
+  if (
+    pipelines.some(
+      ({ status }) => isActiveGitLabPipeline(status) || status === "SCHEDULED",
+    )
+  )
+    return { passed: false, failures: [] };
+
+  const passed =
+    pipelines.some(({ status }) => status === "SUCCESS") &&
+    pipelines.every(({ status }) => ["SUCCESS", "SKIPPED"].includes(status));
+  const failed = pipelines.filter(({ status }) => status === "FAILED");
+  const terminalStatus =
+    pipelines.find(({ status }) => ["CANCELED", "MANUAL"].includes(status))
+      ?.status ?? pipelines.find(({ status }) => status === "SKIPPED")?.status;
+  return {
+    passed,
+    failures: failed.map(({ id, status, webUrl, sha, projectId }) => ({
+      provider: "GITLAB",
+      id,
+      status,
+      url: webUrl || null,
+      headSha: sha,
+      projectId,
+    })),
+    ...(failed.length
+      ? {
+          failureKey: JSON.stringify(
+            failed.map(({ id, updatedAt }) => [id, updatedAt]).sort(),
+          ),
+        }
+      : !passed && terminalStatus
+        ? { terminalStatus }
+        : {}),
   };
 }
 
@@ -950,6 +992,113 @@ export class GitLabService {
     );
   }
 
+  async branchPipelineCI(
+    canonicalOrigin: string,
+    branch: string,
+    linkedMergeRequest?: { projectId: string; iid: number } | null,
+  ) {
+    const project = await this.projectForCanonicalOrigin(canonicalOrigin);
+    if (!project) return { headSha: null };
+    const { data } = await this.get<{ commit: { id: string } }>({
+      path: `/projects/${encodeURIComponent(project.id)}/repository/branches/${encodeURIComponent(branch)}`,
+      operation: "GitLabWorktreeBranchRevision",
+      source: "WORKTREES",
+      force: true,
+      allowStaleOnError: false,
+    });
+    const headSha = data.commit.id;
+    const pipelines = await this.allPages<RawGitLabPipeline>({
+      path: `/projects/${encodeURIComponent(project.id)}/pipelines`,
+      operation: "GitLabWorktreePipelineRepair",
+      source: "WORKTREES",
+      query: { sha: headSha, ref: branch, order_by: "id", sort: "desc" },
+      force: true,
+      allowStaleOnError: false,
+    });
+    const target = { branch, headSha };
+    const latest = latestGitLabPipelines(
+      pipelines
+        .map(mapPipeline)
+        .filter(
+          (pipeline) =>
+            pipeline.projectId === project.id &&
+            pipeline.source !== "merge_request_event",
+        ),
+      target,
+    );
+    if (linkedMergeRequest) {
+      const { projectId, iid } = linkedMergeRequest;
+      const mr = await this.mergeRequestState(projectId, iid, true).catch(
+        (error) => {
+          if (error instanceof GitLabRequestError && error.statusCode === 404)
+            return null;
+          throw error;
+        },
+      );
+      if (
+        mr?.state === "OPENED" &&
+        mr.projectId === projectId &&
+        mr.iid === iid &&
+        mr.sourceProjectId === project.id &&
+        mr.sourceBranch === branch &&
+        mr.sha === headSha
+      ) {
+        const pipeline = await this.mergeRequestPipelineForRevision(mr);
+        if (
+          pipeline &&
+          (pipeline.source === "merge_request_event" || !latest.length)
+        )
+          latest.push(pipeline);
+      }
+    }
+    return { headSha, ci: gitLabPipelineCI(latest) };
+  }
+
+  private async mergeTargetRevision(projectId: string, branch: string) {
+    return (
+      await this.get<{ commit: { id: string } }>({
+        path: `/projects/${encodeURIComponent(projectId)}/repository/branches/${encodeURIComponent(branch)}`,
+        operation: "GitLabMergeTargetRevision",
+        source: "MERGE_REQUEST_DETAILS",
+        force: true,
+        allowStaleOnError: false,
+      })
+    ).data.commit.id;
+  }
+
+  private async mergeRequestPipelineForRevision(
+    mr: GitLabMergeRequestView,
+    targetSha?: string,
+  ) {
+    const pipeline = mr.headPipeline;
+    if (!pipeline) return null;
+    if (pipeline.sha === mr.sha) return pipeline;
+    if (pipeline.source !== "merge_request_event") return null;
+
+    const currentTarget =
+      targetSha ??
+      (await this.mergeTargetRevision(mr.projectId, mr.targetBranch));
+    try {
+      const commit = (
+        await this.get<{ parent_ids: string[] }>({
+          path: `/projects/${encodeURIComponent(pipeline.projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}`,
+          operation: "GitLabMergePipelineParents",
+          source: "MERGE_REQUEST_DETAILS",
+          force: true,
+          allowStaleOnError: false,
+        })
+      ).data;
+      return commit.parent_ids.includes(mr.sha) &&
+        commit.parent_ids.includes(currentTarget)
+        ? pipeline
+        : null;
+    } catch (error) {
+      if (error instanceof GitLabRequestError && error.statusCode === 404)
+        return null;
+      throw error;
+    }
+  }
+
   async managedMergeReadiness(
     projectId: string,
     iid: number,
@@ -959,35 +1108,12 @@ export class GitLabService {
       ? await this.mergeProject(mr.sourceProjectId)
       : null;
     const targetOrigin = normalizeGitOrigin(project.web_url).canonicalOrigin;
-    const branch = (
-      await this.get<{ commit: { id: string } }>({
-        path: `/projects/${encodeURIComponent(projectId)}/repository/branches/${encodeURIComponent(mr.targetBranch)}`,
-        operation: "GitLabMergeTargetRevision",
-        source: "MERGE_REQUEST_DETAILS",
-        force: true,
-        allowStaleOnError: false,
-      })
-    ).data;
-    const pipeline = mr.headPipeline;
-    let ciPassed = pipeline?.status === "SUCCESS" && pipeline.sha === mr.sha;
-    if (
-      pipeline?.status === "SUCCESS" &&
-      pipeline.sha !== mr.sha &&
-      pipeline.source === "merge_request_event"
-    ) {
-      const commit = (
-        await this.get<{ parent_ids: string[] }>({
-          path: `/projects/${encodeURIComponent(projectId)}/repository/commits/${encodeURIComponent(pipeline.sha)}`,
-          operation: "GitLabMergePipelineParents",
-          source: "MERGE_REQUEST_DETAILS",
-          force: true,
-          allowStaleOnError: false,
-        })
-      ).data;
-      ciPassed =
-        commit.parent_ids.includes(mr.sha) &&
-        commit.parent_ids.includes(branch.commit.id);
-    }
+    const targetSha = await this.mergeTargetRevision(
+      projectId,
+      mr.targetBranch,
+    );
+    const pipeline = await this.mergeRequestPipelineForRevision(mr, targetSha);
+    const pipelineCI = gitLabPipelineCI(pipeline ? [pipeline] : []);
     const permanent = !canMerge
       ? "Your GitLab account cannot merge this request."
       : mr.draft
@@ -1012,8 +1138,9 @@ export class GitLabService {
       targetOrigin,
       targetUrl: `${project.web_url.replace(/\/$/, "")}.git`,
       targetBranch: mr.targetBranch,
-      targetSha: branch.commit.id,
-      ciPassed,
+      targetSha,
+      ciPassed: pipelineCI.passed,
+      pipelineCI,
       canMerge:
         canMerge &&
         mr.detailedMergeStatus === "mergeable" &&

@@ -7,17 +7,28 @@ import {
 } from "@ai-development-environment/agent-contract/worktrees";
 import { getPrismaClient } from "@/data/prisma-client";
 import { isCodebaseBusyError } from "@/lib/codebase-busy";
-import {
-  workflowResourceKind,
-  workflowTriggerChoices,
-} from "@/lib/workflows/definition";
+import { workflowTriggerChoices } from "@/lib/workflows/definition";
 import type { AgentControlService } from "@/services/agent-control";
 import type { WorkflowsService } from "@/services/workflows";
 import type { WorktreesService } from "./worktrees.service";
+import {
+  advancePipelineRepair,
+  cancelPipelineRepair,
+  worktreeAutomationWorkflows,
+  pipelineWorkflowSelection,
+  PipelineRepairError,
+  requirePipelineRepairCapability,
+  validatePipelineWorkflow,
+  type PipelineCI,
+  type PipelineRepair,
+  type PipelineWorkflowInput,
+  type PipelineWorkflowSelection,
+} from "./pipeline-repair";
 
 export const MANAGED_MERGE_STATES = [
   "SYNCING",
   "RESOLVING",
+  "RESOLVING_PIPELINE",
   "WAITING_CI",
   "WAITING_REQUIREMENTS",
   "MERGING",
@@ -77,6 +88,7 @@ export type MergeSyncReadiness = {
   targetBranch: string;
   targetSha: string;
   ciPassed: boolean;
+  pipelineCI?: PipelineCI;
   canMerge: boolean;
   hasConflicts?: boolean;
   blocker?: string | null;
@@ -99,6 +111,8 @@ type SyncIntent = {
   folder: string;
   gitDirectory: string;
   conflictWorkflow?: { id: string; choice: string | null };
+  pipelineWorkflow?: PipelineWorkflowSelection;
+  pipelineRepair?: PipelineRepair;
   conflictResolution?: {
     runId: string;
     targetSha: string;
@@ -113,13 +127,21 @@ export type MergeConflictWorkflowFields = {
     hasPlainTrigger?: boolean;
     triggerChoices?: Array<{ key: string; label: string }>;
   }>;
+  failingPipelineWorkflows?: Array<{
+    id: string;
+    name: string;
+    hasPlainTrigger?: boolean;
+    triggerChoices?: Array<{ key: string; label: string }>;
+  }>;
+  defaultPipelineWorkflowId?: string | null;
+  defaultPipelineWorkflowChoice?: string | null;
   defaultConflictWorkflowId?: string | null;
   defaultConflictWorkflowChoice?: string | null;
   conflictWorkflowBlockedReason?: string | null;
   autoSyncRequiresConflictWorkflow?: boolean;
 };
 
-export type MergeConflictWorkflowInput = {
+export type MergeConflictWorkflowInput = PipelineWorkflowInput & {
   conflictWorkflowId?: string | null;
   conflictWorkflowChoice?: string | null;
 };
@@ -175,41 +197,6 @@ function hasSyncCapability(
   }
 }
 
-async function conflictWorkflows(repositoryId: string) {
-  const prisma = await getPrismaClient();
-  const rows = await prisma.workflow.findMany({
-    where: {
-      enabled: true,
-      archivedAt: null,
-      activeVersionId: { not: null },
-      quickActionKind: "MERGE_CONFLICT",
-      OR: [
-        { quickActionRepositories: { none: {} } },
-        { quickActionRepositories: { some: { repositoryId } } },
-      ],
-    },
-    include: { activeVersion: { include: { triggers: true } } },
-    orderBy: [{ name: "asc" }, { id: "asc" }],
-  });
-  return rows.flatMap((workflow) => {
-    const triggers = (workflow.activeVersion?.triggers ?? []).flatMap(
-      ({ kind, configJson }) => {
-        if (kind !== "RESOURCE_MANUAL" && kind !== "RESOURCE_MANUAL_CHOICE")
-          return [];
-        try {
-          const config = JSON.parse(configJson);
-          return workflowResourceKind(config) === "WORKTREE"
-            ? [{ kind, config }]
-            : [];
-        } catch {
-          return [];
-        }
-      },
-    );
-    return triggers.length > 0 ? [{ workflow, triggers }] : [];
-  });
-}
-
 async function validateConflictWorkflow(
   worktree: NonNullable<Awaited<ReturnType<typeof syncWorktree>>>,
   selected: NonNullable<SyncIntent["conflictWorkflow"]>,
@@ -217,7 +204,10 @@ async function validateConflictWorkflow(
   if (!hasSyncCapability(worktree, WORKTREE_REVIEWED_SYNC_FINALIZE_CAPABILITY))
     throw new Error(CONFLICT_WORKFLOW_AGENT_REQUIRED);
   const eligible = (
-    await conflictWorkflows(worktree.codebase.repository.id)
+    await worktreeAutomationWorkflows(
+      worktree.codebase.repository.id,
+      "MERGE_CONFLICT",
+    )
   ).find(({ workflow }) => workflow.id === selected.id);
   if (!eligible)
     throw new Error(
@@ -245,22 +235,36 @@ export async function mergeConflictWorkflowOptions(
     worktree &&
     hasSyncCapability(worktree, WORKTREE_REVIEWED_SYNC_FINALIZE_CAPABILITY);
   const workflows = supportsResolution
-    ? (await conflictWorkflows(worktree.codebase.repository.id)).map(
-        ({ workflow }) => workflow,
-      )
+    ? (
+        await worktreeAutomationWorkflows(
+          worktree.codebase.repository.id,
+          "MERGE_CONFLICT",
+        )
+      ).map(({ workflow }) => workflow)
     : [];
-  let selected: SyncIntent["conflictWorkflow"];
+  const failingPipelineWorkflows = worktree
+    ? (
+        await worktreeAutomationWorkflows(
+          worktree.codebase.repository.id,
+          "FAILING_PIPELINE",
+        )
+      ).map(({ workflow }) => workflow)
+    : [];
+  let intent: SyncIntent | undefined;
   if (syncStateJson) {
     try {
-      selected = readMergeSync(syncStateJson).conflictWorkflow;
+      intent = readMergeSync(syncStateJson);
     } catch {
       // Older or invalid saved sync data does not prevent reviewing the sheet.
     }
   }
   return {
     mergeConflictWorkflows: workflows,
-    defaultConflictWorkflowId: selected?.id ?? null,
-    defaultConflictWorkflowChoice: selected?.choice ?? null,
+    defaultConflictWorkflowId: intent?.conflictWorkflow?.id ?? null,
+    defaultConflictWorkflowChoice: intent?.conflictWorkflow?.choice ?? null,
+    failingPipelineWorkflows,
+    defaultPipelineWorkflowId: intent?.pipelineWorkflow?.id ?? null,
+    defaultPipelineWorkflowChoice: intent?.pipelineWorkflow?.choice ?? null,
     conflictWorkflowBlockedReason:
       worktree && !supportsResolution
         ? CONFLICT_WORKFLOW_AGENT_REQUIRED
@@ -311,6 +315,7 @@ export async function prepareMergeSync(
   ready: MergeSyncReadiness,
   owner: { provider: "GITHUB" | "GITLAB"; id: string },
   selection: MergeConflictWorkflowInput = {},
+  previousSyncState?: string | null,
 ): Promise<string> {
   const reason = await mergeSyncUnavailableReason(worktreeId);
   if (reason) throw new Error(reason);
@@ -320,12 +325,36 @@ export async function prepareMergeSync(
   const standalone = await prisma.worktreeAutoSync.findUnique({
     where: { worktreeId },
   });
-  if (standalone?.activeJobId || standalone?.workflowRunId)
+  if (
+    standalone?.activeJobId ||
+    standalone?.workflowRunId ||
+    standalone?.state === "RESOLVING_PIPELINE"
+  )
     throw new Error(
       "Wait for the active Auto Sync operation before enabling Auto Merge.",
     );
   const worktree = await syncWorktree(worktreeId);
   if (!worktree) throw new Error("The linked worktree is unavailable.");
+  let previousPipelineWorkflow: PipelineWorkflowSelection | undefined;
+  if (previousSyncState && selection.pipelineWorkflowId === undefined) {
+    try {
+      previousPipelineWorkflow =
+        readMergeSync(previousSyncState).pipelineWorkflow;
+    } catch {
+      // Replacing an older or damaged operation starts with no saved pipeline workflow.
+    }
+  }
+  const pipelineWorkflow = pipelineWorkflowSelection(
+    selection,
+    previousPipelineWorkflow,
+  );
+  if (pipelineWorkflow) {
+    requirePipelineRepairCapability(worktree.codebase.agent);
+    await validatePipelineWorkflow(
+      worktree.codebase.repository.id,
+      pipelineWorkflow,
+    );
+  }
   const workflowId = selection.conflictWorkflowId?.trim();
   const workflowChoice = selection.conflictWorkflowChoice?.trim() || null;
   if (workflowChoice && !workflowId)
@@ -372,6 +401,7 @@ export async function prepareMergeSync(
     folder: worktree.folder,
     gitDirectory: worktree.gitDirectory,
     conflictWorkflow,
+    pipelineWorkflow,
   };
   return JSON.stringify(intent);
 }
@@ -381,6 +411,8 @@ export type MergeSyncPatch = {
   syncStateJson: string;
   lastError: string | null;
   acceptedHeadSha?: string;
+  expectedSyncStateJson?: string | null;
+  expectedState?: string;
 };
 
 /** One durable step. Provider coordinators retain their own merge/follow-up locks. */
@@ -399,25 +431,39 @@ export async function advanceMergeSync(input: {
   return withMergeSyncLock(input.worktreeId, async () => {
     const intent = readMergeSync(input.syncStateJson);
     let state = input.state;
+    let savedSyncState = input.syncStateJson;
     const save = async (next: string, error: string | null = null) => {
-      state = next;
+      const syncStateJson = JSON.stringify(intent);
       await input.save({
-        state,
-        syncStateJson: JSON.stringify(intent),
+        state: next,
+        syncStateJson,
         lastError: error,
         acceptedHeadSha: intent.headSha,
+        ...(intent.pipelineWorkflow
+          ? {
+              expectedSyncStateJson: savedSyncState,
+              expectedState: state,
+            }
+          : {}),
       });
+      state = next;
+      savedSyncState = syncStateJson;
     };
     const identityMatches = (ready: MergeSyncReadiness) =>
       ready.sourceOrigin === intent.sourceOrigin &&
       ready.sourceBranch === intent.sourceBranch &&
       ready.targetOrigin === intent.targetOrigin &&
       ready.targetBranch === intent.targetBranch;
-    const stopConflictSync = async () => {
-      if (!intent.conflictWorkflow && !intent.conflictResolution) return true;
+    const stopOwnedWork = async () => {
+      if (
+        !intent.conflictWorkflow &&
+        !intent.conflictResolution &&
+        !intent.pipelineRepair
+      )
+        return true;
       try {
         await cancelMergeSync(
-          input.syncStateJson,
+          JSON.stringify(intent),
           input.agents,
           input.workflows,
         );
@@ -442,7 +488,7 @@ export async function advanceMergeSync(input: {
           throw new Error(
             "A different source commit was merged. Review the follow-ups manually.",
           );
-        return stopConflictSync();
+        return stopOwnedWork();
       }
       if (ready.state !== "OPEN")
         throw new Error("The request closed without merging.");
@@ -473,6 +519,27 @@ export async function advanceMergeSync(input: {
         throw new Error(
           "The linked worktree identity changed. Review it before resuming Auto Merge.",
         );
+      const repairPipeline = async () => {
+        if (!input.workflows || !intent.pipelineWorkflow) return false;
+        return advancePipelineRepair({
+          worktree,
+          selection: intent.pipelineWorkflow,
+          repair: intent.pipelineRepair,
+          headSha: ready.headSha,
+          ci: ready.pipelineCI,
+          workflows: input.workflows,
+          save: async (repair, acceptedHeadSha) => {
+            intent.pipelineRepair = repair ?? undefined;
+            if (acceptedHeadSha) intent.headSha = acceptedHeadSha;
+            await save(repair ? "RESOLVING_PIPELINE" : "WAITING_CI");
+          },
+        });
+      };
+      if (intent.pipelineRepair && !intent.pipelineRepair.verifiedAt) {
+        if (ready.blocker) throw new PipelineRepairError(ready.blocker);
+        await repairPipeline();
+        return false;
+      }
       if (state === "RESOLVING") {
         if (!intent.conflictResolution || !input.workflows)
           throw new Error("The merge conflict workflow run is missing.");
@@ -632,6 +699,13 @@ export async function advanceMergeSync(input: {
             "The source commit changed after syncing. Review it before resuming Auto Merge.",
           );
         intent.headSha = result.syncedHeadSha;
+        if (
+          intent.pipelineRepair?.verifiedAt &&
+          intent.pipelineRepair.headSha !== result.syncedHeadSha
+        ) {
+          intent.pipelineRepair.headSha = result.syncedHeadSha;
+          intent.pipelineRepair.verifiedAt = Date.now();
+        }
         intent.syncedTargetSha = result.syncedTargetSha;
         intent.jobId = null;
         intent.requestId = null;
@@ -678,6 +752,7 @@ export async function advanceMergeSync(input: {
         await save("SYNCING");
         return false;
       }
+      if (await repairPipeline()) return false;
       if (!ready.ciPassed) {
         await save("WAITING_CI");
         return false;
@@ -711,8 +786,14 @@ export async function advanceMergeSync(input: {
         merged.headSha === intent.headSha
       );
     } catch (error) {
+      if (
+        (error as { code?: string })?.code === "P2025" &&
+        intent.pipelineWorkflow
+      )
+        return false; // Another reconciler or cancellation already replaced the checkpoint.
       const message = error instanceof Error ? error.message : String(error);
-      const transient = isTransientMergeError(error);
+      const transient =
+        !(error instanceof PipelineRepairError) && isTransientMergeError(error);
       const next =
         error instanceof MergeSyncNotSubmittedError
           ? "WAITING_REQUIREMENTS"
@@ -721,8 +802,7 @@ export async function advanceMergeSync(input: {
             : transient
               ? state
               : "ACTION_REQUIRED";
-      if (next === "ACTION_REQUIRED" && !(await stopConflictSync()))
-        return false;
+      if (next === "ACTION_REQUIRED" && !(await stopOwnedWork())) return false;
       await save(next, message);
       return false;
     }
@@ -749,6 +829,7 @@ export async function cancelMergeSync(
         })
       : null;
   if (job && !TERMINAL.has(job.status)) await agents.cancelJob(job.id);
+  await cancelPipelineRepair(intent.pipelineRepair, workflows, agents);
   if (!workflows || intent.conflictResolution?.finalizing) return;
   let runId = intent.conflictResolution?.runId;
   if (!runId && intent.conflictWorkflow && job?.status === "SUCCEEDED") {

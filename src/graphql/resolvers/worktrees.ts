@@ -39,6 +39,14 @@ export const createWorktreeResolvers = (
   automation: WorktreeAutomationService,
 ) => ({
   WorktreeOverview: {
+    inProgressRunCounts: (value: {
+      agents: Array<{ codebases: Array<{ worktrees: Array<{ id: string }> }> }>;
+    }) =>
+      service.inProgressRunCounts(
+        value.agents.flatMap(({ codebases }) =>
+          codebases.flatMap(({ worktrees }) => worktrees.map(({ id }) => id)),
+        ),
+      ),
     activeSyncBatches: (value: {
       syncScope?: { appId?: string | null; worktreeId?: string | null };
     }) =>
@@ -440,7 +448,7 @@ export const createWorktreeResolvers = (
         input.operation,
         input.requestId,
         input.forcePreparations,
-        input.expectedBranch,
+        { expectedBranch: input.expectedBranch },
       );
     },
     forceWorktreeAutoSync: (
@@ -676,6 +684,8 @@ export const createWorktreeResolvers = (
           autoSync?: boolean | null;
           conflictWorkflowId?: string | null;
           conflictWorkflowChoice?: string | null;
+          pipelineWorkflowId?: string | null;
+          pipelineWorkflowChoice?: string | null;
           expectedHeadSha?: string | null;
           worktreeId: string;
           repositoryNameWithOwner: string;

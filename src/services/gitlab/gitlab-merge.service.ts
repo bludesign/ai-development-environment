@@ -522,10 +522,13 @@ export class GitLabMergeService {
           throw new Error("Branch syncing requires Auto Merge.");
         if (
           !input.autoSync &&
-          (input.conflictWorkflowId || input.conflictWorkflowChoice)
+          (input.conflictWorkflowId ||
+            input.conflictWorkflowChoice ||
+            input.pipelineWorkflowId ||
+            input.pipelineWorkflowChoice)
         )
           throw new Error(
-            "Automatic conflict resolution requires Auto sync branch.",
+            "Automatic workflow resolution requires Auto sync branch.",
           );
         if (
           input.autoSync
@@ -658,6 +661,7 @@ export class GitLabMergeService {
               ready,
               { provider: "GITLAB", id: saved?.id ?? "new" },
               input,
+              saved?.syncStateJson,
             );
             const managedData = {
               ...data,
@@ -1518,9 +1522,22 @@ export class GitLabMergeService {
                       current.projectId,
                       current.iid,
                     ),
-                  save: ({ acceptedHeadSha, ...data }) =>
+                  save: ({
+                    acceptedHeadSha,
+                    expectedSyncStateJson,
+                    expectedState,
+                    ...data
+                  }) =>
                     prisma.gitLabMergeOperation.update({
-                      where: { id: current.id },
+                      where: {
+                        id: current.id,
+                        ...(expectedState
+                          ? {
+                              state: expectedState,
+                              syncStateJson: expectedSyncStateJson,
+                            }
+                          : {}),
+                      },
                       data: {
                         ...data,
                         ...(acceptedHeadSha ? { sha: acceptedHeadSha } : {}),

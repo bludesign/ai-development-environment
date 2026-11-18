@@ -3093,6 +3093,7 @@ export const operateWorktree: AgentJobHandler = async (
   let operationOutcome:
     "COMPLETED" | "PREPARATION_CONFLICT" | "REBASE_CONFLICT" = "COMPLETED";
   let preparationConflictPathList: string[] = [];
+  let pushedHeadSha: string | undefined;
   let preparationResults: WorktreePreparationResult[] = [];
 
   const inspectPreparations = () =>
@@ -3434,13 +3435,42 @@ export const operateWorktree: AgentJobHandler = async (
       );
       break;
     }
-    case "PUSH":
+    case "PUSH": {
       if (!branch) throw new Error("Push requires a branch");
-      await runGit(
-        upstream ? ["push"] : ["push", "--set-upstream", "origin", "HEAD"],
+      const before = await git(
+        folder,
+        ["rev-parse", "HEAD"],
+        timeoutMs,
+        signal,
+      );
+      const pushed = await runGit(
+        upstream
+          ? ["push", "--porcelain"]
+          : ["push", "--porcelain", "--set-upstream", "origin", "HEAD"],
         upstream ? "Push failed" : "Publish failed",
       );
+      const after = await git(
+        folder,
+        ["rev-parse", "HEAD", "@{upstream}"],
+        timeoutMs,
+        signal,
+      );
+      const sha = before.stdout.trim();
+      const revisions = after.stdout.trim().split("\n");
+      const updatedBranch = pushed.stdout.split("\n").some((line) => {
+        const [flag, refs] = line.split("\t");
+        return flag === " " && refs?.endsWith(`:refs/heads/${branch}`);
+      });
+      if (
+        updatedBranch &&
+        before.exitCode === 0 &&
+        after.exitCode === 0 &&
+        revisions.length === 2 &&
+        revisions.every((revision) => revision === sha)
+      )
+        pushedHeadSha = sha;
       break;
+    }
     case "RESET": {
       if (!branch || !upstream)
         throw new Error("Reset requires a branch with an upstream");
@@ -3477,6 +3507,7 @@ export const operateWorktree: AgentJobHandler = async (
     checkedAt: new Date().toISOString(),
     preparations: preparationResults,
     worktree: await worktreeResult(),
+    ...(pushedHeadSha ? { pushedHeadSha } : {}),
   };
 };
 

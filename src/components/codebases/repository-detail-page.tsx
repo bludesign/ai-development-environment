@@ -125,7 +125,8 @@ export function RepositoryDetailPage({
       name: string;
       description: string;
       enabled: boolean;
-      quickActionKind: "STANDARD" | "MERGE_CONFLICT" | "GITHUB_ACTIONS";
+      quickActionKind:
+        "STANDARD" | "MERGE_CONFLICT" | "FAILING_PIPELINE" | "GITHUB_ACTIONS";
       quickActionRepositories: Array<{ id: string; name: string }>;
     }>
   >([]);

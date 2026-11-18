@@ -373,6 +373,8 @@
     "canvasSection": "Lienzo",
     "worktreeReservation": "Reserva del árbol de trabajo",
     "reservesWorktree": "Reserva el árbol",
+    "maxPipelineRepairRetries": "Reintentos automáticos máximos de canalización",
+    "maxPipelineRepairRetriesHelp": "Intentos adicionales si CI sigue fallando tras una reparación correcta.",
     "maxConcurrentRuns": "Máximo de ejecuciones simultáneas",
     "exclusiveWorktree": "Reservar el árbol de trabajo para este flujo",
     "exclusiveWorktreeHelp": "Más allá de la política de solapamiento, que solo cuenta las ejecuciones de este flujo: un árbol reservado también retiene otros flujos, planes y sesiones hasta que la ejecución termina. La ejecución espera al trabajo ya en curso antes de empezar y sus propios pasos continúan con normalidad.",
@@ -643,12 +645,14 @@
     "quickActionKinds": {
       "STANDARD": "Estándar",
       "MERGE_CONFLICT": "Conflicto de fusión",
+      "FAILING_PIPELINE": "Pipeline con errores",
       "GITHUB_ACTIONS": "Acciones de GitHub",
       "NONE": "Ninguna"
     },
     "quickActionKindHelp": {
       "STANDARD": "Mostrar con las acciones estándar del worktree.",
       "MERGE_CONFLICT": "Mostrar cuando un rebase se detiene por conflictos.",
+      "FAILING_PIPELINE": "Mostrar esta acción en los árboles de trabajo con un pipeline de CI con errores.",
       "GITHUB_ACTIONS": "Mostrar en los menús de pipelines y trabajos de GitHub.",
       "NONE": "No mostrar como acción rápida."
     },
@@ -2655,6 +2659,7 @@
       "CANCELED": "Cancelada",
       "SYNCING": "Sincronizando rama",
       "RESOLVING": "Ejecutando el flujo de trabajo para conflictos de fusión",
+      "RESOLVING_PIPELINE": "Reparación de canalización en curso o en espera de CI",
       "WAITING_CI": "Esperando CI",
       "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
       "MERGING": "Fusionando"
@@ -3198,6 +3203,13 @@
     "closeMergeResult": "Cerrar",
     "autoSyncBranch": "Sincronizar rama automáticamente",
     "autoSyncBranchDescription": "Rebasar y enviar esta rama cuando cambie el destino, y fusionar cuando la CI y los requisitos de fusión se cumplan.",
+    "autoResolveFailingPipelines": "Resolver automáticamente los fallos de canalización",
+    "failingPipelineWorkflow": "Flujo para canalizaciones con fallos",
+    "selectFailingPipelineWorkflow": "Selecciona un flujo para canalizaciones con fallos",
+    "failingPipelineWorkflowTrigger": "Desencadenador del flujo para canalizaciones",
+    "selectFailingPipelineWorkflowTrigger": "Selecciona un desencadenador",
+    "defaultFailingPipelineWorkflowTrigger": "Desencadenador predeterminado",
+    "noFailingPipelineWorkflow": "No hay ningún flujo para canalizaciones con fallos disponible para este repositorio.",
     "autoResolveMergeConflicts": "Resolver conflictos de fusión automáticamente",
     "mergeConflictWorkflow": "Flujo de trabajo para conflictos de fusión",
     "selectMergeConflictWorkflow": "Seleccionar un flujo de trabajo para conflictos de fusión",
@@ -3212,6 +3224,7 @@
     "syncStates": {
       "SYNCING": "Sincronizando rama",
       "RESOLVING": "Ejecutando el flujo de trabajo para conflictos de fusión",
+      "RESOLVING_PIPELINE": "Reparación de canalización en curso o en espera de CI",
       "WAITING_CI": "Esperando CI",
       "WAITING_REQUIREMENTS": "Esperando requisitos de fusión",
       "MERGING": "Fusionando",
@@ -3554,6 +3567,7 @@
     "quickActionKinds": {
       "STANDARD": "Estándar",
       "MERGE_CONFLICT": "Conflicto de fusión",
+      "FAILING_PIPELINE": "Pipeline con errores",
       "GITHUB_ACTIONS": "Acciones de GitHub"
     },
     "allRepositories": "Todos los repositorios",
@@ -3943,6 +3957,9 @@
     "forcePush": "Forzar push",
     "sync": "Sincronizar",
     "rebase": "Rebasar",
+    "pipelineFailing": "Error en el pipeline",
+    "sessionsInProgress": "{count, plural, one {# sesión en curso} other {# sesiones en curso}}",
+    "plansInProgress": "{count, plural, one {# plan en curso} other {# planes en curso}}",
     "rebasePaused": "Rebase en pausa",
     "rebaseConflicts": "Resuelve los conflictos con un flujo o cancela para restaurar el estado anterior al rebase.",
     "rebaseIncomplete": "Hay un rebase en curso. Cancélalo para restaurar el estado anterior de la rama.",
@@ -3956,6 +3973,7 @@
     "unstageAll": "Quitar todo del área de preparación",
     "autoSync": "Sincronización automática",
     "autoSyncing": "Auto Sync activo",
+    "autoSyncRepairingPipeline": "Reparando canalización",
     "autoSyncPaused": "Auto Sync en pausa",
     "forceSyncPreparations": "Forzar sincronización y reaplicar",
     "confirmForceSyncPreparations": "Confirmar sincronización forzada",

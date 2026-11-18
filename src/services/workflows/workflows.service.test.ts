@@ -2213,6 +2213,50 @@ describe("workflow runtime lifecycle guards", () => {
     });
   });
 
+  test("does not create a child run after its pipeline repair root was cancelled", async () => {
+    const version = { id: "version-1", name: "Child workflow" };
+    prisma.workflowRun.findUnique.mockImplementation(async ({ where }) => {
+      switch (where.id) {
+        case "parent-run":
+          return {
+            id: "parent-run",
+            idempotencyKey: "existing-subworkflow-key",
+            parentRunId: "root-run",
+            status: "WAITING",
+          };
+        case "root-run":
+          return {
+            id: "root-run",
+            idempotencyKey: "auto-pipeline-repair:repair:0",
+            parentRunId: null,
+            status: "CANCELLED",
+          };
+        default:
+          return null;
+      }
+    });
+    const service = new WorkflowsService(new WorkflowEventsService());
+
+    await expect(
+      internals(service).createRunForTrigger(
+        {
+          id: "workflow-1",
+          overlapPolicy: "CONCURRENT",
+          activeVersion: version,
+        },
+        version,
+        null,
+        null,
+        "SUBWORKFLOW",
+        "parent-run",
+        { sessionData: {}, parentRunId: "parent-run" },
+        "new-subworkflow-key",
+        "parent-run",
+      ),
+    ).rejects.toThrow("The parent pipeline repair is no longer active");
+    expect(prisma.workflowRun.create).not.toHaveBeenCalled();
+  });
+
   test("links event-triggered runs to the resource that caused the event", async () => {
     const version = { id: "version-1", name: "Run workflow" };
     prisma.workflowRun.findUnique.mockResolvedValue(null);

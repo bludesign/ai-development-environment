@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
 import { CODEBASE_BRANCHES_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
-import { WORKTREE_POST_MERGE_SWITCH_JOB_KIND } from "@ai-development-environment/agent-contract/worktrees";
+import {
+  WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_POST_MERGE_SWITCH_JOB_KIND,
+} from "@ai-development-environment/agent-contract/worktrees";
 
 import { CodebaseBusyError } from "@/lib/codebase-busy";
 
@@ -798,6 +801,130 @@ describe("AgentControlService.createJob", () => {
     await expect(new AgentControlService().createJob(gitInspect)).resolves.toBe(
       winner,
     );
+  });
+});
+
+describe("pipeline repair job dispatch", () => {
+  const input = {
+    agentId: "agent-1",
+    codebaseId: "codebase-1",
+    worktreeId: "worktree-1",
+    kind: WORKTREE_OPERATION_JOB_KIND,
+    payload: {
+      codebaseId: "codebase-1",
+      folder: "/repair",
+      gitDirectory: "/repo/.git/worktrees/repair",
+      expectedOrigin: "github.com/team/repository",
+      operation: "PUSH",
+    },
+    idempotencyKey: "repair-push",
+    pipelineRepairAttemptId: "attempt-1",
+  };
+
+  function database(active: boolean, child = false) {
+    const transaction = {
+      workflowStepAttempt: {
+        findFirst: vi.fn().mockResolvedValue(
+          active
+            ? {
+                id: "attempt-1",
+                runId: "repair-run",
+                run: {
+                  id: "repair-run",
+                  idempotencyKey: child
+                    ? "subworkflow:child-key"
+                    : "auto-pipeline-repair:repair:0",
+                  parentRunId: child ? "root-run" : null,
+                  status: "RUNNING",
+                },
+              }
+            : null,
+        ),
+      },
+      workflowRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          id: "root-run",
+          idempotencyKey: "auto-pipeline-repair:repair:0",
+          parentRunId: null,
+          status: "CANCELLED",
+        }),
+      },
+      agentJob: { create: vi.fn(async ({ data }) => data) },
+      workflowRunResourceLink: { create: vi.fn() },
+      operationHolder: {
+        upsert: vi.fn(async ({ create }) => ({ ...create, resources: [] })),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: async (operation: (value: typeof transaction) => unknown) =>
+        operation(transaction),
+      agentJob: { findUnique: vi.fn().mockResolvedValue(null) },
+      agentAuditEvent: { create: vi.fn() },
+    });
+    return transaction;
+  }
+
+  test("records ownership in the job creation transaction", async () => {
+    const transaction = database(true);
+    const job = await new AgentControlService().createJob(input);
+
+    expect(job.status).toBe("QUEUED");
+    expect(transaction.workflowRunResourceLink.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        runId: "repair-run",
+        attemptId: "attempt-1",
+        kind: "AGENT_JOB",
+        resourceId: job.id,
+      }),
+    });
+  });
+
+  test("never queues the job when cancellation won the dispatch race", async () => {
+    const transaction = database(false);
+
+    await expect(new AgentControlService().createJob(input)).rejects.toThrow(
+      "The pipeline repair attempt is no longer active",
+    );
+    expect(transaction.workflowStepAttempt.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "attempt-1",
+        status: "RUNNING",
+        supersededAt: null,
+        run: { status: { in: ["RUNNING", "WAITING"] } },
+      },
+      select: {
+        id: true,
+        runId: true,
+        run: {
+          select: {
+            id: true,
+            idempotencyKey: true,
+            parentRunId: true,
+            status: true,
+          },
+        },
+      },
+    });
+    expect(transaction.agentJob.create).not.toHaveBeenCalled();
+    expect(transaction.workflowRunResourceLink.create).not.toHaveBeenCalled();
+  });
+
+  test("rejects a descendant job once the root repair is cancelled", async () => {
+    const transaction = database(true, true);
+
+    await expect(new AgentControlService().createJob(input)).rejects.toThrow(
+      "The parent pipeline repair is no longer active",
+    );
+    expect(transaction.workflowRun.findUnique).toHaveBeenCalledWith({
+      where: { id: "root-run" },
+      select: {
+        id: true,
+        idempotencyKey: true,
+        parentRunId: true,
+        status: true,
+      },
+    });
+    expect(transaction.agentJob.create).not.toHaveBeenCalled();
   });
 });
 

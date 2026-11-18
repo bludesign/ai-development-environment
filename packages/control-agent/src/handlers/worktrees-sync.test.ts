@@ -23,6 +23,37 @@ import { executeWorktreePreparations } from "./worktree-preparations.js";
 registerWorktreeFixtures();
 
 describe("worktree pull, sync, and rebase", () => {
+  test("records the revision advanced by Push and omits proof on a no-op", async () => {
+    const folder = await repository();
+    const remote = await localRemote();
+    const remoteUrl = `ssh://git@example.test${remote}`;
+    await useHostedRemote(folder, remote, remoteUrl);
+    await git(folder, "switch", "-c", "feature/repair");
+    await git(folder, "push", "-u", "origin", "HEAD");
+    await git(folder, "commit", "--allow-empty", "-m", "Repair CI");
+    const pushedHeadSha = (
+      await git(folder, "rev-parse", "HEAD")
+    ).stdout.trim();
+    const gitDirectory = await realpath(join(folder, ".git"));
+    const push = () =>
+      operateWorktree(
+        {
+          codebaseId: "codebase-1",
+          folder,
+          gitDirectory,
+          baseBranch: "main",
+          expectedOrigin: normalizeGitOrigin(remoteUrl).canonicalOrigin,
+          operation: "PUSH",
+        },
+        10_000,
+        new AbortController().signal,
+        async () => undefined,
+      );
+
+    await expect(push()).resolves.toMatchObject({ pushedHeadSha });
+    await expect(push()).resolves.not.toHaveProperty("pushedHeadSha");
+  }, 15_000);
+
   test("publishes a renamed branch and tracks the new origin branch", async () => {
     const folder = await repository();
     const remote = await localRemote();

@@ -31,6 +31,7 @@ const watchers = new Map<string, Promise<void>>();
 const ACTIVE_OPERATION_STATES = new Set([
   "SYNCING",
   "RESOLVING",
+  "RESOLVING_PIPELINE",
   "WAITING_CI",
   "WAITING_REQUIREMENTS",
   "MERGING",

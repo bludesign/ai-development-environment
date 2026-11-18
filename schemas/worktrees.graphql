@@ -108,6 +108,8 @@ enum WorktreeAutoSyncPauseReason {
   REBASE_CONFLICT
   "The worktree branch changed from the branch Auto Sync was configured for."
   BRANCH_CHANGED
+  "Pipeline repair could not clear the failure or needs review."
+  PIPELINE_REPAIR
   "Auto Sync encountered another error."
   ERROR
 }
@@ -242,6 +244,10 @@ type WorktreeAutoSync {
   conflictWorkflowId: ID
   "The conflict workflow choice associated with this worktree auto sync. May be null when unavailable or not applicable."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
   "The last error associated with this worktree auto sync. May be null when unavailable or not applicable."
   lastError: String
   "Structured reason Auto Sync is paused."
@@ -441,8 +447,14 @@ type Worktree {
   ticketStatus: String
   "The pull request associated with this worktree. May be null when unavailable or not applicable."
   pullRequest: GitHubPullRequest
+  "Saved GitHub pipeline status for the exact worktree commit when it differs from or has no linked pull request."
+  gitHubHeadPipelineStatus: GitHubPipelineStatusSnapshot
+  "GitHub repository identifier for monitoring the worktree commit's pipeline status, when known."
+  gitHubPipelineRepositoryId: ID
   "The provider-neutral pull or merge request associated with this worktree."
   sourceControlRequest: SourceControlRequest
+  "Identifier of the configured GitLab project for this worktree's repository."
+  gitLabProjectId: ID
   "GitLab pipelines associated with the worktree's current commit."
   gitLabPipelines: [GitLabPipeline!]!
   "The latest build associated with this worktree. May be null when unavailable or not applicable."
@@ -491,6 +503,18 @@ type WorktreeCodebaseGroup {
   quickActions: [Workflow!]!
   "Merge conflict quick actions associated with this worktree codebase group."
   mergeConflictQuickActions: [Workflow!]!
+  "Failing pipeline quick actions available to this repository."
+  failingPipelineQuickActions: [Workflow!]!
+}
+
+"Counts of plans and sessions in progress on a worktree."
+type WorktreeInProgressRunCount {
+  "Identifier of the worktree."
+  worktreeId: ID!
+  "Number of plans in progress."
+  planCount: Int!
+  "Number of sessions in progress."
+  sessionCount: Int!
 }
 
 "Represents a worktree agent group in the GraphQL API."
@@ -507,6 +531,8 @@ type WorktreeOverview {
   durationMs: Float!
   "Agents associated with this worktree overview."
   agents: [WorktreeAgentGroup!]!
+  "In-progress plan and session counts for worktrees with active runs in this overview."
+  inProgressRunCounts: [WorktreeInProgressRunCount!]!
   "Tags associated with this worktree overview."
   tags: [WorktreeTag!]!
   "The settings associated with this worktree overview."
@@ -1453,6 +1479,10 @@ input ConfigureWorktreeAutoSyncInput {
   conflictWorkflowId: ID
   "The conflict workflow choice to use for the request."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
 }
 
 "Values used to configure a worktree auto merge."
@@ -1465,6 +1495,10 @@ input ConfigureWorktreeAutoMergeInput {
   conflictWorkflowId: ID
   "Optional resource trigger choice for the selected merge conflict workflow."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
   "Reviewed source revision, required when autoSync is selected."
   expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."
