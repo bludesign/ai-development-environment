@@ -630,7 +630,7 @@ jobs:
           url: ${{ secrets.WATCH_TOWER_URL }}
           api_token: ${{ secrets.WATCHTOWER_HTTP_API_TOKEN }}
           images: ghcr.io/bludesign/ai-development-environment:latest
-          timeout: '180'
+          timeout: "180"
           headers: |
             {
               "CF-Access-Client-Id": ${{ toJSON(secrets.CF_ACCESS_CLIENT_ID) }},
