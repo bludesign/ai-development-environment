@@ -26,6 +26,8 @@ import {
   MergeSyncFields,
   MergeSyncStatus,
   useMergeConflictWorkflow,
+  PipelineWorkflowFields,
+  usePipelineWorkflow,
 } from "@/components/github/merge-sync-fields";
 import { MergeRequestDialog } from "@/components/gitlab/merge-request-dialog";
 import { isActiveGitLabPipeline } from "@/components/gitlab/pipeline-format";
@@ -76,6 +78,7 @@ const DEFAULT_EMAIL = "__github_account_default__";
 type AutomationButtonProps = {
   worktree: Worktree;
   conflictWorkflows: WorktreeQuickAction[];
+  pipelineWorkflows?: WorktreeQuickAction[];
   disabled: boolean;
   onCompleted: () => Promise<void>;
   onError: (error: string | null) => void;
@@ -88,6 +91,7 @@ function errorMessage(value: unknown): string {
 export function AutoSyncButton({
   worktree,
   conflictWorkflows,
+  pipelineWorkflows,
   disabled,
   onCompleted,
   onError,
@@ -101,6 +105,12 @@ export function AutoSyncButton({
   const [useWorkflow, setUseWorkflow] = useState(false);
   const [workflowId, setWorkflowId] = useState(NONE);
   const [choice, setChoice] = useState(NONE);
+  const pipelineOptions = {
+    failingPipelineWorkflows: pipelineWorkflows,
+    defaultPipelineWorkflowId: rule?.pipelineWorkflowId,
+    defaultPipelineWorkflowChoice: rule?.pipelineWorkflowChoice,
+  };
+  const pipeline = usePipelineWorkflow(true, pipelineOptions);
   const selectedWorkflow = useMemo(
     () => conflictWorkflows.find((workflow) => workflow.id === workflowId),
     [conflictWorkflows, workflowId],
@@ -112,6 +122,7 @@ export function AutoSyncButton({
     setUseWorkflow(Boolean(rule?.conflictWorkflowId));
     setWorkflowId(rule?.conflictWorkflowId ?? NONE);
     setChoice(rule?.conflictWorkflowChoice ?? NONE);
+    pipeline.load(pipelineOptions);
     setOpen(true);
   };
 
@@ -126,7 +137,7 @@ export function AutoSyncButton({
           $input: ConfigureWorktreeAutoSyncInput!
         ) {
           configureWorktreeAutoSync(input: $input) {
-            worktreeId state conflictWorkflowId conflictWorkflowChoice
+            worktreeId state conflictWorkflowId conflictWorkflowChoice pipelineWorkflowId pipelineWorkflowChoice
             lastError pauseReason lastSyncedAt updatedAt
           }
         }`,
@@ -137,6 +148,7 @@ export function AutoSyncButton({
               useWorkflow && workflowId !== NONE ? workflowId : null,
             conflictWorkflowChoice:
               useWorkflow && choice !== NONE ? choice : null,
+            ...pipeline.input,
           },
         },
       );
@@ -215,7 +227,13 @@ export function AutoSyncButton({
         variant={paused ? "destructive" : rule ? "default" : "outline"}
       >
         <RefreshCw />
-        {paused ? t("autoSyncPaused") : rule ? t("autoSyncing") : t("autoSync")}
+        {paused
+          ? t("autoSyncPaused")
+          : rule?.state === "RESOLVING_PIPELINE"
+            ? t("autoSyncRepairingPipeline")
+            : rule
+              ? t("autoSyncing")
+              : t("autoSync")}
       </Button>
       <Dialog
         onOpenChange={(next) => {
@@ -304,6 +322,7 @@ export function AutoSyncButton({
                   )}
               </>
             )}
+            <PipelineWorkflowFields {...pipeline.fields} disabled={busy} />
           </div>
           <DialogFooter>
             {rule?.state === "PAUSED" &&
@@ -346,6 +365,7 @@ export function AutoSyncButton({
             <Button
               disabled={
                 busy ||
+                !pipeline.valid ||
                 (useWorkflow && workflowId === NONE) ||
                 Boolean(
                   useWorkflow &&
@@ -944,6 +964,7 @@ function GitHubAutoMergeButton({
                   [
                     "SYNCING",
                     "RESOLVING",
+                    "RESOLVING_PIPELINE",
                     "WAITING_CI",
                     "WAITING_REQUIREMENTS",
                     "MERGING",

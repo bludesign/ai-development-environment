@@ -4194,6 +4194,7 @@ export function ActionRow(
       {!isDefault && (
         <AutoSyncButton
           conflictWorkflows={props.group.mergeConflictQuickActions ?? []}
+          pipelineWorkflows={props.group.failingPipelineQuickActions}
           disabled={unavailable || !worktree.upstream || !worktree.baseBranch}
           onCompleted={props.onCompleted}
           onError={props.onError}

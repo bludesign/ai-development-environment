@@ -15,6 +15,12 @@ import type { MergeConflictWorkflowFields } from "@/services/worktrees/merge-bra
 
 export const MERGE_CONFLICT_WORKFLOW_FIELDS = `
   defaultConflictWorkflowId defaultConflictWorkflowChoice conflictWorkflowBlockedReason
+  defaultPipelineWorkflowId defaultPipelineWorkflowChoice
+  failingPipelineWorkflows {
+    id name
+    hasPlainTrigger(resourceKind: "WORKTREE")
+    triggerChoices(resourceKind: "WORKTREE") { key label }
+  }
   autoSyncRequiresConflictWorkflow
   mergeConflictWorkflows {
     id name
@@ -34,16 +40,22 @@ export function useMergeConflictWorkflow(
     id: "",
     choice: "",
   });
+  const pipeline = usePipelineWorkflow(autoSync, options);
+  const loadPipeline = pipeline.load;
   const selected = options?.mergeConflictWorkflows?.find(
     (workflow) => workflow.id === selection.id,
   );
-  const load = useCallback((next: MergeConflictWorkflowFields) => {
-    setSelection({
-      enabled: Boolean(next.defaultConflictWorkflowId),
-      id: next.defaultConflictWorkflowId ?? "",
-      choice: next.defaultConflictWorkflowChoice ?? "",
-    });
-  }, []);
+  const load = useCallback(
+    (next: MergeConflictWorkflowFields) => {
+      loadPipeline(next);
+      setSelection({
+        enabled: Boolean(next.defaultConflictWorkflowId),
+        id: next.defaultConflictWorkflowId ?? "",
+        choice: next.defaultConflictWorkflowChoice ?? "",
+      });
+    },
+    [loadPipeline],
+  );
   const valid =
     !autoSync ||
     (selection.enabled
@@ -56,19 +68,81 @@ export function useMergeConflictWorkflow(
         )
       : !options?.autoSyncRequiresConflictWorkflow);
   return {
-    valid,
-    input:
-      autoSync && selection.enabled && valid
+    valid: valid && pipeline.valid,
+    input: {
+      ...pipeline.input,
+      ...(autoSync && selection.enabled && valid
         ? {
             conflictWorkflowId: selection.id,
             ...(selection.choice
               ? { conflictWorkflowChoice: selection.choice }
               : {}),
           }
-        : {},
+        : {}),
+    },
     load,
-    fields: { selection, onChange: setSelection, options },
+    fields: {
+      selection,
+      onChange: setSelection,
+      options,
+      pipeline: pipeline.fields,
+    },
   };
+}
+
+export function usePipelineWorkflow(
+  autoSync: boolean,
+  options?: MergeConflictWorkflowFields | null,
+) {
+  const [selection, setSelection] = useState<Selection>({
+    enabled: false,
+    id: "",
+    choice: "",
+  });
+  const workflows = options?.failingPipelineWorkflows ?? [];
+  const selected = workflows.find((workflow) => workflow.id === selection.id);
+  const load = useCallback((next: MergeConflictWorkflowFields) => {
+    setSelection({
+      enabled: Boolean(next.defaultPipelineWorkflowId),
+      id: next.defaultPipelineWorkflowId ?? "",
+      choice: next.defaultPipelineWorkflowChoice ?? "",
+    });
+  }, []);
+  const valid =
+    !autoSync ||
+    !selection.enabled ||
+    Boolean(
+      selection.choice
+        ? selected?.triggerChoices?.some(({ key }) => key === selection.choice)
+        : selected?.hasPlainTrigger,
+    );
+  return {
+    valid,
+    load,
+    input:
+      autoSync && (selection.enabled || options?.defaultPipelineWorkflowId)
+        ? {
+            pipelineWorkflowId: selection.enabled ? selection.id : null,
+            pipelineWorkflowChoice: selection.enabled
+              ? selection.choice || null
+              : null,
+          }
+        : {},
+    fields: { selection, onChange: setSelection, workflows },
+  };
+}
+
+export function PipelineWorkflowFields({
+  workflows,
+  ...fields
+}: ReturnType<typeof usePipelineWorkflow>["fields"] & { disabled?: boolean }) {
+  return (
+    <ConflictWorkflowFields
+      {...fields}
+      options={{ mergeConflictWorkflows: workflows }}
+      pipeline
+    />
+  );
 }
 
 function ConflictWorkflowFields({
@@ -76,11 +150,13 @@ function ConflictWorkflowFields({
   onChange,
   options,
   disabled,
+  pipeline = false,
 }: {
   selection: Selection;
   onChange: (selection: Selection) => void;
   options?: MergeConflictWorkflowFields | null;
   disabled?: boolean;
+  pipeline?: boolean;
 }) {
   const t = useTranslations("pullRequests");
   const id = useId();
@@ -98,8 +174,19 @@ function ConflictWorkflowFields({
             onChange({ ...selection, enabled: value === true })
           }
         />
-        <Label htmlFor={id}>{t("autoResolveMergeConflicts")}</Label>
+        <Label htmlFor={id}>
+          {t(
+            pipeline
+              ? "autoResolveFailingPipelines"
+              : "autoResolveMergeConflicts",
+          )}
+        </Label>
       </div>
+      {pipeline && !selection.enabled && workflows.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          {t("noFailingPipelineWorkflow")}
+        </p>
+      )}
       {options?.conflictWorkflowBlockedReason && (
         <p className="text-xs text-muted-foreground">
           {options.conflictWorkflowBlockedReason}
@@ -117,8 +204,18 @@ function ConflictWorkflowFields({
             value={selected?.id ?? ""}
             onValueChange={(id) => onChange({ enabled: true, id, choice: "" })}
           >
-            <SelectTrigger aria-label={t("mergeConflictWorkflow")}>
-              <SelectValue placeholder={t("selectMergeConflictWorkflow")} />
+            <SelectTrigger
+              aria-label={t(
+                pipeline ? "failingPipelineWorkflow" : "mergeConflictWorkflow",
+              )}
+            >
+              <SelectValue
+                placeholder={t(
+                  pipeline
+                    ? "selectFailingPipelineWorkflow"
+                    : "selectMergeConflictWorkflow",
+                )}
+              />
             </SelectTrigger>
             <SelectContent>
               {workflows.map((workflow) => (
@@ -146,15 +243,29 @@ function ConflictWorkflowFields({
                 })
               }
             >
-              <SelectTrigger aria-label={t("mergeConflictWorkflowTrigger")}>
+              <SelectTrigger
+                aria-label={t(
+                  pipeline
+                    ? "failingPipelineWorkflowTrigger"
+                    : "mergeConflictWorkflowTrigger",
+                )}
+              >
                 <SelectValue
-                  placeholder={t("selectMergeConflictWorkflowTrigger")}
+                  placeholder={t(
+                    pipeline
+                      ? "selectFailingPipelineWorkflowTrigger"
+                      : "selectMergeConflictWorkflowTrigger",
+                  )}
                 />
               </SelectTrigger>
               <SelectContent>
                 {selected?.hasPlainTrigger && (
                   <SelectItem value="plain">
-                    {t("defaultMergeConflictWorkflowTrigger")}
+                    {t(
+                      pipeline
+                        ? "defaultFailingPipelineWorkflowTrigger"
+                        : "defaultMergeConflictWorkflowTrigger",
+                    )}
                   </SelectItem>
                 )}
                 {choices.map((choice) => (
@@ -184,8 +295,8 @@ export function MergeSyncFields({
   unavailableReason?: string | null;
   conflictWorkflow?: Omit<
     Parameters<typeof ConflictWorkflowFields>[0],
-    "disabled"
-  >;
+    "disabled" | "pipeline"
+  > & { pipeline: ReturnType<typeof usePipelineWorkflow>["fields"] };
 }) {
   const t = useTranslations("pullRequests");
   const id = useId();
@@ -211,10 +322,18 @@ export function MergeSyncFields({
           </p>
         )}
       {checked && conflictWorkflow && (
-        <ConflictWorkflowFields
-          {...conflictWorkflow}
-          disabled={disabled || Boolean(unavailableReason)}
-        />
+        <>
+          <ConflictWorkflowFields
+            selection={conflictWorkflow.selection}
+            onChange={conflictWorkflow.onChange}
+            options={conflictWorkflow.options}
+            disabled={disabled || Boolean(unavailableReason)}
+          />
+          <PipelineWorkflowFields
+            {...conflictWorkflow.pipeline}
+            disabled={disabled || Boolean(unavailableReason)}
+          />
+        </>
       )}
     </div>
   );
@@ -227,6 +346,7 @@ export function MergeSyncStatus({ state }: { state?: string }) {
     ![
       "SYNCING",
       "RESOLVING",
+      "RESOLVING_PIPELINE",
       "WAITING_CI",
       "WAITING_REQUIREMENTS",
       "MERGING",

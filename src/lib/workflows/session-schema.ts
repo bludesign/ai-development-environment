@@ -447,6 +447,14 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     },
     { name: "conflicts", description: "Conflicting files" },
     {
+      name: "pipelineRepair.retryCount",
+      description: "Automatic pipeline repair attempt, starting at zero",
+    },
+    {
+      name: "pipelineRepair.maxRetries",
+      description: "Maximum automatic retries for this pipeline repair",
+    },
+    {
       name: "failingPipelines",
       description:
         "Pipeline IDs, links, and status captured by a failing pipeline quick action",
@@ -570,7 +578,10 @@ function describeConcretePath(path: string): string | undefined {
   const segments = path.split(".");
   if (segments.length < 2) return undefined;
   const last = segments[segments.length - 1]!;
-  return FIELD_DESCRIPTIONS.get(`${namespaceOf(path)}.${last}`);
+  return (
+    FIELD_DESCRIPTIONS.get(path) ??
+    FIELD_DESCRIPTIONS.get(`${namespaceOf(path)}.${last}`)
+  );
 }
 
 /**

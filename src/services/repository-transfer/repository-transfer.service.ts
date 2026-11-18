@@ -102,6 +102,7 @@ const workflowFields = [
   "overlapPolicy",
   "overlapScope",
   "maxConcurrentRuns",
+  "maxPipelineRepairRetries",
   "completionNotificationsEnabled",
   "exclusiveWorktree",
   "worktreeConcurrency",
@@ -1967,6 +1968,12 @@ export class RepositoryTransferService {
             .min(1)
             .max(32)
             .parse(f.maxConcurrentRuns ?? 1),
+          maxPipelineRepairRetries: z
+            .number()
+            .int()
+            .min(0)
+            .max(10)
+            .parse(f.maxPipelineRepairRetries ?? 0),
           worktreeConcurrency: concurrency,
           exclusiveWorktree: concurrency === "EXCLUSIVE",
           blocksGitOperations:

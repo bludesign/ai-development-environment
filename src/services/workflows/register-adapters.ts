@@ -2559,6 +2559,14 @@ function registerWorktreeAdapters(
                   context.node.config.conflictWorkflowChoice,
                   500,
                 ),
+                pipelineWorkflowId:
+                  optionalText(context.node.config.pipelineWorkflowId, 500) ??
+                  undefined,
+                pipelineWorkflowChoice:
+                  optionalText(
+                    context.node.config.pipelineWorkflowChoice,
+                    500,
+                  ) ?? undefined,
               })
             : null;
     if (!autoSync) throw new Error("Unknown Auto Sync action");
@@ -2596,6 +2604,12 @@ function registerWorktreeAdapters(
         ...(context.node.config.autoSync === true
           ? {
               autoSync: true,
+              pipelineWorkflowId:
+                optionalText(context.node.config.pipelineWorkflowId, 500) ??
+                undefined,
+              pipelineWorkflowChoice:
+                optionalText(context.node.config.pipelineWorkflowChoice, 500) ??
+                undefined,
               expectedHeadSha: optionalText(
                 context.node.config.expectedHeadSha ??
                   getSessionValue(context.sessionData, "pr.headRefOid"),

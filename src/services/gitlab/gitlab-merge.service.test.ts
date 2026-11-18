@@ -27,6 +27,7 @@ const database = vi.hoisted(() => ({
     findUniqueOrThrow: vi.fn(),
     findMany: vi.fn(),
   },
+  workflow: { findMany: vi.fn(async () => []) },
   agentJob: { findFirst: vi.fn() },
 }));
 vi.mock("@/data/prisma-client", () => ({

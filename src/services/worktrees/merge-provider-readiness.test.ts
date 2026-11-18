@@ -23,7 +23,7 @@ function githubFixture(
     isDraft: false,
     headRefOid: head,
     headRefName: "feature",
-    headRepository: { nameWithOwner: "fork/repo" },
+    headRepository: { id: "source-repo", nameWithOwner: "fork/repo" },
     baseRefName: "release",
     baseRefOid: target,
     mergeable: "MERGEABLE",
@@ -32,10 +32,22 @@ function githubFixture(
     statusCheckRollup: {
       state: rollup,
       contexts: {
-        nodes: conclusions.map((conclusion) => ({
+        nodes: conclusions.map((conclusion, index) => ({
           __typename: "CheckRun",
+          id: `check-${index}`,
           status: "COMPLETED",
           conclusion,
+          checkSuite: {
+            id: `suite-${index}`,
+            status: "COMPLETED",
+            conclusion,
+            workflowRun: {
+              databaseId: 1,
+              runAttempt: 1,
+              url: "https://github.com/fork/repo/actions/runs/1",
+              workflow: { name: "CI" },
+            },
+          },
         })),
         pageInfo: { hasNextPage: false, endCursor: null },
       },
@@ -81,6 +93,22 @@ describe("GitHub managed merge readiness", () => {
       );
     },
   );
+  test("attributes a completed failure to the reviewed source repository and head", async () => {
+    const f = githubFixture(["FAILURE"], "FAILURE");
+    const ready = await f.service.managedMergeReadiness("team", "repo", 1);
+    expect(ready.pipelineCI?.failures).toEqual([
+      {
+        provider: "GITHUB",
+        id: "suite-0",
+        repositoryGithubId: "source-repo",
+        workflowRunId: "1",
+        headSha: head,
+        status: "FAILURE",
+        url: "https://github.com/fork/repo/actions/runs/1",
+      },
+    ]);
+  });
+
   test("includes paginated check contexts before allowing a merge", async () => {
     const f = githubFixture();
     f.pr.statusCheckRollup.contexts.pageInfo = {
@@ -140,6 +168,8 @@ function gitlabFixture(
     mergeWhenPipelineSucceeds: false,
     headPipeline: {
       status,
+      id: "pipeline",
+      projectId: "target-project",
       sha: pipelineSha,
       source: "merge_request_event",
     } as Record<string, unknown> | null,
@@ -172,6 +202,27 @@ describe("GitLab managed merge readiness", () => {
       ).toBe(false);
     },
   );
+  test("only reports a synthetic failure when both parents match the request", async () => {
+    const synthetic = "c".repeat(40);
+    const stale = gitlabFixture("FAILED", synthetic, ["old-source", target]);
+    const matching = gitlabFixture("FAILED", synthetic, [head, target]);
+    expect(
+      (await stale.service.managedMergeReadiness("project", 1)).pipelineCI
+        ?.failures,
+    ).toEqual([]);
+    expect(
+      (await matching.service.managedMergeReadiness("project", 1)).pipelineCI
+        ?.failures,
+    ).toMatchObject([
+      {
+        provider: "GITLAB",
+        id: "pipeline",
+        headSha: synthetic,
+        status: "FAILED",
+      },
+    ]);
+  });
+
   test("does not accept an older pipeline or missing CI", async () => {
     const f = gitlabFixture("SUCCESS", "old");
     expect((await f.service.managedMergeReadiness("project", 1)).ciPassed).toBe(

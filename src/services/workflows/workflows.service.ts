@@ -277,6 +277,7 @@ export type CreateWorkflowInput = {
   overlapPolicy?: string | null;
   overlapScope?: string | null;
   maxConcurrentRuns?: number | null;
+  maxPipelineRepairRetries?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
   worktreeConcurrency?: string | null;
@@ -289,6 +290,7 @@ export type SaveWorkflowDraftInput = {
   overlapPolicy?: string | null;
   overlapScope?: string | null;
   maxConcurrentRuns?: number | null;
+  maxPipelineRepairRetries?: number | null;
   completionNotificationsEnabled?: boolean | null;
   exclusiveWorktree?: boolean | null;
   worktreeConcurrency?: string | null;
@@ -494,6 +496,15 @@ function overlapScopeFilter(
   worktreeId: string | null,
 ): { worktreeId?: string | null } {
   return scope === "WORKTREE" ? { worktreeId } : {};
+}
+
+function pipelineRepairRetries(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 10) {
+    throw new Error(
+      "Maximum automatic pipeline retries must be an integer from 0 to 10.",
+    );
+  }
+  return value;
 }
 
 function concurrentRuns(
@@ -1292,6 +1303,9 @@ export class WorkflowsService {
         overlapPolicy: policy,
         overlapScope: overlapScope(input.overlapScope),
         maxConcurrentRuns: concurrentRuns(input.maxConcurrentRuns, policy),
+        maxPipelineRepairRetries: pipelineRepairRetries(
+          input.maxPipelineRepairRetries ?? 0,
+        ),
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ?? true,
         exclusiveWorktree: concurrency === "EXCLUSIVE",
@@ -1334,6 +1348,9 @@ export class WorkflowsService {
         maxConcurrentRuns: concurrentRuns(
           input.maxConcurrentRuns ?? current.maxConcurrentRuns,
           policy,
+        ),
+        maxPipelineRepairRetries: pipelineRepairRetries(
+          input.maxPipelineRepairRetries ?? current.maxPipelineRepairRetries,
         ),
         completionNotificationsEnabled:
           input.completionNotificationsEnabled ??
@@ -1642,6 +1659,7 @@ export class WorkflowsService {
         overlapPolicy: workflow.overlapPolicy,
         overlapScope: workflow.overlapScope,
         maxConcurrentRuns: workflow.maxConcurrentRuns,
+        maxPipelineRepairRetries: workflow.maxPipelineRepairRetries,
         completionNotificationsEnabled: workflow.completionNotificationsEnabled,
         exclusiveWorktree: workflow.exclusiveWorktree,
         worktreeConcurrency: workflow.worktreeConcurrency,
@@ -1692,6 +1710,10 @@ export class WorkflowsService {
         typeof workflow.maxConcurrentRuns === "number"
           ? workflow.maxConcurrentRuns
           : 1,
+      maxPipelineRepairRetries:
+        typeof workflow.maxPipelineRepairRetries === "number"
+          ? workflow.maxPipelineRepairRetries
+          : 0,
       completionNotificationsEnabled:
         typeof workflow.completionNotificationsEnabled === "boolean"
           ? workflow.completionNotificationsEnabled

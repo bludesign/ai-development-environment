@@ -684,6 +684,8 @@ export const createWorktreeResolvers = (
           autoSync?: boolean | null;
           conflictWorkflowId?: string | null;
           conflictWorkflowChoice?: string | null;
+          pipelineWorkflowId?: string | null;
+          pipelineWorkflowChoice?: string | null;
           expectedHeadSha?: string | null;
           worktreeId: string;
           repositoryNameWithOwner: string;

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import type { GitLabPipelineView } from "@/services/gitlab/types";
 
-import { failingGitLabPipelines } from "./worktree-failing-pipelines";
+import { failingGitLabPipelines } from "@/lib/worktree-failing-pipelines";
 
 const worktree = {
   branch: "feature/ci",

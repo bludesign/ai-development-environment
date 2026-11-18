@@ -730,12 +730,16 @@ const STEP_CONFIG_DESCRIPTORS: StepConfigDescriptors = {
       ),
       text("conflictWorkflowId", "Conflict workflow ID"),
       text("conflictWorkflowChoice", "Conflict workflow choice"),
+      text("pipelineWorkflowId", "Failing pipeline workflow ID"),
+      text("pipelineWorkflowChoice", "Failing pipeline workflow choice"),
     ],
   },
   WORKTREE_SET_AUTO_MERGE: {
     fields: [
       bool("autoSync", "Auto sync branch before merging"),
       text("expectedHeadSha", "Reviewed source commit"),
+      text("pipelineWorkflowId", "Failing pipeline workflow ID"),
+      text("pipelineWorkflowChoice", "Failing pipeline workflow choice"),
       resource("worktreeId", "Worktree", "worktree"),
       enumField(
         "action",

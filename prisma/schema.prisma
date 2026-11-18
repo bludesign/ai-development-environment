@@ -826,6 +826,9 @@ model WorktreeAutoSync {
   branch                 String
   conflictWorkflowId     String?
   conflictWorkflowChoice String?
+  pipelineWorkflowId     String?
+  pipelineWorkflowChoice String?
+  pipelineRepairJson     String?
   activeJobId            String?
   workflowRunId          String?
   lastError              String?
@@ -3638,6 +3641,7 @@ model Workflow {
   overlapPolicy                  String                          @default("QUEUE")
   overlapScope                   String                          @default("WORKTREE")
   maxConcurrentRuns              Int                             @default(1)
+  maxPipelineRepairRetries       Int                             @default(0)
   completionNotificationsEnabled Boolean                         @default(true)
   exclusiveWorktree              Boolean                         @default(false)
   worktreeConcurrency            String                          @default("NON_EXCLUSIVE")

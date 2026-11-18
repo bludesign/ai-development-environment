@@ -221,7 +221,7 @@ function WorkflowDiagnosticFocus({
 const DEFINITION_QUERY = `
   query WorkflowEditorDefinition($id: ID!) {
     workflow(id: $id) {
-      id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
+      id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns maxPipelineRepairRetries completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt
       versionCount runCount createdAt updatedAt
     }
   }
@@ -443,6 +443,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
   const [overlapPolicy, setOverlapPolicy] = useState("QUEUE");
   const [overlapScope, setOverlapScope] = useState("WORKTREE");
   const [maxConcurrentRuns, setMaxConcurrentRuns] = useState(1);
+  const [maxPipelineRepairRetries, setMaxPipelineRepairRetries] = useState(0);
   const [completionNotificationsEnabled, setCompletionNotificationsEnabled] =
     useState(true);
   const [worktreeConcurrency, setWorktreeConcurrency] = useState<
@@ -511,6 +512,9 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
         setOverlapPolicy(data.workflow?.overlapPolicy ?? "QUEUE");
         setOverlapScope(data.workflow?.overlapScope ?? "WORKTREE");
         setMaxConcurrentRuns(data.workflow?.maxConcurrentRuns ?? 1);
+        setMaxPipelineRepairRetries(
+          data.workflow?.maxPipelineRepairRetries ?? 0,
+        );
         setCompletionNotificationsEnabled(
           data.workflow?.completionNotificationsEnabled ?? true,
         );
@@ -782,12 +786,13 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
 
   // Persist a captured draft without replacing newer local edits with the response.
   const persistSnapshot = async (snapshot: WorkflowDefinition) => {
-    const fields = `id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt versionCount runCount createdAt updatedAt`;
+    const fields = `id name description draftDefinition activeVersionId enabled overlapPolicy overlapScope maxConcurrentRuns maxPipelineRepairRetries completionNotificationsEnabled exclusiveWorktree worktreeConcurrency blocksGitOperations archivedAt versionCount runCount createdAt updatedAt`;
     const input = {
       definition: snapshot,
       overlapPolicy,
       overlapScope,
       maxConcurrentRuns,
+      maxPipelineRepairRetries,
       completionNotificationsEnabled,
       worktreeConcurrency,
       blocksGitOperations,
@@ -933,6 +938,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
             overlapPolicy,
             overlapScope,
             maxConcurrentRuns,
+            maxPipelineRepairRetries,
             completionNotificationsEnabled,
             worktreeConcurrency,
             blocksGitOperations,
@@ -963,6 +969,7 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
               overlapPolicy,
               overlapScope,
               maxConcurrentRuns,
+              maxPipelineRepairRetries,
               completionNotificationsEnabled,
               worktreeConcurrency,
               blocksGitOperations,
@@ -1778,6 +1785,24 @@ function WorkflowEditorInner({ workflowId }: { workflowId?: string | null }) {
                     </FieldDescription>
                   </Field>
                 )}
+                <Field>
+                  <FieldLabel htmlFor="workflow-pipeline-repair-retries">
+                    {t("maxPipelineRepairRetries")}
+                  </FieldLabel>
+                  <Input
+                    id="workflow-pipeline-repair-retries"
+                    max={10}
+                    min={0}
+                    onChange={(event) =>
+                      setMaxPipelineRepairRetries(Number(event.target.value))
+                    }
+                    type="number"
+                    value={maxPipelineRepairRetries}
+                  />
+                  <FieldDescription>
+                    {t("maxPipelineRepairRetriesHelp")}
+                  </FieldDescription>
+                </Field>
                 <Field>
                   <FieldLabel htmlFor="workflow-overlap-scope">
                     {t("overlapScope")}

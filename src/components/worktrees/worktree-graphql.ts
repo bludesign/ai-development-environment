@@ -43,7 +43,7 @@ const worktreeFields = (pipelineFields: string) => `
   activeJob { id agentId kind commandName payload status idempotencyKey result error timeoutSeconds createdAt startedAt finishedAt updatedAt }
   blockingJob { id agentId kind status error createdAt startedAt finishedAt updatedAt }
   activeJobs { id agentId kind commandName payload status error createdAt startedAt finishedAt updatedAt }
-  autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
+  autoSync { worktreeId state conflictWorkflowId conflictWorkflowChoice pipelineWorkflowId pipelineWorkflowChoice lastError pauseReason lastSyncedAt updatedAt }
   autoMerge { ${POST_MERGE_SWITCH_FIELDS} autoSync worktreeId state repositoryNameWithOwner pullRequestNumber branch mergeMethod commitHeadline commitBody authorEmail deleteWorktree moveTicketToDone ticketKey lastError updatedAt }
   pullRequest { ${PULL_REQUEST_FIELDS} }
   sourceControlRequest { ${SOURCE_CONTROL_REQUEST_FIELDS} }

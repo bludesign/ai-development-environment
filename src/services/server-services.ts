@@ -328,6 +328,7 @@ function createServerServices(): ServerServices {
     workflowsService,
     agentControlService,
     pollingService,
+    gitLabService,
   );
   registerWorkflowAdapters(workflowsService, workflowStepExecutor, {
     agentControl: agentControlService,

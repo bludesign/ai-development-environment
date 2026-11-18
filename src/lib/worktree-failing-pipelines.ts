@@ -1,18 +1,26 @@
 import { aggregatePipelineStatus } from "@/services/github/pipeline-status";
 import type {
   GitHubPipelineStatusSnapshotView,
+  GitHubPipelineView,
   GitHubPipelineStatus,
 } from "@/services/github/types";
 import type { GitLabPipelineView } from "@/services/gitlab/types";
-
-import type { Worktree } from "./types";
 
 export function isFailingGitHubStatus(status: GitHubPipelineStatus) {
   return status === "FAILURE" || status === "ERROR";
 }
 
 export function failingGitHubPipelines(
-  snapshot: GitHubPipelineStatusSnapshotView | null,
+  snapshot:
+    | (Pick<
+        GitHubPipelineStatusSnapshotView,
+        "pipelineStatus" | "headSha" | "repositoryGithubId"
+      > & {
+        pipelines: Array<
+          Pick<GitHubPipelineView, "id" | "status" | "url" | "workflowRunId">
+        >;
+      })
+    | null,
 ) {
   if (!snapshot || !isFailingGitHubStatus(snapshot.pipelineStatus)) return [];
   return snapshot.pipelines
@@ -30,10 +38,16 @@ export function failingGitHubPipelines(
     }));
 }
 
-type GitLabWorktreeTarget = Pick<
-  Worktree,
-  "branch" | "headSha" | "sourceControlRequest"
->;
+type GitLabWorktreeTarget = {
+  branch?: string | null;
+  headSha?: string | null;
+  sourceControlRequest?: {
+    provider: string;
+    projectId?: string | null;
+    number: number;
+    headRefName?: string | null;
+  } | null;
+};
 
 function gitLabPipelineRefForWorktree(
   { ref, projectId, mergeRequests }: GitLabPipelineView,
@@ -65,7 +79,7 @@ function gitLabPipelineRefForWorktree(
   return linkedRequestMatches || associatedRequestMatches ? ref : null;
 }
 
-export function failingGitLabPipelines(
+export function latestGitLabPipelines(
   pipelines: GitLabPipelineView[],
   worktree: GitLabWorktreeTarget,
 ) {
@@ -79,7 +93,14 @@ export function failingGitLabPipelines(
     if (!prior || BigInt(pipeline.id) > BigInt(prior.id))
       latest.set(key, pipeline);
   }
-  return [...latest.values()]
+  return [...latest.values()];
+}
+
+export function failingGitLabPipelines(
+  pipelines: GitLabPipelineView[],
+  worktree: GitLabWorktreeTarget,
+) {
+  return latestGitLabPipelines(pipelines, worktree)
     .filter(({ status }) => status === "FAILED")
     .map(({ id, status, webUrl, sha, projectId }) => ({
       provider: "GITLAB" as const,

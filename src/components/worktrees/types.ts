@@ -65,11 +65,14 @@ export type WorktreeAutoSync = {
   state: string;
   conflictWorkflowId: string | null;
   conflictWorkflowChoice: string | null;
+  pipelineWorkflowId?: string | null;
+  pipelineWorkflowChoice?: string | null;
   lastError: string | null;
   pauseReason?:
     | "PREPARATION_CONFLICT"
     | "REBASE_CONFLICT"
     | "BRANCH_CHANGED"
+    | "PIPELINE_REPAIR"
     | "ERROR"
     | null;
   lastSyncedAt: string | null;

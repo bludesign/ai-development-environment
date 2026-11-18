@@ -13,7 +13,7 @@ import {
   failingGitHubPipelines,
   failingGitLabPipelines,
   isFailingGitHubStatus,
-} from "./worktree-failing-pipelines";
+} from "@/lib/worktree-failing-pipelines";
 
 export function WorktreeFailingPipelineItem({
   worktree,

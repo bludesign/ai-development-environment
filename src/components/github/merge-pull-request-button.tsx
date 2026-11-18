@@ -274,6 +274,7 @@ export function MergePullRequestButton({
     [
       "SYNCING",
       "RESOLVING",
+      "RESOLVING_PIPELINE",
       "WAITING_CI",
       "WAITING_REQUIREMENTS",
       "MERGING",

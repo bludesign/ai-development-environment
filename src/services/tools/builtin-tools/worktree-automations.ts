@@ -15,6 +15,8 @@ const AutoSyncSchema = z.object({
   state: z.string(),
   conflictWorkflowId: z.string().nullable(),
   conflictWorkflowChoice: z.string().nullable(),
+  pipelineWorkflowId: z.string().nullable(),
+  pipelineWorkflowChoice: z.string().nullable(),
   lastError: z.string().nullable(),
   pauseReason: z.string().nullable(),
   lastSyncedAt: z.string().nullable(),
@@ -68,11 +70,13 @@ export function createWorktreeAutomationToolGroup(
         name: "configure_worktree_auto_sync",
         title: "Configure worktree Auto Sync",
         description:
-          "Enable or update Auto Sync. Optionally select a merge-conflict quick-action workflow and one of its trigger choices.",
+          "Enable or update Auto Sync. Optionally select quick-action workflows and trigger choices for merge conflicts and failing pipelines.",
         inputSchema: z.object({
           worktreeId: z.string().min(1),
           conflictWorkflowId: z.string().min(1).nullable().optional(),
           conflictWorkflowChoice: z.string().min(1).nullable().optional(),
+          pipelineWorkflowId: z.string().min(1).nullable().optional(),
+          pipelineWorkflowChoice: z.string().min(1).nullable().optional(),
         }),
         outputSchema: z.object({ autoSync: AutoSyncSchema }),
         annotations: WRITE_ANNOTATIONS,
@@ -121,7 +125,7 @@ export function createWorktreeAutomationToolGroup(
         name: "configure_worktree_auto_merge",
         title: "Configure worktree Auto Merge",
         description:
-          "Enable or update GitHub-native Auto Merge and its optional Jira/worktree post-merge actions.",
+          "Enable or update GitHub Auto Merge, optional branch sync and pipeline repair, and post-merge actions.",
         inputSchema: z.object({
           worktreeId: z.string().min(1),
           repositoryNameWithOwner: z.string().min(3),
@@ -131,6 +135,8 @@ export function createWorktreeAutomationToolGroup(
           commitBody: z.string(),
           autoSync: z.boolean().optional(),
           expectedHeadSha: z.string().nullable().optional(),
+          pipelineWorkflowId: z.string().min(1).nullable().optional(),
+          pipelineWorkflowChoice: z.string().min(1).nullable().optional(),
           authorEmail: z.string().email().nullable().optional(),
           deleteWorktree: z.boolean(),
           moveTicketToDone: z.boolean(),

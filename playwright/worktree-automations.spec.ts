@@ -99,6 +99,8 @@ function automationWorktree(
       state: "ACTIVE",
       conflictWorkflowId: null,
       conflictWorkflowChoice: null,
+      pipelineWorkflowId: managed ? null : "repair-platform-pipeline",
+      pipelineWorkflowChoice: managed ? null : "diagnose",
       lastError: null,
       pauseReason: null,
       lastSyncedAt: updatedAt,
@@ -189,6 +191,23 @@ function automationGroup(
     iosBuildConfigured: false,
     quickActions: [],
     mergeConflictQuickActions: [],
+    failingPipelineQuickActions: [
+      {
+        id: "repair-platform-pipeline",
+        name: "Repair platform pipeline",
+        description: "",
+        quickActionIconKey: "workflow",
+        quickActionButtonVariant: "outline",
+        hasPlainTrigger: false,
+        triggerChoices: [
+          {
+            key: "diagnose",
+            label: "Diagnose and fix",
+            description: "Investigate the CI failure and push a fix.",
+          },
+        ],
+      },
+    ],
   };
 }
 
@@ -288,6 +307,29 @@ test("active worktree automations stay green for native and managed merges on bo
         path: `screenshots/${info.project.name}/worktree-automations.png`,
         animations: "disabled",
       });
+      await syncing.click();
+      const dialog = page.getByRole("dialog", { name: "Configure Auto Sync" });
+      await expect(
+        dialog.getByRole("checkbox", {
+          name: "Auto resolve failing pipelines",
+        }),
+      ).toBeChecked();
+      await expect(
+        dialog.getByRole("combobox", {
+          name: "Failing pipeline workflow",
+          exact: true,
+        }),
+      ).toHaveText("Repair platform pipeline");
+      await expect(
+        dialog.getByRole("combobox", {
+          name: "Failing pipeline workflow trigger",
+        }),
+      ).toHaveText("Diagnose and fix");
+      await dialog.screenshot({
+        path: `screenshots/${info.project.name}/worktree-auto-sync-options.png`,
+        animations: "disabled",
+      });
+      await page.keyboard.press("Escape");
     }
   }
 });

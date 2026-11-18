@@ -108,6 +108,8 @@ enum WorktreeAutoSyncPauseReason {
   REBASE_CONFLICT
   "The worktree branch changed from the branch Auto Sync was configured for."
   BRANCH_CHANGED
+  "Pipeline repair could not clear the failure or needs review."
+  PIPELINE_REPAIR
   "Auto Sync encountered another error."
   ERROR
 }
@@ -242,6 +244,10 @@ type WorktreeAutoSync {
   conflictWorkflowId: ID
   "The conflict workflow choice associated with this worktree auto sync. May be null when unavailable or not applicable."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
   "The last error associated with this worktree auto sync. May be null when unavailable or not applicable."
   lastError: String
   "Structured reason Auto Sync is paused."
@@ -1473,6 +1479,10 @@ input ConfigureWorktreeAutoSyncInput {
   conflictWorkflowId: ID
   "The conflict workflow choice to use for the request."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
 }
 
 "Values used to configure a worktree auto merge."
@@ -1485,6 +1495,10 @@ input ConfigureWorktreeAutoMergeInput {
   conflictWorkflowId: ID
   "Optional resource trigger choice for the selected merge conflict workflow."
   conflictWorkflowChoice: String
+  "Failing pipeline workflow used for automatic repair."
+  pipelineWorkflowId: ID
+  "Optional trigger choice for the failing pipeline workflow."
+  pipelineWorkflowChoice: String
   "Reviewed source revision, required when autoSync is selected."
   expectedHeadSha: String
   "Selected targeting worktrees to update only after the merge is confirmed."

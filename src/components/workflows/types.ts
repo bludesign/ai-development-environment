@@ -114,6 +114,7 @@ export type WorkflowSummary = {
   overlapPolicy: "QUEUE" | "CONCURRENT" | "COALESCE_LATEST";
   overlapScope: "WORKTREE" | "GLOBAL";
   maxConcurrentRuns: number;
+  maxPipelineRepairRetries?: number;
   completionNotificationsEnabled: boolean;
   exclusiveWorktree: boolean;
   worktreeConcurrency: "EXCLUSIVE" | "NON_EXCLUSIVE" | "EXCLUDED";

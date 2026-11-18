@@ -56,7 +56,15 @@ import {
   type GitLabCommentsInput,
 } from "./gitlab-comments";
 import type { NotificationsService } from "@/services/notifications";
-import { ACTIVE_GITLAB_PIPELINE_STATUSES } from "./pipeline-status";
+import {
+  ACTIVE_GITLAB_PIPELINE_STATUSES,
+  isActiveGitLabPipeline,
+} from "./pipeline-status";
+import {
+  failingGitLabPipelines,
+  latestGitLabPipelines,
+} from "@/lib/worktree-failing-pipelines";
+import type { PipelineCI } from "@/services/worktrees/pipeline-repair";
 
 import type {
   GitLabApiCallView,
@@ -950,6 +958,53 @@ export class GitLabService {
     );
   }
 
+  async branchPipelineCI(canonicalOrigin: string, branch: string) {
+    const project = await this.projectForCanonicalOrigin(canonicalOrigin);
+    if (!project) return { headSha: null };
+    const { data } = await this.get<{ commit: { id: string } }>({
+      path: `/projects/${encodeURIComponent(project.id)}/repository/branches/${encodeURIComponent(branch)}`,
+      operation: "GitLabWorktreeBranchRevision",
+      source: "WORKTREES",
+      force: true,
+      allowStaleOnError: false,
+    });
+    const headSha = data.commit.id;
+    const pipelines = await this.allPages<RawGitLabPipeline>({
+      path: `/projects/${encodeURIComponent(project.id)}/pipelines`,
+      operation: "GitLabWorktreePipelineRepair",
+      source: "WORKTREES",
+      query: { sha: headSha, ref: branch, order_by: "id", sort: "desc" },
+      force: true,
+      allowStaleOnError: false,
+    });
+    const target = { branch, headSha };
+    const latest = latestGitLabPipelines(
+      pipelines
+        .map(mapPipeline)
+        .filter(
+          (pipeline) =>
+            pipeline.projectId === project.id &&
+            pipeline.source !== "merge_request_event",
+        ),
+      target,
+    );
+    const pending = latest.some(({ status }) => isActiveGitLabPipeline(status));
+    const failures = pending ? [] : failingGitLabPipelines(latest, target);
+    const ci: PipelineCI = {
+      passed:
+        latest.some(({ status }) => status === "SUCCESS") &&
+        latest.every(({ status }) => ["SUCCESS", "SKIPPED"].includes(status)),
+      failures,
+      failureKey: JSON.stringify(
+        latest
+          .filter(({ status }) => status === "FAILED")
+          .map(({ id, updatedAt }) => [id, updatedAt])
+          .sort(),
+      ),
+    };
+    return { headSha, ci };
+  }
+
   async managedMergeReadiness(
     projectId: string,
     iid: number,
@@ -969,10 +1024,11 @@ export class GitLabService {
       })
     ).data;
     const pipeline = mr.headPipeline;
-    let ciPassed = pipeline?.status === "SUCCESS" && pipeline.sha === mr.sha;
+    let matchingPipeline = pipeline?.sha === mr.sha;
     if (
-      pipeline?.status === "SUCCESS" &&
-      pipeline.sha !== mr.sha &&
+      pipeline &&
+      ["SUCCESS", "FAILED"].includes(pipeline.status) &&
+      !matchingPipeline &&
       pipeline.source === "merge_request_event"
     ) {
       const commit = (
@@ -984,10 +1040,30 @@ export class GitLabService {
           allowStaleOnError: false,
         })
       ).data;
-      ciPassed =
+      matchingPipeline =
         commit.parent_ids.includes(mr.sha) &&
         commit.parent_ids.includes(branch.commit.id);
     }
+    const ciPassed = matchingPipeline && pipeline?.status === "SUCCESS";
+    const pipelineCI: PipelineCI = {
+      passed: ciPassed,
+      failures:
+        matchingPipeline && pipeline?.status === "FAILED"
+          ? [
+              {
+                provider: "GITLAB",
+                id: pipeline.id,
+                status: pipeline.status,
+                url: pipeline.webUrl || null,
+                headSha: pipeline.sha,
+                projectId: pipeline.projectId,
+              },
+            ]
+          : [],
+      failureKey: pipeline
+        ? JSON.stringify([pipeline.id, pipeline.updatedAt])
+        : undefined,
+    };
     const permanent = !canMerge
       ? "Your GitLab account cannot merge this request."
       : mr.draft
@@ -1014,6 +1090,7 @@ export class GitLabService {
       targetBranch: mr.targetBranch,
       targetSha: branch.commit.id,
       ciPassed,
+      pipelineCI,
       canMerge:
         canMerge &&
         mr.detailedMergeStatus === "mergeable" &&
