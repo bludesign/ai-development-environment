@@ -516,9 +516,10 @@ describe("native status subscriptions", () => {
     counts.sessions = 0;
     work.integrationsKnown = false;
 
-    expect((await service.snapshot()).liveActivity.summary).toBe(
-      "Checking work status",
-    );
+    expect(await service.snapshot()).toMatchObject({
+      liveActivityCountsKnown: false,
+      liveActivity: { activeCount: 0, summary: "Checking work status" },
+    });
     await service.flush();
     expect(send).toHaveBeenCalledTimes(1);
     expect(send.mock.calls[0]![0].headers["apns-push-type"]).toBe("widgets");
@@ -526,6 +527,7 @@ describe("native status subscriptions", () => {
 
     work.integrationsKnown = true;
     counts.pipelines = 1;
+    expect((await service.snapshot()).liveActivityCountsKnown).toBe(true);
     await service.flush();
     expect(send).toHaveBeenCalledTimes(2);
     expect(send.mock.calls[1]![0].payload.aps).toMatchObject({
