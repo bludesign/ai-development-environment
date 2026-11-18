@@ -24,6 +24,8 @@ enum WorktreeOperation {
   PULL
   "Represents the push option."
   PUSH
+  "Pushes the local branch to the same name on origin and tracks it."
+  PUBLISH
   "Represents the reset option."
   RESET
   "Removes the selected worktree's Git index lock."
@@ -1329,6 +1331,8 @@ input RunWorktreeOperationInput {
   worktreeId: ID!
   "The operation to use for the request."
   operation: WorktreeOperation!
+  "The checked-out branch required for publishing."
+  expectedBranch: String
   "Identifier of the request to use."
   requestId: ID!
   "Whether preparation-managed paths may be reset before Sync or Rebase."

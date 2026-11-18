@@ -583,6 +583,7 @@ export function registerWorktreesPageTests(
                   "worktree.branch.rename",
                   "worktree.inspect",
                   "worktree.operation",
+                  "worktree.operation.publish",
                   "worktree.watch",
                 ],
                 baseRepoDirectory: "/workspaces",
@@ -1838,6 +1839,7 @@ export function registerWorktreesPageTests(
           response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
         Object.assign(worktree, {
           branch: "release/1",
+          upstream: "origin/release/1",
           isDefaultBranch: true,
           baseBehind: 4,
           defaultBranchUpdateEnabled: true,
@@ -1868,6 +1870,7 @@ export function registerWorktreesPageTests(
         fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
         Object.assign(worktree, {
           branch: "feature/AIDE-25",
+          upstream: "origin/feature/AIDE-25",
           isDefaultBranch: false,
           defaultBranchUpdateEnabled: false,
           defaultBranchUpdatePaused: false,
@@ -2493,6 +2496,36 @@ export function registerWorktreesPageTests(
         ).toBe(true);
       });
 
+      test("publishes a renamed tracked branch under its new name", async () => {
+        const response = await request<{ worktreeOverview: WorktreeOverview }>(
+          "query Fixture",
+        );
+        const worktree =
+          response.worktreeOverview.agents[0]!.codebases[0]!.worktrees[0]!;
+        worktree.branch = "feature/AIDE-24-renamed";
+        render(<WorktreesPage />);
+
+        const publish = await screen.findByRole("button", { name: "Publish" });
+        request.mockResolvedValueOnce({
+          runWorktreeOperation: { id: "publish-job" },
+        } as never);
+        fireEvent.click(publish);
+
+        await waitFor(() =>
+          expect(request).toHaveBeenCalledWith(
+            expect.stringContaining("mutation RunWorktreeOperation"),
+            {
+              input: {
+                worktreeId: "worktree-1",
+                operation: "PUBLISH",
+                expectedBranch: "feature/AIDE-24-renamed",
+                requestId: expect.any(String),
+              },
+            },
+          ),
+        );
+      });
+
       test("pulls the branch onto its upstream", async () => {
         const response = (await request("query Fixture")) as unknown as {
           worktreeOverview: WorktreeOverview;
@@ -2535,6 +2568,7 @@ export function registerWorktreesPageTests(
             ...group.worktrees[0]!,
             id: "worktree-2",
             branch: "feature/AIDE-25",
+            upstream: "origin/feature/AIDE-25",
             folder: "/workspaces/repo-aide-25",
             relativePath: "repo-aide-25",
             primary: false,
@@ -2719,6 +2753,32 @@ export function registerWorktreesPageTests(
             screen.queryByRole("dialog", { name: "Rename branch" }),
           ).toBeNull(),
         );
+      });
+
+      test("restores focus to the worktree menu when cancelling a rename", async () => {
+        render(<WorktreesPage />);
+        const trigger = await screen.findByRole("button", {
+          name: "Tags: feature/AIDE-24",
+        });
+        trigger.focus();
+        fireEvent.keyDown(trigger, { key: "Enter" });
+
+        const rename = await screen.findByRole("menuitem", {
+          name: "Rename branch",
+        });
+        rename.focus();
+        fireEvent.keyDown(rename, { key: "Enter" });
+
+        const dialog = await screen.findByRole("dialog", {
+          name: "Rename branch",
+        });
+        const field = within(dialog).getByRole("textbox", {
+          name: "Branch name",
+        });
+        expect(document.activeElement).toBe(field);
+
+        fireEvent.keyDown(field, { key: "Escape" });
+        await waitFor(() => expect(document.activeElement).toBe(trigger));
       });
 
       test("keeps the change branch popover open with an agent-relative path", async () => {

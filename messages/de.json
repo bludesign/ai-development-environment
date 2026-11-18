@@ -4198,6 +4198,7 @@
       "cancelRebase": "Rebase abbrechen",
       "pull": "Pull",
       "push": "Push",
+      "publish": "Veröffentlichen",
       "reset": "Zurücksetzen",
       "clearLock": "Git-Sperre entfernen",
       "stashAll": "Alle Änderungen stashen",

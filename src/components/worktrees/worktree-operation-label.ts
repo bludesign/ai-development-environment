@@ -23,6 +23,7 @@ const operationLabels = {
   CANCEL_REBASE: "cancelRebase",
   PULL: "pull",
   PUSH: "push",
+  PUBLISH: "publish",
   RESET: "reset",
   CLEAR_LOCK: "clearLock",
   STASH_ALL: "stashAll",

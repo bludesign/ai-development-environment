@@ -40,6 +40,7 @@ import {
   WORKTREE_MOVE_CHECKOUT_JOB_KIND,
   WORKTREE_MOVE_PUSH_JOB_KIND,
   WORKTREE_OPERATION_JOB_KIND,
+  WORKTREE_PUBLISH_CAPABILITY,
   WORKTREE_PREPARATION_JOB_KIND,
   WORKTREE_PREPARATION_ACTIONS,
   WORKTREE_PREPARATION_STATES,
@@ -3895,6 +3896,7 @@ export class WorktreesService {
     operation: WorktreeOperation,
     requestId: string,
     forcePreparations = false,
+    expectedBranch?: string | null,
   ) {
     if (!WORKTREE_OPERATIONS.includes(operation))
       throw new Error("Unknown worktree operation");
@@ -3903,6 +3905,19 @@ export class WorktreesService {
       WORKTREE_OPERATION_JOB_KIND,
       operation === "OPEN_EDITOR",
     );
+    if (operation === "PUBLISH") {
+      if (
+        !capabilities(worktree.codebase.agent).includes(
+          WORKTREE_PUBLISH_CAPABILITY,
+        )
+      )
+        throw new Error("Agent must be updated to publish a branch");
+      if (
+        !worktree.branch ||
+        (expectedBranch != null && worktree.branch !== expectedBranch)
+      )
+        throw new Error("The worktree branch changed after selection");
+    }
     const settings = await this.settings();
     const preparations = worktree.codebase.repository.preparations ?? [];
     if (
@@ -3921,6 +3936,7 @@ export class WorktreesService {
       payload: {
         ...this.payload(worktree),
         operation,
+        ...(operation === "PUBLISH" ? { expectedBranch: worktree.branch } : {}),
         forcePreparations,
         preparations: preparations.map(preparationPayload),
         ...(operation === "OPEN_EDITOR"
@@ -5320,15 +5336,18 @@ export class WorktreesService {
       return;
     }
     const result = resultObject({ ...job, error: null });
-    const renamedFrom =
-      job.worktreeId && typeof result.renamedFrom === "string"
-        ? result.renamedFrom
-        : null;
-    if (
-      !result.worktree ||
-      (!renamedFrom && typeof result.baseBranch !== "string")
-    )
+    if (!result.worktree) return;
+    if (job.worktreeId && typeof result.renamedFrom === "string") {
+      await this.projectBranchRename(
+        job.codebaseId,
+        job.worktreeId,
+        result.renamedFrom,
+        parseWorktreeInventoryItem(result.worktree),
+      );
       return;
+    }
+    if (typeof result.baseBranch !== "string") return;
+    const baseBranch = result.baseBranch;
     const item = parseWorktreeInventoryItem(result.worktree);
     const prisma = await getPrismaClient();
     let worktreeId = job.worktreeId;
@@ -5340,54 +5359,22 @@ export class WorktreesService {
       });
       if (!codebase) return false;
       const branchSet = new Set(parseBranches(codebase.localBranchesJson));
-      if (renamedFrom) branchSet.delete(renamedFrom);
       if (item.branch) branchSet.add(item.branch);
       if (job.worktreeId) {
         const updated = await transaction.worktree.updateMany({
-          where: {
-            id: job.worktreeId,
-            codebaseId: job.codebaseId!,
-            ...(renamedFrom
-              ? {
-                  gitDirectory: item.gitDirectory,
-                  missingAt: null,
-                  OR: [
-                    { lastCheckedAt: null },
-                    { lastCheckedAt: { lt: new Date(item.checkedAt) } },
-                  ],
-                }
-              : {}),
-          },
+          where: { id: job.worktreeId, codebaseId: job.codebaseId! },
           data: {
             ...this.inventoryData(item),
             gitDirectory: item.gitDirectory,
-            ...(renamedFrom
-              ? {
-                  pullRequestLookupOrigin: null,
-                  pullRequestLookupBranch: null,
-                  pullRequestLookupAt: null,
-                }
-              : { baseBranchOverride: result.baseBranch as string }),
+            baseBranchOverride: baseBranch,
             missingAt: null,
           },
         });
-        if (updated.count !== 1) {
-          if (renamedFrom) return false;
-          throw new Error("Worktree no longer exists");
-        }
-        if (renamedFrom) {
-          await transaction.worktreePullRequest.deleteMany({
-            where: { worktreeId: job.worktreeId },
-          });
-          await transaction.worktreeGitLabMergeRequest.deleteMany({
-            where: { worktreeId: job.worktreeId },
-          });
-        }
+        if (updated.count !== 1) throw new Error("Worktree no longer exists");
       }
       await transaction.codebase.update({
         where: { id: job.codebaseId! },
         data: {
-          ...(renamedFrom && item.primary ? { branch: item.branch } : {}),
           localBranchesJson: JSON.stringify(
             [...branchSet].sort((first, second) => first.localeCompare(second)),
           ),
@@ -5406,11 +5393,11 @@ export class WorktreesService {
           codebaseId: job.codebaseId!,
           gitDirectory: item.gitDirectory,
           ...this.inventoryData(item),
-          baseBranchOverride: result.baseBranch as string,
+          baseBranchOverride: baseBranch,
         },
         update: {
           ...this.inventoryData(item),
-          baseBranchOverride: result.baseBranch as string,
+          baseBranchOverride: baseBranch,
           missingAt: null,
         },
       });
@@ -5472,6 +5459,124 @@ export class WorktreesService {
     }
     await this.skillsService?.requestAutoReconcile();
     if (job.worktreeId) await this.restartWatch(job.worktreeId);
+  }
+
+  private async projectBranchRename(
+    codebaseId: string,
+    worktreeId: string,
+    previousBranch: string,
+    item: ReturnType<typeof parseWorktreeInventoryItem>,
+  ) {
+    const branch = item.branch;
+    if (!branch || branch === previousBranch) return;
+    const checkedAt = new Date(item.checkedAt);
+    const lastCheckedBeforeRename = [
+      { lastCheckedAt: null },
+      { lastCheckedAt: { lt: checkedAt } },
+    ];
+    const identity = {
+      id: worktreeId,
+      codebaseId,
+      folder: item.folder,
+      gitDirectory: item.gitDirectory,
+      missingAt: null,
+    };
+    const prisma = await getPrismaClient();
+    const changed = await prisma.$transaction(async (transaction) => {
+      const worktree = await transaction.worktree.updateMany({
+        where: { ...identity, OR: lastCheckedBeforeRename },
+        data: this.inventoryData(item),
+      });
+      // A newer watcher or inventory observation may already show the rename.
+      if (
+        !worktree.count &&
+        !(await transaction.worktree.findFirst({
+          where: { ...identity, branch },
+          select: { id: true },
+        }))
+      )
+        return false;
+
+      const lookup = await transaction.worktree.updateMany({
+        where: {
+          ...identity,
+          branch,
+          pullRequestLookupBranch: { not: branch },
+        },
+        data: {
+          pullRequestLookupOrigin: null,
+          pullRequestLookupBranch: null,
+          pullRequestLookupAt: null,
+        },
+      });
+      const pullRequest = await transaction.worktreePullRequest.deleteMany({
+        where: { worktreeId, headRefName: { not: branch } },
+      });
+      const mergeRequest =
+        await transaction.worktreeGitLabMergeRequest.deleteMany({
+          where: { worktreeId, sourceBranch: { not: branch } },
+        });
+      const codebase = await transaction.codebase.findUniqueOrThrow({
+        where: { id: codebaseId },
+        select: {
+          localBranchesJson: true,
+          localBranchInventoryAttemptedAt: true,
+          worktreeInventoryObservedAt: true,
+        },
+      });
+      const branches = new Set(parseBranches(codebase.localBranchesJson));
+      const removedPreviousBranch = branches.delete(previousBranch);
+      const inventoryChanged =
+        (removedPreviousBranch || !branches.has(branch)) &&
+        [
+          codebase.localBranchInventoryAttemptedAt,
+          codebase.worktreeInventoryObservedAt,
+        ].every((observedAt) => !observedAt || observedAt <= checkedAt);
+      if (inventoryChanged) {
+        branches.add(branch);
+        await transaction.codebase.update({
+          where: { id: codebaseId },
+          data: {
+            localBranchesJson: JSON.stringify(
+              [...branches].sort((first, second) =>
+                first.localeCompare(second),
+              ),
+            ),
+          },
+        });
+      }
+      const primary = item.primary
+        ? await transaction.codebase.updateMany({
+            where: {
+              id: codebaseId,
+              folder: item.folder,
+              OR: lastCheckedBeforeRename,
+            },
+            data: {
+              branch,
+              headSha: item.headSha,
+              upstream: item.upstream,
+              ahead: item.ahead,
+              behind: item.behind,
+              syncState: item.syncState,
+              availability: item.availability,
+              statusError: item.error,
+              lastCheckedAt: checkedAt,
+            },
+          })
+        : { count: 0 };
+      return (
+        inventoryChanged ||
+        [worktree, lookup, pullRequest, mergeRequest, primary].some(
+          ({ count }) => count > 0,
+        )
+      );
+    });
+    if (changed) {
+      this.publish(worktreeId, codebaseId);
+      await this.skillsService?.requestAutoReconcile();
+      await this.restartWatch(worktreeId);
+    }
   }
 
   private async projectPreparationOperation(job: {

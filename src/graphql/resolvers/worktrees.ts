@@ -427,6 +427,7 @@ export const createWorktreeResolvers = (
         input: {
           worktreeId: string;
           operation: WorktreeOperation;
+          expectedBranch?: string | null;
           requestId: string;
           forcePreparations: boolean;
         };
@@ -439,6 +440,7 @@ export const createWorktreeResolvers = (
         input.operation,
         input.requestId,
         input.forcePreparations,
+        input.expectedBranch,
       );
     },
     forceWorktreeAutoSync: (

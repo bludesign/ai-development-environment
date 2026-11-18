@@ -30,6 +30,7 @@ export const WORKTREE_BRANCH_JOB_KIND = "worktree.branch";
 export const WORKTREE_BRANCH_EXPECTED_SOURCE_CAPABILITY =
   "worktree.branch.expected-source";
 export const WORKTREE_BRANCH_RENAME_CAPABILITY = "worktree.branch.rename";
+export const WORKTREE_PUBLISH_CAPABILITY = "worktree.operation.publish";
 export const WORKTREE_POST_MERGE_SWITCH_JOB_KIND = "worktree.post-merge-switch";
 export const JIRA_BRANCH_GENERATE_JOB_KIND = "jira.branch.generate";
 export const WORKTREE_MOVE_PUSH_JOB_KIND = "worktree.move.push";
@@ -97,6 +98,7 @@ export const WORKTREE_OPERATIONS = [
   "CANCEL_REBASE",
   "PULL",
   "PUSH",
+  "PUBLISH",
   "RESET",
   "CLEAR_LOCK",
   "STASH_ALL",
@@ -1278,6 +1280,7 @@ export function worktreeJobPayload(value: unknown): {
   expectedOrigin: string;
   baseBranch: string | null;
   operation?: WorktreeOperation;
+  expectedBranch?: string;
   editorVariant?: WorktreeEditorVariant;
   forcePreparations: boolean;
   preparations: WorktreePreparationDefinition[];
@@ -1290,6 +1293,7 @@ export function worktreeJobPayload(value: unknown): {
     "expectedOrigin",
     "baseBranch",
     "operation",
+    "expectedBranch",
     "editorVariant",
     "forcePreparations",
     "preparations",
@@ -1304,6 +1308,18 @@ export function worktreeJobPayload(value: unknown): {
       !WORKTREE_OPERATIONS.includes(operation as WorktreeOperation))
   ) {
     throw new Error("worktree payload.operation is invalid");
+  }
+  const expectedBranch =
+    operation === "PUBLISH"
+      ? stringValue(payload.expectedBranch, "worktree payload.expectedBranch")
+      : undefined;
+  if (expectedBranch !== undefined && !validGitBranchName(expectedBranch)) {
+    throw new Error("Publish requires a valid expected branch");
+  }
+  if (operation !== "PUBLISH" && payload.expectedBranch !== undefined) {
+    throw new Error(
+      "A worktree operation may only specify expectedBranch when publishing",
+    );
   }
   const editorVariant = payload.editorVariant;
   if (
@@ -1336,6 +1352,7 @@ export function worktreeJobPayload(value: unknown): {
     ...(operation === undefined
       ? {}
       : { operation: operation as WorktreeOperation }),
+    ...(expectedBranch === undefined ? {} : { expectedBranch }),
     ...(editorVariant === undefined
       ? {}
       : { editorVariant: editorVariant as WorktreeEditorVariant }),

@@ -1,5 +1,6 @@
 import { generateBranchName } from "../runs/branch-naming.js";
 import { jiraBranchNameCandidates } from "@ai-development-environment/agent-contract/worktrees";
+import { randomUUID } from "node:crypto";
 import { createWriteStream, watch, type FSWatcher } from "node:fs";
 import { mkdtemp, open, readFile, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -276,7 +277,7 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   entry.pending = false;
   try {
     const signal = new AbortController().signal;
-    const [status, branchResult, headResult, codeStateHash, rebasing] =
+    const [status, symbolicBranch, headResult, codeStateHash, rebasing] =
       await Promise.all([
         git(
           entry.folder,
@@ -290,18 +291,11 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
           entry.timeoutMs,
           signal,
         ),
-        git(
-          entry.folder,
-          ["symbolic-ref", "--short", "-q", "HEAD"],
-          entry.timeoutMs,
-          signal,
-        ),
+        currentBranch(entry.folder, entry.timeoutMs, signal),
         git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
         worktreeCodeStateHash(entry.folder, entry.timeoutMs, signal),
         rebaseInProgress(entry.folder, entry.timeoutMs, signal),
       ]);
-    const symbolicBranch =
-      branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
     const branch =
       symbolicBranch ??
       (rebasing
@@ -597,15 +591,10 @@ export async function inspectWorktreeItem(
   const checkedAt = new Date().toISOString();
   try {
     const folder = await realpath(folderValue);
-    const [gitDir, branchResult, headResult, statusResult, rebasing] =
+    const [gitDir, symbolicBranch, headResult, statusResult, rebasing] =
       await Promise.all([
         gitDirectory(folder, timeoutMs, signal),
-        git(
-          folder,
-          ["symbolic-ref", "--short", "-q", "HEAD"],
-          timeoutMs,
-          signal,
-        ),
+        currentBranch(folder, timeoutMs, signal),
         git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
         git(
           folder,
@@ -621,8 +610,6 @@ export async function inspectWorktreeItem(
         ),
         rebaseInProgress(folder, timeoutMs, signal),
       ]);
-    const symbolicBranch =
-      branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
     const branch =
       symbolicBranch ??
       (rebasing ? await rebaseBranch(folder, timeoutMs, signal) : null);
@@ -1939,11 +1926,11 @@ async function currentBranch(
 ): Promise<string | null> {
   const result = await git(
     folder,
-    ["symbolic-ref", "--short", "-q", "HEAD"],
+    ["branch", "--show-current"],
     timeoutMs,
     signal,
   );
-  return result.exitCode === 0 ? result.stdout.trim() : null;
+  return result.exitCode === 0 ? result.stdout.trim() || null : null;
 }
 
 async function branchChangeSource(
@@ -2163,14 +2150,12 @@ async function renameWorktreeBranch(
     folder,
     async () => {
       await branchChangeSource(folder, input.expectedBranch, timeoutMs, signal);
-      requireSuccess(
-        await git(
-          folder,
-          ["branch", "-m", "--", input.expectedBranch, input.branch],
-          timeoutMs,
-          signal,
-        ),
-        "Could not rename the worktree branch",
+      await renameLocalBranch(
+        folder,
+        input.expectedBranch,
+        input.branch,
+        timeoutMs,
+        signal,
       );
     },
     signal,
@@ -2192,6 +2177,85 @@ async function renameWorktreeBranch(
     branch: input.branch,
     renamedFrom: input.expectedBranch,
   };
+}
+
+async function renameLocalBranch(
+  folder: string,
+  source: string,
+  target: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const rename = (
+    from: string,
+    to: string,
+    operationSignal: AbortSignal = signal,
+  ) =>
+    git(folder, ["branch", "-m", "--", from, to], timeoutMs, operationSignal);
+  const failure = "Could not rename the worktree branch";
+  if (source.toLowerCase() !== target.toLowerCase()) {
+    requireSuccess(await rename(source, target), failure);
+    return;
+  }
+
+  const exactBranchExists = async (
+    name: string,
+    operationSignal: AbortSignal = signal,
+  ) => {
+    const ref = `refs/heads/${name}`;
+    return requireSuccess(
+      await git(
+        folder,
+        ["for-each-ref", "--format=%(refname)", ref],
+        timeoutMs,
+        operationSignal,
+      ),
+      "Could not verify the branch name",
+    )
+      .stdout.split(/\r?\n/)
+      .includes(ref);
+  };
+  if (await exactBranchExists(target)) {
+    throw new Error(`A branch named '${target}' already exists`);
+  }
+
+  // A loose ref on a case-insensitive volume can resolve under both names.
+  const temporary = `aide-rename-${randomUUID()}`;
+  let temporaryMoveSucceeded = false;
+  try {
+    requireSuccess(await rename(source, temporary), failure);
+    temporaryMoveSucceeded = true;
+    requireSuccess(await rename(temporary, target), failure);
+    if (!(await exactBranchExists(target))) {
+      throw new Error(`Git could not store the exact branch name '${target}'`);
+    }
+  } catch (error) {
+    const recoverySignal = new AbortController().signal;
+    try {
+      const temporaryExists = await exactBranchExists(
+        temporary,
+        recoverySignal,
+      );
+      // Git may have moved the ref before reporting a failure updating HEAD.
+      if (temporaryMoveSucceeded && !temporaryExists) {
+        requireSuccess(
+          await rename(target, temporary, recoverySignal),
+          "Could not move the branch to its temporary name",
+        );
+      }
+      if (temporaryMoveSucceeded || temporaryExists) {
+        requireSuccess(
+          await rename(temporary, source, recoverySignal),
+          "Could not restore the original branch name",
+        );
+      }
+    } catch (recoveryError) {
+      throw new Error(
+        `${cleanError(error)}. Could not restore '${source}': ${cleanError(recoveryError)}`,
+      );
+    }
+    throw error;
+  }
 }
 
 async function finishBranchWorktree(
@@ -3013,14 +3077,7 @@ export const operateWorktree: AgentJobHandler = async (
   const input = worktreeJobPayload(payload);
   const folder = await validateWorktree(input, timeoutMs, signal);
   if (!input.operation) throw new Error("A worktree operation is required");
-  const branchResult = await git(
-    folder,
-    ["symbolic-ref", "--short", "-q", "HEAD"],
-    timeoutMs,
-    signal,
-  );
-  const branch =
-    branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+  const branch = await currentBranch(folder, timeoutMs, signal);
   const upstreamResult = branch
     ? await git(
         folder,
@@ -3364,6 +3421,17 @@ export const operateWorktree: AgentJobHandler = async (
       // behaviour follows the checkout's own config. Diverged branches stop
       // here with Git's own message; Sync and Rebase are the ways through.
       await runGit(["merge", "--ff-only", upstreamSha], "Pull failed");
+      break;
+    }
+    case "PUBLISH": {
+      const publishBranch = input.expectedBranch;
+      if (!publishBranch) throw new Error("Publish requires a named branch");
+      await branchChangeSource(folder, publishBranch, timeoutMs, signal);
+      const ref = `refs/heads/${publishBranch}`;
+      await runGit(
+        ["push", "--set-upstream", "origin", `${ref}:${ref}`],
+        "Publish failed",
+      );
       break;
     }
     case "PUSH":
@@ -3722,14 +3790,7 @@ export const autoSyncWorktree: AgentJobHandler = async (
       definitionHash: definition.definitionHash,
       state: "SUSPENDED" as const,
     }));
-  const branchResult = await git(
-    folder,
-    ["symbolic-ref", "--short", "-q", "HEAD"],
-    timeoutMs,
-    signal,
-  );
-  const symbolicBranch =
-    branchResult.exitCode === 0 ? branchResult.stdout.trim() : null;
+  const symbolicBranch = await currentBranch(folder, timeoutMs, signal);
   const branch =
     symbolicBranch ??
     (input.phase === "FINALIZE"
@@ -3836,24 +3897,17 @@ export const autoSyncWorktree: AgentJobHandler = async (
         ),
       };
     }
-    const finalBranch = await git(
-      folder,
-      ["symbolic-ref", "--short", "-q", "HEAD"],
-      timeoutMs,
-      signal,
-    );
-    const finalUpstream =
-      finalBranch.exitCode === 0
-        ? await git(
-            folder,
-            ["rev-parse", "--abbrev-ref", "@{upstream}"],
-            timeoutMs,
-            signal,
-          )
-        : null;
+    const finalBranch = await currentBranch(folder, timeoutMs, signal);
+    const finalUpstream = finalBranch
+      ? await git(
+          folder,
+          ["rev-parse", "--abbrev-ref", "@{upstream}"],
+          timeoutMs,
+          signal,
+        )
+      : null;
     if (
-      finalBranch.exitCode !== 0 ||
-      finalBranch.stdout.trim() !== input.expectedBranch ||
+      finalBranch !== input.expectedBranch ||
       finalUpstream?.exitCode !== 0 ||
       !finalUpstream.stdout.trim()
     ) {

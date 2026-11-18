@@ -4198,6 +4198,7 @@
       "cancelRebase": "Cancelar rebase",
       "pull": "Recibir cambios",
       "push": "Enviar cambios",
+      "publish": "Publicar",
       "reset": "Restablecer",
       "clearLock": "Eliminar bloqueo de Git",
       "stashAll": "Guardar todos los cambios en stash",

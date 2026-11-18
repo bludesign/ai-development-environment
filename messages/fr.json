@@ -4198,6 +4198,7 @@
       "cancelRebase": "Annuler le rebase",
       "pull": "Récupérer les modifications",
       "push": "Envoyer les modifications",
+      "publish": "Publier",
       "reset": "Réinitialiser",
       "clearLock": "Supprimer le verrou Git",
       "stashAll": "Remiser toutes les modifications",

@@ -513,21 +513,34 @@ describe("WorktreesService", () => {
     const inventory = report();
     const original = inventory.worktrees[0]!;
     const item = { ...original, branch: "feature/AIDE-42" };
+    const localBranchesJson = JSON.stringify([item.branch, "main"]);
     const tx = {
       codebase: {
-        findUnique: vi.fn().mockResolvedValue({
-          localBranchesJson: JSON.stringify(inventory.localBranches),
-        }),
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValueOnce({
+            localBranchesJson: JSON.stringify(inventory.localBranches),
+          })
+          .mockResolvedValue({ localBranchesJson }),
         update: vi.fn(),
-      },
-      worktree: {
         updateMany: vi
           .fn()
           .mockResolvedValueOnce({ count: 1 })
-          .mockResolvedValueOnce({ count: 0 }),
+          .mockResolvedValue({ count: 0 }),
       },
-      worktreePullRequest: { deleteMany: vi.fn() },
-      worktreeGitLabMergeRequest: { deleteMany: vi.fn() },
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({ id: "worktree-1" }),
+        updateMany: vi
+          .fn()
+          .mockResolvedValueOnce({ count: 1 })
+          .mockResolvedValue({ count: 0 }),
+      },
+      worktreePullRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreeGitLabMergeRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
     };
     getPrismaClient.mockResolvedValue({
       $transaction: vi.fn((callback) => callback(tx)),
@@ -553,16 +566,121 @@ describe("WorktreesService", () => {
     });
     expect(data).toMatchObject({
       branch: item.branch,
-      pullRequestLookupBranch: null,
     });
     expect(data).not.toHaveProperty("baseBranchOverride");
-    expect(tx.worktreePullRequest.deleteMany).toHaveBeenCalledOnce();
     expect(tx.codebase.update).toHaveBeenCalledExactlyOnceWith({
       where: { id: "codebase-1" },
-      data: {
-        branch: item.branch,
-        localBranchesJson: JSON.stringify([item.branch, "main"]),
+      data: { localBranchesJson },
+    });
+    expect(tx.codebase.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "codebase-1",
+          folder: item.folder,
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+          ],
+        },
+        data: expect.objectContaining({
+          branch: item.branch,
+          lastCheckedAt: new Date(item.checkedAt),
+        }),
+      }),
+    );
+  });
+
+  test("reconciles a watched rename without resetting the new branch's associations", async () => {
+    let complete: ((job: Record<string, unknown>) => Promise<void>) | undefined;
+    const control = {
+      registerCompletionHandler: vi.fn((kind, handler) => {
+        if (kind === WORKTREE_BRANCH_JOB_KIND) complete = handler;
+      }),
+    } as unknown as AgentControlService;
+    const inventory = report();
+    const original = inventory.worktrees[0]!;
+    const item = { ...original, branch: "feature/AIDE-42" };
+    const worktreeId = "worktree-1";
+    const tx = {
+      codebase: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({
+          localBranchesJson: JSON.stringify(inventory.localBranches),
+        }),
+        update: vi.fn(),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       },
+      worktree: {
+        findFirst: vi.fn().mockResolvedValue({ id: worktreeId }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreePullRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      worktreeGitLabMergeRequest: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+    };
+    getPrismaClient.mockResolvedValue({
+      $transaction: vi.fn((callback) => callback(tx)),
+    });
+    service(control);
+
+    await complete!({
+      codebaseId: inventory.codebaseId,
+      worktreeId,
+      status: "SUCCEEDED",
+      resultJson: JSON.stringify({
+        worktree: item,
+        renamedFrom: original.branch,
+      }),
+    });
+
+    const identity = {
+      id: worktreeId,
+      codebaseId: inventory.codebaseId,
+      folder: item.folder,
+      gitDirectory: item.gitDirectory,
+      missingAt: null,
+    };
+    expect(tx.worktree.updateMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: {
+          ...identity,
+          OR: [
+            { lastCheckedAt: null },
+            { lastCheckedAt: { lt: new Date(item.checkedAt) } },
+          ],
+        },
+      }),
+    );
+    expect(tx.worktree.findFirst).toHaveBeenCalledExactlyOnceWith({
+      where: { ...identity, branch: item.branch },
+      select: { id: true },
+    });
+    expect(tx.worktree.updateMany).toHaveBeenNthCalledWith(2, {
+      where: {
+        ...identity,
+        branch: item.branch,
+        pullRequestLookupBranch: { not: item.branch },
+      },
+      data: {
+        pullRequestLookupOrigin: null,
+        pullRequestLookupBranch: null,
+        pullRequestLookupAt: null,
+      },
+    });
+    expect(tx.worktreePullRequest.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { worktreeId, headRefName: { not: item.branch } },
+    });
+    expect(
+      tx.worktreeGitLabMergeRequest.deleteMany,
+    ).toHaveBeenCalledExactlyOnceWith({
+      where: { worktreeId, sourceBranch: { not: item.branch } },
+    });
+    expect(tx.codebase.update).toHaveBeenCalledExactlyOnceWith({
+      where: { id: inventory.codebaseId },
+      data: { localBranchesJson: JSON.stringify([item.branch, "main"]) },
     });
   });
 

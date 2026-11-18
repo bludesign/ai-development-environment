@@ -46,12 +46,13 @@ async function pushLease(
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<PushLease> {
-  const branch = await git(
+  const branchRef = await git(
     folder,
-    ["symbolic-ref", "--short", "HEAD"],
+    ["symbolic-ref", "HEAD"],
     timeoutMs,
     signal,
   );
+  const branch = branchRef.replace(/^refs\/heads\//, "");
   const remote = await git(
     folder,
     ["for-each-ref", "--format=%(push:remotename)", `refs/heads/${branch}`],

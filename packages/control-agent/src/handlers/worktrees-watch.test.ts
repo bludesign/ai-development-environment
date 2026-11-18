@@ -121,6 +121,7 @@ describe("worktree activity watching", () => {
       timeout: 3_000,
     });
     await git(folder, "branch", "alternate");
+    await git(folder, "tag", "alternate");
     await git(folder, "switch", "alternate");
     await vi.waitFor(
       () =>
