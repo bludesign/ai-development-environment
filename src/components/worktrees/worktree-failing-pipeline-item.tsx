@@ -34,44 +34,34 @@ function PipelineActions({
   workflows: WorktreeQuickAction[];
 }) {
   const t = useTranslations("worktrees");
-  const { gitHubHeadPipelineStatus, headSha, pullRequest } = worktree;
-  const repositoryGithubId =
-    worktree.gitHubPipelineRepositoryId ??
-    gitHubHeadPipelineStatus?.repositoryGithubId ??
-    (pullRequest && pullRequest.headRefOid === headSha
-      ? pullRequest.repositoryGithubId
-      : null);
+  const { branch, headSha, pullRequest, sourceControlRequest } = worktree;
+  const currentOpenPullRequest =
+    pullRequest?.state === "OPEN" &&
+    pullRequest.headRefName === branch &&
+    pullRequest.headRefOid === headSha
+      ? pullRequest
+      : null;
   const seed = useMemo(() => {
-    if (!headSha) return null;
-    if (
-      gitHubHeadPipelineStatus?.headSha === headSha &&
-      gitHubHeadPipelineStatus.repositoryGithubId === repositoryGithubId
-    )
-      return gitHubHeadPipelineStatus;
-    if (
-      pullRequest?.headRefOid !== headSha ||
-      pullRequest.repositoryGithubId !== repositoryGithubId
-    )
-      return null;
+    if (!currentOpenPullRequest) return null;
     return {
-      repositoryGithubId: pullRequest.repositoryGithubId,
-      repositoryNameWithOwner: pullRequest.repositoryNameWithOwner,
-      repositoryUrl: pullRequest.repositoryUrl,
-      headSha,
-      pipelineStatus: pullRequest.pipelineStatus,
-      pipelines: pullRequest.pipelines,
-      revision: pullRequest.pipelineRevision ?? 0,
+      repositoryGithubId: currentOpenPullRequest.repositoryGithubId,
+      repositoryNameWithOwner: currentOpenPullRequest.repositoryNameWithOwner,
+      repositoryUrl: currentOpenPullRequest.repositoryUrl,
+      headSha: currentOpenPullRequest.headRefOid,
+      pipelineStatus: currentOpenPullRequest.pipelineStatus,
+      pipelines: currentOpenPullRequest.pipelines,
+      revision: currentOpenPullRequest.pipelineRevision ?? 0,
       updatedAt: "",
     };
-  }, [gitHubHeadPipelineStatus, headSha, pullRequest, repositoryGithubId]);
-  const github = useGitHubPipelineSnapshot(
-    repositoryGithubId && headSha ? { repositoryGithubId, headSha } : null,
-    seed,
-  );
-  const gitlab = failingGitLabPipelines(
-    worktree.gitLabPipelines ?? [],
-    worktree,
-  );
+  }, [currentOpenPullRequest]);
+  const github = useGitHubPipelineSnapshot(seed, seed);
+  const gitlab =
+    sourceControlRequest?.provider === "GITLAB" &&
+    sourceControlRequest.state === "OPENED" &&
+    sourceControlRequest.headRefName === branch &&
+    sourceControlRequest.headRefOid === headSha
+      ? failingGitLabPipelines(worktree.gitLabPipelines ?? [], worktree)
+      : [];
   const failing =
     gitlab.length > 0 ||
     Boolean(github && isFailingGitHubStatus(github.pipelineStatus));

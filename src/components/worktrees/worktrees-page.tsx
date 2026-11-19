@@ -2224,6 +2224,8 @@ export function WorktreeMetadata(
     onToggleDetails,
   } = props;
   const t = useTranslations("worktrees");
+  const baseUnavailable =
+    !group.codebase.defaultBranch && !worktree.baseBranchOverride;
   return (
     <div className="space-y-3 text-sm">
       <div className="grid gap-3 md:grid-cols-2">
@@ -2266,18 +2268,20 @@ export function WorktreeMetadata(
           onError={props.onError}
         />
       )}
-      <div className="flex flex-wrap items-center gap-2">
-        {worktree.statusError && (
-          <span className="text-xs text-destructive">
-            {worktree.statusError}
-          </span>
-        )}
-        {!group.codebase.defaultBranch && !worktree.baseBranchOverride && (
-          <span className="text-xs text-destructive">
-            {t("baseUnavailable")}
-          </span>
-        )}
-      </div>
+      {(worktree.statusError || baseUnavailable) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {worktree.statusError && (
+            <span className="text-xs text-destructive">
+              {worktree.statusError}
+            </span>
+          )}
+          {baseUnavailable && (
+            <span className="text-xs text-destructive">
+              {t("baseUnavailable")}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

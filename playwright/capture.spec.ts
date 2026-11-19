@@ -197,9 +197,23 @@ test.describe("app screenshots", () => {
         });
         await expect(sessionBadge).toBeVisible();
         await expect(planBadge).toBeVisible();
-        await expect(
-          card.getByText("Pipeline failing", { exact: true }),
-        ).toBeVisible();
+        const pipelineWarning = card.getByText("Pipeline failing", {
+          exact: true,
+        });
+        await expect(pipelineWarning).toBeVisible();
+        const spacing = await pipelineWarning.evaluate((title) => {
+          const banner = title.parentElement!;
+          const bounds = banner.getBoundingClientRect();
+          const metadata = banner.previousElementSibling!;
+          const footer = banner.closest(
+            '[data-slot="card-content"]',
+          )!.nextElementSibling!;
+          return {
+            above: bounds.top - metadata.getBoundingClientRect().bottom,
+            below: footer.getBoundingClientRect().top - bounds.bottom,
+          };
+        });
+        expect(spacing.above).toBeCloseTo(spacing.below);
         await expect(
           card.getByRole("button", {
             name: "Diagnose CI failure",

@@ -55,6 +55,14 @@ const gitlabWorktree = (gitLabPipelines: GitLabPipelineView[]) =>
     branch: "feature/ci",
     headSha: "current-head",
     gitLabPipelines,
+    sourceControlRequest: {
+      provider: "GITLAB",
+      projectId: "44",
+      number: 5,
+      state: "OPENED",
+      headRefName: "feature/ci",
+      headRefOid: "current-head",
+    },
   }) as Worktree;
 
 test("uses the newest GitLab pipeline per source and sends only current failures", async () => {
@@ -141,8 +149,11 @@ test("does not offer a GitHub quick action when only a different PR commit faile
   });
   const worktree = {
     ...gitlabWorktree([]),
+    sourceControlRequest: null,
     pullRequest: {
+      state: "OPEN",
       repositoryGithubId: "44",
+      headRefName: "feature/ci",
       headRefOid: "stale-pr-head",
       pipelineStatus: "FAILURE",
       pipelines: [{ id: "stale-check", status: "FAILURE" }],
@@ -155,7 +166,7 @@ test("does not offer a GitHub quick action when only a different PR commit faile
   expect(screen.queryByRole("button", { name: workflow.name })).toBeNull();
 });
 
-test("watches the exact GitHub head before a tracked worktree has a saved pipeline", async () => {
+test("watches live pipeline status for an open GitHub pull request", async () => {
   const key = { repositoryGithubId: "44", headSha: "current-head" };
   vi.mocked(controlPlaneRequest).mockImplementation(async (query) => {
     if (query.includes("GitHubPipelineStatuses")) {
@@ -176,16 +187,40 @@ test("watches the exact GitHub head before a tracked worktree has a saved pipeli
       ],
     };
   });
-  render(
+  const worktree: Worktree = {
+    ...gitlabWorktree([]),
+    sourceControlRequest: null,
+    pullRequest: {
+      id: "pr-5",
+      number: 5,
+      title: "CI changes",
+      url: "https://github.com/acme/app/pull/5",
+      state: "OPEN",
+      repositoryGithubId: key.repositoryGithubId,
+      repositoryNameWithOwner: "acme/app",
+      repositoryUrl: "https://github.com/acme/app",
+      headRefName: "feature/ci",
+      headRefOid: key.headSha,
+      labels: [],
+      jiraKey: null,
+      pipelineStatus: "NONE",
+      pipelines: [],
+      reviewDecision: "APPROVED",
+      unresolvedReviewThreadCount: 0,
+      isDraft: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      autoMergeEnabled: false,
+      viewerCanEnableAutoMerge: false,
+      viewerCanDisableAutoMerge: false,
+      worktreeId: "worktree-1",
+      worktreeHighlightColor: null,
+      createdAt: "",
+    },
+  };
+  const { rerender } = render(
     <GitHubPipelineStatusProvider>
-      <WorktreeFailingPipelineItem
-        worktree={{
-          ...gitlabWorktree([]),
-          pullRequest: null,
-          gitHubPipelineRepositoryId: key.repositoryGithubId,
-        }}
-        workflows={[workflow]}
-      />
+      <WorktreeFailingPipelineItem worktree={worktree} workflows={[workflow]} />
     </GitHubPipelineStatusProvider>,
   );
 
@@ -194,75 +229,125 @@ test("watches the exact GitHub head before a tracked worktree has a saved pipeli
     expect.stringContaining("GitHubPipelineStatuses"),
     { keys: [key] },
   );
+  rerender(
+    <GitHubPipelineStatusProvider>
+      <WorktreeFailingPipelineItem
+        worktree={{ ...worktree, pullRequest: null }}
+        workflows={[workflow]}
+      />
+    </GitHubPipelineStatusProvider>,
+  );
+  expect(screen.queryByText("Pipeline failing")).toBeNull();
+  expect(screen.queryByRole("button", { name: workflow.name })).toBeNull();
 });
 
-test.each([true, false])(
-  "includes exact-HEAD GitHub check details with a linked PR = %s",
-  async (hasPullRequest) => {
+test.each([null, "CLOSED", "MERGED"] as const)(
+  "hides failing branch CI when the linked request state is %s",
+  (state) => {
     vi.mocked(controlPlaneRequest).mockResolvedValue({
       workflowTargetSummaries: [],
-      triggerWorkflow: { id: "run-1" },
     });
-    const currentHeadStatus = {
+    const gitlab = gitlabWorktree([pipeline("11", "push", "FAILED")]);
+    const githubHeadStatus = {
       repositoryGithubId: "44",
+      headSha: "current-head",
       pipelineStatus: "FAILURE",
-      pipelines: [
-        {
-          id: "check-1",
-          workflowRunId: "987",
-          status: "TIMED_OUT",
-          url: "https://github.com/acme/app/actions/runs/987",
-        },
-        { id: "check-2", status: "SUCCESS" },
-      ],
+      pipelines: [{ id: "failed-check", status: "FAILURE" }],
     };
-    const worktree = {
+    const github = {
       ...gitlabWorktree([]),
-      ...(hasPullRequest
+      sourceControlRequest: null,
+      gitHubHeadPipelineStatus: githubHeadStatus,
+      gitHubPipelineRepositoryId: githubHeadStatus.repositoryGithubId,
+      pullRequest: state
         ? {
-            pullRequest: { ...currentHeadStatus, headRefOid: "current-head" },
+            ...githubHeadStatus,
+            state,
+            headRefName: "feature/ci",
+            headRefOid: githubHeadStatus.headSha,
           }
-        : {
-            pullRequest: null,
-            gitHubHeadPipelineStatus: {
-              ...currentHeadStatus,
-              headSha: "current-head",
-            },
-          }),
+        : null,
     } as Worktree;
     render(
-      <WorktreeFailingPipelineItem
-        worktree={worktree}
-        workflows={[workflow]}
-      />,
+      <>
+        <WorktreeFailingPipelineItem
+          worktree={{
+            ...gitlab,
+            sourceControlRequest:
+              gitlab.sourceControlRequest && state
+                ? { ...gitlab.sourceControlRequest, state }
+                : null,
+          }}
+          workflows={[workflow]}
+        />
+        <WorktreeFailingPipelineItem
+          worktree={{ ...github, id: "github-worktree" }}
+          workflows={[workflow]}
+        />
+      </>,
     );
-    fireEvent.click(screen.getByRole("button", { name: workflow.name }));
-    await waitFor(() =>
-      expect(controlPlaneRequest).toHaveBeenCalledWith(
-        expect.stringContaining("RunWorktreeQuickAction"),
-        expect.objectContaining({
-          input: expect.objectContaining({
-            sessionData: {
-              worktree: {
-                failingPipelines: [
-                  {
-                    provider: "GITHUB",
-                    id: "check-1",
-                    workflowRunId: "987",
-                    status: "TIMED_OUT",
-                    url: "https://github.com/acme/app/actions/runs/987",
-                    headSha: "current-head",
-                    repositoryGithubId: "44",
-                  },
-                ],
-              },
-            },
-          }),
-        }),
-      ),
-    );
+    expect(screen.queryByText("Pipeline failing")).toBeNull();
+    expect(screen.queryByRole("button", { name: workflow.name })).toBeNull();
   },
 );
+
+test("includes failing check details for the current commit of an open GitHub pull request", async () => {
+  vi.mocked(controlPlaneRequest).mockResolvedValue({
+    workflowTargetSummaries: [],
+    triggerWorkflow: { id: "run-1" },
+  });
+  const currentHeadStatus = {
+    repositoryGithubId: "44",
+    pipelineStatus: "FAILURE",
+    pipelines: [
+      {
+        id: "check-1",
+        workflowRunId: "987",
+        status: "TIMED_OUT",
+        url: "https://github.com/acme/app/actions/runs/987",
+      },
+      { id: "check-2", status: "SUCCESS" },
+    ],
+  };
+  const worktree = {
+    ...gitlabWorktree([]),
+    sourceControlRequest: null,
+    pullRequest: {
+      ...currentHeadStatus,
+      headRefName: "feature/ci",
+      headRefOid: "current-head",
+      state: "OPEN",
+    },
+  } as Worktree;
+  render(
+    <WorktreeFailingPipelineItem worktree={worktree} workflows={[workflow]} />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: workflow.name }));
+  await waitFor(() =>
+    expect(controlPlaneRequest).toHaveBeenCalledWith(
+      expect.stringContaining("RunWorktreeQuickAction"),
+      expect.objectContaining({
+        input: expect.objectContaining({
+          sessionData: {
+            worktree: {
+              failingPipelines: [
+                {
+                  provider: "GITHUB",
+                  id: "check-1",
+                  workflowRunId: "987",
+                  status: "TIMED_OUT",
+                  url: "https://github.com/acme/app/actions/runs/987",
+                  headSha: "current-head",
+                  repositoryGithubId: "44",
+                },
+              ],
+            },
+          },
+        }),
+      }),
+    ),
+  );
+});
 
 test("shows both kinds of work in progress and clears zero-count badges", () => {
   const { rerender } = render(

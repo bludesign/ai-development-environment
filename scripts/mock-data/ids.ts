@@ -140,6 +140,8 @@ export const ids = {
     owner: "acme",
     repository: "web-app",
     number: 42,
+    repositoryGithubId: "R_kgACMEweb",
+    headSha: "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081",
   },
   gitlab: {
     projectId: "1001",
