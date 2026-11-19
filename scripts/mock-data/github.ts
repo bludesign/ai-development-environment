@@ -3,8 +3,7 @@ import type { PrismaClient } from "../../src/generated/prisma/client";
 import { ids } from "./ids";
 import { daysFromNow, hoursAgo, minutesAgo } from "./time";
 
-const WEB_GITHUB_ID = "R_kgACMEweb";
-const WEB_HEAD_SHA = "5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081";
+const WEB_GITHUB_ID = ids.pullRequests.repositoryGithubId;
 
 /**
  * Delivery history behind the three deliveries the pipeline snapshot above depends on. Kept as
@@ -182,7 +181,7 @@ export async function seedGitHub(prisma: PrismaClient): Promise<void> {
       repositoryGithubId: WEB_GITHUB_ID,
       repositoryNameWithOwner: "acme/web-app",
       repositoryUrl: "https://github.com/acme/web-app",
-      headSha: WEB_HEAD_SHA,
+      headSha: ids.pullRequests.headSha,
       pipelineStatus: "FAILURE",
       graphqlRollupStatus: "FAILURE",
       lastObservedAt: minutesAgo(6),

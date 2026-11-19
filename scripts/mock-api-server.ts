@@ -25,6 +25,7 @@ import { createMcpHandler, McpServer } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import * as z from "zod/v4";
 
+import { ids } from "./mock-data/ids";
 import { NOW } from "./mock-data/time";
 import { mockActionsRuns } from "./mock-api-pagination";
 import { mockGitLabApi } from "./mock-gitlab-api";
@@ -76,7 +77,10 @@ const actor = (login: string) => ({
 });
 
 const repositoryNode = (name: string) => ({
-  id: `R_kgACME${name.replace(/[^a-z]/gi, "")}`,
+  id:
+    name === ids.pullRequests.repository
+      ? ids.pullRequests.repositoryGithubId
+      : `R_kgACME${name.replace(/[^a-z]/gi, "")}`,
   nameWithOwner: `${OWNER}/${name}`,
   url: `https://github.com/${OWNER}/${name}`,
 });
@@ -108,8 +112,8 @@ type PullRequestSeed = {
 
 const PULL_REQUESTS: PullRequestSeed[] = [
   {
-    number: 42,
-    repository: "web-app",
+    number: ids.pullRequests.number,
+    repository: ids.pullRequests.repository,
     title: "Add quick search to the global navigation bar",
     author: VIEWER_LOGIN,
     state: "OPEN",
@@ -441,12 +445,16 @@ const reviewThreadComment = (
   updatedAt: ago(minutesAgo),
 });
 
+const isQuickSearchPullRequest = (seed: PullRequestSeed) =>
+  seed.repository === ids.pullRequests.repository &&
+  seed.number === ids.pullRequests.number;
+
 /**
  * Every review thread carries the pull request it belongs to — the Comments page groups by it,
  * and the detail page reads `headRepository` off it to match the thread to a local worktree.
  */
 const pullRequestBranch = (seed: PullRequestSeed) =>
-  seed.repository === "web-app" && seed.number === 42
+  isQuickSearchPullRequest(seed)
     ? "feature/quick-search"
     : `feature/pr-${seed.number}`;
 
@@ -600,7 +608,9 @@ const pullRequestNode = (seed: PullRequestSeed) => ({
   state: seed.state,
   mergedAt: seed.state === "MERGED" ? ago(seed.updatedMinutesAgo) : null,
   headRefName: pullRequestBranch(seed),
-  headRefOid: `${seed.number}`.padStart(4, "0").repeat(10).slice(0, 40),
+  headRefOid: isQuickSearchPullRequest(seed)
+    ? ids.pullRequests.headSha
+    : `${seed.number}`.padStart(4, "0").repeat(10).slice(0, 40),
   headRepository: { nameWithOwner: `${OWNER}/${seed.repository}` },
   repository: repositoryNode(seed.repository),
   labels: connection(seed.labels.map((name) => ({ name }))),
