@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -13,7 +13,15 @@ import {
   AUTO_BUILD_READINESS_CAPABILITY,
   IOS_BUILD_JOB_KIND,
 } from "@ai-development-environment/agent-contract/builds";
-import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  test,
+  vi,
+} from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 import type { AgentControlService } from "@/services/agent-control";
 import { BuildsService } from "@/services/builds/builds.service";
@@ -24,20 +32,28 @@ const getPrismaClient = vi.hoisted(() => vi.fn());
 vi.mock("@/data/prisma-client", () => ({ getPrismaClient }));
 
 let directory: string;
+let templateDatabasePath: string;
+let databaseCount = 0;
 let prisma: PrismaClient;
 
-beforeEach(async () => {
+beforeAll(async () => {
   directory = await mkdtemp(join(tmpdir(), "aide-auto-build-"));
-  const path = join(directory, "test.db");
-  const db = new Database(path);
+  templateDatabasePath = join(directory, "template.db");
+  const db = new Database(":memory:");
   try {
     for (const migration of readdirSync("prisma/migrations").sort()) {
       const sql = join("prisma/migrations", migration, "migration.sql");
       if (existsSync(sql)) db.exec(readFileSync(sql, "utf8"));
     }
+    await db.backup(templateDatabasePath);
   } finally {
     db.close();
   }
+});
+
+beforeEach(async () => {
+  const path = join(directory, `test-${++databaseCount}.db`);
+  await copyFile(templateDatabasePath, path);
   prisma = new PrismaClient({
     adapter: new PrismaBetterSqlite3({ url: path }),
   });
@@ -130,6 +146,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await prisma.$disconnect();
+});
+
+afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
