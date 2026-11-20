@@ -404,6 +404,14 @@ export function SidebarStatusFooter({
                   {enabledAgents.map((agent) => {
                     const volume = monitoredVolume(agent);
                     if (!volume) return null;
+                    const volumeLabel = volume.roles
+                      .filter(
+                        (role) =>
+                          role === "DERIVED_DATA" ||
+                          role === "GRADLE_BUILD_DATA",
+                      )
+                      .map((role) => t(`role.${role}`))
+                      .join(", ");
                     const usedPercent =
                       volume.totalBytes > 0
                         ? Math.max(
@@ -419,13 +427,13 @@ export function SidebarStatusFooter({
                     const unfilledPercent = 100 - usedPercent;
                     return (
                       <span
-                        aria-label={`${agent.agent.name} · ${t("role.DERIVED_DATA")}: ${formatDiskBytes(volume.freeBytes, locale)} ${t("free")}`}
+                        aria-label={`${agent.agent.name} · ${volumeLabel}: ${formatDiskBytes(volume.freeBytes, locale)} ${t("free")}`}
                         className="grid size-5 place-items-center rounded-full"
                         key={agent.agent.id}
                         style={{
                           background: `conic-gradient(var(--muted) 0% ${unfilledPercent}%, ${ringColor(agent.status)} ${unfilledPercent}% 100%)`,
                         }}
-                        title={`${agent.agent.name} · ${t("role.DERIVED_DATA")}`}
+                        title={`${agent.agent.name} · ${volumeLabel}`}
                       >
                         <span className="size-3 rounded-full bg-sidebar" />
                       </span>

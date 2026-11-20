@@ -29,6 +29,115 @@ afterEach(async () => {
 });
 
 describe("AgentGraphQLClient", () => {
+  test("preserves inventory and watch reports on servers without automatic build readiness", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+      const { variables } = JSON.parse(init.body);
+      const input = variables.input ?? variables.reports[0].worktrees[0];
+      if ("cleanForAutoBuild" in input) {
+        const type = variables.input
+          ? "WorktreeActivityReportInput"
+          : "WorktreeInventoryInput";
+        return Response.json({
+          errors: [
+            {
+              message: `Field "cleanForAutoBuild" is not defined by type "${type}".`,
+            },
+          ],
+        });
+      }
+      return Response.json({
+        data: variables.input
+          ? { reportWorktreeActivity: {} }
+          : { reportWorktrees: [] },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new AgentGraphQLClient("https://control.test");
+    const observedAt = new Date().toISOString();
+    const item = {
+      folder: "/repo",
+      gitDirectory: "/repo/.git",
+      relativePath: ".",
+      primary: true,
+      branch: "main",
+      headSha: "abc",
+      upstream: null,
+      ahead: null,
+      behind: null,
+      syncState: "UNKNOWN" as const,
+      baseAhead: null,
+      baseBehind: null,
+      cleanForAutoBuild: false,
+      availability: "AVAILABLE" as const,
+      error: null,
+      checkedAt: observedAt,
+    };
+    await client.reportWorktrees([
+      {
+        codebaseId: "repo",
+        complete: true,
+        defaultBranch: "main",
+        localBranches: [],
+        remoteBranches: [],
+        fetchedAt: null,
+        fetchAttemptedAt: null,
+        fetchError: null,
+        worktrees: [item],
+      },
+    ]);
+    await client.reportWorktreeActivity({
+      codebaseId: "repo",
+      gitDirectory: item.gitDirectory,
+      cleanForAutoBuild: true,
+      observedAt,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(
+      JSON.parse(fetchMock.mock.calls[1]![1].body).variables.reports[0]
+        .worktrees[0].headSha,
+    ).toBe("abc");
+    expect(
+      JSON.parse(fetchMock.mock.calls[3]![1].body).variables.input.observedAt,
+    ).toBe(observedAt);
+  });
+
+  test("falls back to legacy disk reporting when the server lacks the Gradle cache field", async () => {
+    const configuration = {
+      enabled: true,
+      pollIntervalSeconds: 60,
+      baseRepoDirectory: null,
+      derivedDataLocationMode: "DEFAULT",
+      derivedDataPath: null,
+      managedDerivedDataRoot: null,
+      worktrees: [],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({
+          errors: [
+            {
+              message:
+                'Cannot query field "managedGradleRoot" on type "AgentDiskSpaceConfiguration".',
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ data: { agentDiskSpaceConfiguration: configuration } }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(
+      new AgentGraphQLClient("https://control.test").diskSpaceConfiguration(),
+    ).resolves.toEqual(configuration);
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).query).toContain(
+      "managedGradleRoot",
+    );
+    expect(
+      JSON.parse(String(fetchMock.mock.calls[1][1].body)).query,
+    ).not.toContain("managedGradleRoot");
+  });
+
   test("falls back to remote-default maintenance when an older server has no branch patterns field", async () => {
     const fetchMock = vi
       .fn()

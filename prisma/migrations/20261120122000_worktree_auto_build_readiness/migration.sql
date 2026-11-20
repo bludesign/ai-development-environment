@@ -1,0 +1,1 @@
+ALTER TABLE "Worktree" ADD COLUMN "cleanForAutoBuild" BOOLEAN NOT NULL DEFAULT false;

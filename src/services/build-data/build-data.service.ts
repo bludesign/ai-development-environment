@@ -5,8 +5,10 @@ import {
   BUILD_DATA_DELETE_JOB_KIND,
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
+  GRADLE_CACHE_ONLY_CAPABILITY,
   buildDataDeletePayload,
   buildDataTargetsPayload,
+  isCacheOnlyGradleTarget,
   parseBuildDataDeleteResult,
   parseBuildDataScanResult,
   parseBuildDataSizeResult,
@@ -31,6 +33,7 @@ import {
   executingResourcesByWorktree,
   type DerivedDataActiveResource,
 } from "@/services/disk-space/executing-work";
+import { buildDataWorktree } from "./worktree-ownership";
 
 const COLLECTION_DEADLINE_MS = 60_000;
 const SCAN_TIMEOUT_SECONDS = 45;
@@ -186,11 +189,6 @@ function entryId(agentId: string, path: string): string {
     .update("\0")
     .update(path)
     .digest("base64url");
-}
-
-function pathContains(folder: string, candidate: string): boolean {
-  const normalized = folder === "/" ? folder : folder.replace(/\/+$/, "");
-  return candidate === normalized || candidate.startsWith(`${normalized}/`);
 }
 
 export class BuildDataService {
@@ -480,12 +478,12 @@ export class BuildDataService {
   ): Promise<void> {
     const uniqueIds = [...new Set(requestedIds)];
     if (!uniqueIds.length)
-      throw new Error("Select at least one Derived Data entry");
+      throw new Error("Select at least one Build Data entry");
     const entries = new Map(snapshot.entries.map((entry) => [entry.id, entry]));
     const selected = uniqueIds.map((id) => {
       const entry = entries.get(id);
       if (!entry)
-        throw new Error("A selected Derived Data entry is no longer available");
+        throw new Error("A selected Build Data entry is no longer available");
       return entry;
     });
     if (kind === BUILD_DATA_DELETE_JOB_KIND && !overrideProtection) {
@@ -494,7 +492,7 @@ export class BuildDataService {
       );
       if (protectedEntries.length) {
         throw new Error(
-          `Explicit override confirmation is required to delete protected Derived Data: ${protectedEntries
+          `Explicit override confirmation is required to delete protected Build Data: ${protectedEntries
             .map((entry) => entry.name)
             .join(", ")}`,
         );
@@ -521,9 +519,18 @@ export class BuildDataService {
           `${selectedAgent.name} is offline; reconnect it before running this operation`,
         );
       }
-      if (!capabilities(currentAgent).includes(kind)) {
+      const supported = capabilities(currentAgent);
+      if (!supported.includes(kind)) {
         throw new Error(
           `${selectedAgent.name} must be updated before this operation can run`,
+        );
+      }
+      if (
+        group.some(isCacheOnlyGradleTarget) &&
+        !supported.includes(GRADLE_CACHE_ONLY_CAPABILITY)
+      ) {
+        throw new Error(
+          `Update ${selectedAgent.name} to size or delete unlinked Gradle caches`,
         );
       }
       readyGroups.push({ agentId, entries: group });
@@ -562,9 +569,14 @@ export class BuildDataService {
           agentId,
           kind,
           payload: {
-            targets: group.map(({ path, rootPath }) => ({
-              path,
-              rootPath,
+            targets: group.map((entry) => ({
+              path: entry.path,
+              rootPath: entry.rootPath,
+              ...(isCacheOnlyGradleTarget(entry) ? { cacheOnly: true } : {}),
+              ...(kind === BUILD_DATA_DELETE_JOB_KIND &&
+              entry.kind === "GRADLE_PROJECT"
+                ? { kind: entry.kind, worktreeId: entry.worktreeId }
+                : {}),
             })),
           },
           idempotencyKey: `${kind}:${snapshot.id}:${requestId}:${agentId}`,
@@ -602,9 +614,9 @@ export class BuildDataService {
     id: string,
   ): Promise<BuildDataCollectionSnapshot> {
     const collection = await this.getCollection(id);
-    if (!collection) throw new Error("Derived Data collection not found");
+    if (!collection) throw new Error("Build Data collection not found");
     if (collection.status !== "COMPLETED") {
-      throw new Error("Wait for the Derived Data scan to finish");
+      throw new Error("Wait for the Build Data scan to finish");
     }
     return collection;
   }
@@ -722,16 +734,10 @@ export class BuildDataService {
         continue;
       }
       for (const entry of report.entries) {
-        const candidates = entry.workspacePath
-          ? (worktreesByAgent.get(job.agentId) ?? [])
-              .filter((worktree) =>
-                pathContains(worktree.folder, entry.workspacePath!),
-              )
-              .sort(
-                (first, second) => second.folder.length - first.folder.length,
-              )
-          : [];
-        const worktree = candidates[0] ?? null;
+        const worktree = buildDataWorktree(
+          entry,
+          worktreesByAgent.get(job.agentId) ?? [],
+        );
         const id = entryId(job.agentId, entry.path);
         views.set(id, {
           id,
@@ -773,11 +779,22 @@ export class BuildDataService {
     for (const job of collection.jobs) {
       if (job.kind === BUILD_DATA_SIZE_JOB_KIND && job.status === "SUCCEEDED") {
         try {
-          for (const size of parseBuildDataSizeResult(
+          const { sizes } = parseBuildDataSizeResult(
             parseResult(job.resultJson),
-          ).sizes) {
+          );
+          const cacheOnlyPaths = new Set(
+            buildDataTargetsPayload(parseResult(job.payloadJson))
+              .targets.filter(isCacheOnlyGradleTarget)
+              .map(({ path }) => path),
+          );
+          for (const size of sizes) {
             const view = views.get(entryId(job.agentId, size.path));
             if (!view) continue;
+            if (
+              view.kind === "GRADLE_PROJECT" &&
+              isCacheOnlyGradleTarget(view) !== cacheOnlyPaths.has(size.path)
+            )
+              continue;
             view.sizeBytes = size.sizeBytes;
             view.error = size.error;
           }
@@ -893,7 +910,7 @@ export class BuildDataService {
     const entry = snapshot.entries.find(
       (candidate) => candidate.id === entryIdValue,
     );
-    if (!entry) throw new Error("Derived Data entry not found");
+    if (!entry) throw new Error("Build Data entry not found");
     const prisma = await getPrismaClient();
     if (locked) {
       await prisma.derivedDataLock.upsert({

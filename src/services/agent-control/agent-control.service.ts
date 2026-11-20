@@ -60,6 +60,7 @@ import {
   ANDROID_DEPLOY_JOB_KIND,
   ANDROID_REMOTE_DEPLOY_JOB_KIND,
   ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
   isBuildRunJob,
   parseAndroidBuildPayload,
   parseAndroidSourcePayload,
@@ -100,9 +101,11 @@ import {
   BUILD_DATA_JOB_KINDS,
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
+  GRADLE_CACHE_ONLY_CAPABILITY,
   buildDataDeletePayload,
   buildDataScanPayload,
   buildDataTargetsPayload,
+  isCacheOnlyGradleTarget,
   parseDerivedDataLocationMode,
   type DerivedDataLocationMode,
 } from "@ai-development-environment/agent-contract/build-data";
@@ -1464,9 +1467,49 @@ export class AgentControlService {
       );
     if (
       queued.status === "QUEUED" &&
+      (queued.kind === BUILD_DATA_SIZE_JOB_KIND ||
+        queued.kind === BUILD_DATA_DELETE_JOB_KIND)
+    ) {
+      const payload: unknown = JSON.parse(queued.payloadJson);
+      const { targets } =
+        queued.kind === BUILD_DATA_DELETE_JOB_KIND
+          ? buildDataDeletePayload(payload)
+          : buildDataTargetsPayload(payload);
+      if (targets.some(isCacheOnlyGradleTarget)) {
+        const agent = await prisma.agent.findUnique({
+          where: { id: agentId },
+          select: { capabilitiesJson: true },
+        });
+        if (
+          !agentCapabilities(agent?.capabilitiesJson ?? "[]").includes(
+            GRADLE_CACHE_ONLY_CAPABILITY,
+          )
+        )
+          throw new Error(
+            "Update the agent to size or delete unlinked Gradle caches",
+          );
+      }
+    }
+    if (
+      queued.status === "QUEUED" &&
       isBuildRunJob(queued.kind) &&
       queued.worktreeId
     ) {
+      const buildPayload = JSON.parse(queued.payloadJson) as {
+        requireCleanWorktree?: boolean;
+      };
+      if (buildPayload.requireCleanWorktree) {
+        const agent = await prisma.agent.findUnique({
+          where: { id: agentId },
+          select: { capabilitiesJson: true },
+        });
+        if (
+          !agentCapabilities(agent?.capabilitiesJson ?? "[]").includes(
+            CLEAN_WORKTREE_BUILD_CAPABILITY,
+          )
+        )
+          throw new Error("Update the build agent to run automatic builds");
+      }
       for (const guard of this.buildAdmissionGuards) {
         try {
           await guard(queued.worktreeId);
@@ -1483,7 +1526,7 @@ export class AgentControlService {
       });
       if (lease) {
         throw new Error(
-          "Derived Data cleanup is in progress for this worktree; try again shortly",
+          "Build Data cleanup is in progress for this worktree; try again shortly",
         );
       }
     }

@@ -1,6 +1,7 @@
 export const BUILD_DATA_SCAN_JOB_KIND = "buildData.scan";
 export const BUILD_DATA_SIZE_JOB_KIND = "buildData.size";
 export const BUILD_DATA_DELETE_JOB_KIND = "buildData.delete";
+export const GRADLE_CACHE_ONLY_CAPABILITY = "buildData.gradle-cache-only.v1";
 
 export const BUILD_DATA_JOB_KINDS = [
   BUILD_DATA_SCAN_JOB_KIND,
@@ -17,8 +18,23 @@ export const DERIVED_DATA_LOCATION_MODES = [
 export type DerivedDataLocationMode =
   (typeof DERIVED_DATA_LOCATION_MODES)[number];
 
-export type BuildDataScanEntryKind =
-  "PROJECT" | "PENDING" | "SHARED_CACHE" | "DEVICE_SUPPORT" | "GRADLE_PROJECT";
+export const BUILD_DATA_ENTRY_KINDS = [
+  "PROJECT",
+  "PENDING",
+  "SHARED_CACHE",
+  "DEVICE_SUPPORT",
+  "GRADLE_PROJECT",
+] as const;
+
+export type BuildDataScanEntryKind = (typeof BUILD_DATA_ENTRY_KINDS)[number];
+
+export const MANAGED_GRADLE_CACHE_DIRECTORY = ".android-gradle";
+
+export function isBuildDataEntryKind(
+  value: unknown,
+): value is BuildDataScanEntryKind {
+  return BUILD_DATA_ENTRY_KINDS.some((kind) => kind === value);
+}
 
 export type BuildDataWorktreeRoot = {
   id: string;
@@ -41,12 +57,25 @@ export type BuildDataScanEntry = BuildDataTarget & {
 
 export type BuildDataDeleteSource = "USER" | "AUTOMATIC";
 
-export type BuildDataDeleteTarget = BuildDataTarget & {
+export type BuildDataSizeTarget = BuildDataTarget & {
+  cacheOnly?: true;
+};
+
+export type BuildDataDeleteTarget = BuildDataSizeTarget & {
   name?: string;
   kind?: BuildDataScanEntryKind;
   worktreeId?: string | null;
   worktreePath?: string | null;
 };
+
+export function isCacheOnlyGradleTarget(
+  target: Pick<BuildDataDeleteTarget, "cacheOnly" | "kind" | "worktreeId">,
+): boolean {
+  return (
+    target.cacheOnly === true ||
+    (target.kind === "GRADLE_PROJECT" && target.worktreeId === null)
+  );
+}
 
 export type BuildDataScanResult = {
   entries: BuildDataScanEntry[];
@@ -125,10 +154,20 @@ function worktreeRoot(value: unknown, index: number): BuildDataWorktreeRoot {
   };
 }
 
-function target(value: unknown, index: number): BuildDataTarget {
+function cacheOnlyField(
+  item: JsonObject,
+): Pick<BuildDataSizeTarget, "cacheOnly"> {
+  if (item.cacheOnly === undefined) return {};
+  if (item.cacheOnly !== true)
+    throw new Error("build data target.cacheOnly must be true");
+  return { cacheOnly: true };
+}
+
+function target(value: unknown, index: number): BuildDataSizeTarget {
   const item = objectValue(value, `build data targets[${index}]`);
-  exactKeys(item, ["path", "rootPath"], "build data target");
+  exactKeys(item, ["path", "rootPath", "cacheOnly"], "build data target");
   return {
+    ...cacheOnlyField(item),
     path: stringValue(item.path, `build data targets[${index}].path`),
     rootPath: stringValue(
       item.rootPath,
@@ -141,25 +180,23 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
   const item = objectValue(value, `build data delete targets[${index}]`);
   exactKeys(
     item,
-    ["path", "rootPath", "name", "kind", "worktreeId", "worktreePath"],
+    [
+      "path",
+      "rootPath",
+      "name",
+      "kind",
+      "worktreeId",
+      "worktreePath",
+      "cacheOnly",
+    ],
     "build data delete target",
   );
   const kind = item.kind;
-  if (
-    kind !== undefined &&
-    !(
-      [
-        "PROJECT",
-        "PENDING",
-        "SHARED_CACHE",
-        "DEVICE_SUPPORT",
-        "GRADLE_PROJECT",
-      ] as unknown[]
-    ).includes(kind)
-  ) {
+  if (kind !== undefined && !isBuildDataEntryKind(kind)) {
     throw new Error(`build data delete targets[${index}].kind is invalid`);
   }
   return {
+    ...cacheOnlyField(item),
     path: stringValue(item.path, `build data delete targets[${index}].path`),
     rootPath: stringValue(
       item.rootPath,
@@ -173,7 +210,7 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
             `build data delete targets[${index}].name`,
           ),
         }),
-    ...(kind === undefined ? {} : { kind: kind as BuildDataScanEntryKind }),
+    ...(kind === undefined ? {} : { kind }),
     ...(item.worktreeId === undefined
       ? {}
       : {
@@ -232,7 +269,7 @@ export function buildDataScanPayload(value: unknown): {
 }
 
 export function buildDataTargetsPayload(value: unknown): {
-  targets: BuildDataTarget[];
+  targets: BuildDataSizeTarget[];
 } {
   const payload = objectValue(value, "build data targets payload");
   exactKeys(payload, ["targets"], "build data targets payload");
@@ -274,17 +311,7 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
     entries: result.entries.map((raw, index) => {
       const entry = objectValue(raw, `build data entries[${index}]`);
       const kind = entry.kind;
-      if (
-        !(
-          [
-            "PROJECT",
-            "PENDING",
-            "SHARED_CACHE",
-            "DEVICE_SUPPORT",
-            "GRADLE_PROJECT",
-          ] as unknown[]
-        ).includes(kind)
-      ) {
+      if (!isBuildDataEntryKind(kind)) {
         throw new Error(`build data entries[${index}].kind is invalid`);
       }
       return {
@@ -294,7 +321,7 @@ export function parseBuildDataScanResult(value: unknown): BuildDataScanResult {
           `build data entries[${index}].rootPath`,
         ),
         name: stringValue(entry.name, `build data entries[${index}].name`),
-        kind: kind as BuildDataScanEntryKind,
+        kind,
         deviceSupportPlatform: optionalNullableString(
           entry.deviceSupportPlatform,
           `build data entries[${index}].deviceSupportPlatform`,

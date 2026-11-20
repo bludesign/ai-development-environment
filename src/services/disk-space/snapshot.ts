@@ -48,7 +48,7 @@ export type DiskSpaceSessionData = {
 /**
  * Projects the monitor's canonical agent snapshot for workflow session data and
  * built-in MCP tools. The summary metrics always describe the monitored
- * Derived Data volume with the least free space; inventory/root-disk metrics
+ * build data volume with the least free space. Inventory and root-disk metrics
  * remain available separately under `agent.*` for compatibility.
  */
 export function diskSpaceSessionData(

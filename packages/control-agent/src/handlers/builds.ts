@@ -29,6 +29,7 @@ import {
 import { spawnExecutionProcess as spawn } from "../execution-recovery.js";
 
 import {
+  AUTO_BUILD_CHECKOUT_CHANGED,
   parseBuildDeploymentPayload,
   parseBuildDeletePayload,
   parseBuildArtifactDownloadPayload,
@@ -75,6 +76,7 @@ import { worktreeCodeStateHash } from "../git-code-state.js";
 import { withRepositoryMetadata } from "../repository-metadata.js";
 import type { ProcessResult } from "../process-runner.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
+import { cleanForAutoBuild, inspectWorktreeRefreshState } from "./worktrees.js";
 import type { OperationResource } from "@ai-development-environment/agent-contract/operation-resources";
 
 const successfulProcess = {
@@ -214,11 +216,15 @@ export async function validateWorktree(
 
 export async function verifyQueuedBuildCheckout(
   folder: string,
-  expected: { branch?: string | null; headSha?: string | null },
+  expected: {
+    branch?: string | null;
+    headSha?: string | null;
+    requireCleanWorktree?: boolean;
+  },
   timeoutMs: number,
   signal: AbortSignal,
 ) {
-  await withRepositoryMetadata(
+  return withRepositoryMetadata(
     folder,
     async () => {
       const [branch, head] = await Promise.all([
@@ -244,13 +250,45 @@ export async function verifyQueuedBuildCheckout(
           (head.exitCode === 0 ? head.stdout.trim() : null) !==
             expected.headSha)
       ) {
+        if (expected.requireCleanWorktree) {
+          return skipAutomaticBuild(
+            "The worktree branch or commit changed while the automatic build was queued",
+          );
+        }
         throw new Error(
           "The build worktree branch or commit changed while queued; refresh and start a new build",
         );
       }
+      if (expected.requireCleanWorktree) {
+        if (!expected.headSha) {
+          return skipAutomaticBuild(
+            "The worktree does not have a commit to build",
+          );
+        }
+        const state = await inspectWorktreeRefreshState(
+          folder,
+          timeoutMs,
+          signal,
+        );
+        if (!cleanForAutoBuild(state)) {
+          return skipAutomaticBuild(
+            "The worktree became dirty or a Git operation is in progress",
+          );
+        }
+      }
     },
     signal,
   );
+}
+
+function skipAutomaticBuild(error: string) {
+  return {
+    ...successfulProcess,
+    exitCode: 1,
+    cancelled: true,
+    error,
+    errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+  };
 }
 
 export function containedPath(root: string, relativePath: string): string {
@@ -3419,17 +3457,19 @@ const runIosBuildWithPaths: AgentJobHandler = async (
     signal,
   );
   const snapshot = payload as Record<string, unknown>;
-  await verifyQueuedBuildCheckout(
+  const skipped = await verifyQueuedBuildCheckout(
     folder,
     {
       ...(Object.hasOwn(snapshot, "branch")
         ? { branch: input.branch ?? null }
         : {}),
       ...(Object.hasOwn(snapshot, "headSha") ? { headSha: input.headSha } : {}),
+      requireCleanWorktree: input.requireCleanWorktree,
     },
     Math.min(timeoutMs, 60_000),
     signal,
   );
+  if (skipped) return skipped;
   await validateSource(folder, input.source);
   const xcodeInput = {
     ...input,

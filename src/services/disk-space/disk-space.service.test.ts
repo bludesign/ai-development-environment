@@ -11,7 +11,8 @@ vi.mock("./executing-work", () => ({
   ),
 }));
 
-import type { AgentControlService } from "@/services/agent-control";
+import { AgentControlService } from "@/services/agent-control";
+import { executingResourcesByWorktree } from "./executing-work";
 
 import {
   DiskSpaceService,
@@ -421,6 +422,232 @@ describe("DiskSpaceService monitor notifications", () => {
 
 describe("DiskSpaceService cleanup selection", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  test.each([false, true])(
+    "reclaims the oldest eligible Gradle project when Xcode data is present: %s",
+    async (includeXcode) => {
+      const gib = 1024 ** 3;
+      const gradle = (id: string, time: number) => ({
+        path: `/Builds/.android-gradle/${id}/cdb4ee2aea69cc6a`,
+        rootPath: `/Builds/.android-gradle/${id}`,
+        name: id,
+        kind: "GRADLE_PROJECT",
+        workspacePath: `/Repos/${id}`,
+        modifiedAt: new Date(time).toISOString(),
+        volumeId: "build-device",
+      });
+      const stale = gradle("stale", 0);
+      const active = gradle("active", 1);
+      const locked = gradle("locked", 2);
+      const ready = gradle("ready", 3);
+      const worktrees = [active, locked, ready]
+        .map(({ name, workspacePath }) => ({
+          id: name,
+          folder: workspacePath,
+        }))
+        .concat({ id: "recreated", folder: stale.workspacePath });
+      const xcode = {
+        ...gradle("ready", 4),
+        kind: "PROJECT",
+        path: "/DerivedData/Ready-cache",
+        rootPath: "/DerivedData",
+      };
+      const report = {
+        observedAt: new Date().toISOString(),
+        volumes: [
+          {
+            id: "build-device",
+            totalBytes: 100 * gib,
+            freeBytes: 20 * gib,
+            roles: includeXcode
+              ? ["DERIVED_DATA", "GRADLE_BUILD_DATA"]
+              : ["GRADLE_BUILD_DATA"],
+            paths: includeXcode
+              ? ["/DerivedData", "/Builds/.android-gradle"]
+              : ["/Builds/.android-gradle"],
+          },
+        ],
+        entries: [
+          stale,
+          active,
+          locked,
+          ready,
+          ...(includeXcode ? [xcode] : []),
+        ],
+        warnings: [],
+      };
+      const agent = {
+        id: "agent-1",
+        lastSeenAt: new Date(),
+        disconnectedAt: null,
+        baseRepoDirectory: "/Repos",
+        capabilitiesJson: '["buildData.delete"]',
+      };
+      const create = vi.fn().mockResolvedValue({});
+      const createJob = vi.fn().mockResolvedValue({ id: "delete-1" });
+      const upsert = vi.fn(async ({ create }) => {
+        Object.assign(state, create);
+      });
+      const state = {
+        enabled: true,
+        manualPressureMode: false,
+        automaticPressureMode: false,
+      };
+      getPrismaClient.mockResolvedValue({
+        diskSpaceSettings: {
+          upsert: vi.fn().mockResolvedValue({
+            normalThresholdGiB: 40,
+            pressureThresholdGiB: 10,
+          }),
+        },
+        agentDiskSpaceState: {
+          upsert,
+          findUnique: vi.fn().mockResolvedValue(state),
+        },
+        derivedDataLock: {
+          findMany: vi
+            .fn()
+            .mockResolvedValueOnce([{ path: locked.path }])
+            .mockResolvedValue([]),
+        },
+        derivedDataCleanupLease: {
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+          findFirst: vi.fn().mockResolvedValue(null),
+          create,
+          update: vi.fn().mockResolvedValue({}),
+        },
+        agent: { findUnique: vi.fn().mockResolvedValue(agent) },
+        worktree: {
+          findMany: vi.fn().mockResolvedValue(worktrees),
+          findFirst: vi
+            .fn()
+            .mockResolvedValue({ id: ready.name, folder: ready.workspacePath }),
+        },
+      });
+      vi.mocked(executingResourcesByWorktree).mockResolvedValueOnce(
+        new Map([
+          [
+            active.name,
+            [
+              {
+                kind: "BUILD",
+                id: "build-1",
+                label: "Build",
+                href: "/dashboard/builds/build-1",
+              },
+            ],
+          ],
+        ]),
+      );
+      const instance = new DiskSpaceService({
+        registerCompletionObserver: vi.fn(),
+        createJob,
+      } as unknown as AgentControlService);
+
+      await instance.report(agent.id, report);
+
+      await vi.waitFor(() =>
+        expect(createJob).toHaveBeenCalledExactlyOnceWith(
+          expect.objectContaining({
+            kind: BUILD_DATA_DELETE_JOB_KIND,
+            payload: {
+              source: "AUTOMATIC",
+              targets: [
+                expect.objectContaining({
+                  path: ready.path,
+                  kind: "GRADLE_PROJECT",
+                  worktreeId: ready.name,
+                }),
+              ],
+            },
+          }),
+        ),
+      );
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          worktreeId: ready.name,
+          source: "AUTOMATIC",
+        }),
+      });
+      expect(
+        JSON.parse(upsert.mock.calls[0]![0].create.entriesJson),
+      ).toContainEqual(
+        expect.objectContaining({ path: stale.path, worktreeId: null }),
+      );
+    },
+  );
+
+  test("releases a failed Gradle cleanup lease and still blocks new work on a critical volume", async () => {
+    const requestDiskSpacePoll = vi.fn();
+    const registerCompletionObserver = vi.fn();
+    const state = {
+      enabled: true,
+      lastReportedAt: new Date(),
+      lastError: null,
+      lastCleanupError: null,
+      volumesJson: JSON.stringify([
+        { roles: ["GRADLE_BUILD_DATA"], freeBytes: 0 },
+      ]),
+    };
+    const updateMany = vi.fn(async ({ data }) => {
+      Object.assign(state, data);
+      return { count: 1 };
+    });
+    const deleteMany = vi.fn().mockResolvedValue({ count: 1 });
+    const criticalDisk = prismaForState(state);
+    getPrismaClient.mockResolvedValue({
+      agentDiskSpaceState: { ...criticalDisk.agentDiskSpaceState, updateMany },
+      diskSpaceSettings: {
+        ...criticalDisk.diskSpaceSettings,
+        findUnique: vi.fn().mockResolvedValue({ pressureThresholdGiB: 10 }),
+      },
+      derivedDataCleanupLease: {
+        deleteMany,
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      agentJob: {
+        findUnique: vi.fn().mockResolvedValue({
+          agentId: "agent-1",
+          kind: "android.build.run",
+          status: "QUEUED",
+          worktreeId: "worktree-1",
+          payloadJson: "{}",
+        }),
+      },
+    });
+    const monitor = new DiskSpaceService({
+      registerCompletionObserver,
+      requestDiskSpacePoll,
+    } as unknown as AgentControlService);
+    const rootPath = "/Builds/.android-gradle/worktree-1";
+    const path = `${rootPath}/cdb4ee2aea69cc6a`;
+    await registerCompletionObserver.mock.calls[0]![0]({
+      id: "delete-job",
+      agentId: "agent-1",
+      kind: BUILD_DATA_DELETE_JOB_KIND,
+      status: "SUCCEEDED",
+      error: null,
+      payloadJson: JSON.stringify({
+        source: "AUTOMATIC",
+        targets: [{ path, rootPath, kind: "GRADLE_PROJECT" }],
+      }),
+      resultJson: JSON.stringify({
+        deleted: [{ path, deleted: false, error: "Permission denied" }],
+      }),
+    });
+    expect(deleteMany).toHaveBeenCalledWith({ where: { jobId: "delete-job" } });
+    expect(updateMany).toHaveBeenCalledWith({
+      where: { agentId: "agent-1" },
+      data: { lastCleanupError: "Permission denied" },
+    });
+    expect(requestDiskSpacePoll).not.toHaveBeenCalled();
+    await expect(monitor.assertAgentCanStart("agent-1")).rejects.toThrow(
+      "paused",
+    );
+    await expect(
+      new AgentControlService().claimJob("agent-1", "build-1"),
+    ).rejects.toThrow("paused");
+  });
 
   test("cleans a Derived Data volume that shares APFS capacity with root", async () => {
     const gib = 1024 ** 3;

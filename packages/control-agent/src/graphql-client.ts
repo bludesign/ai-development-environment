@@ -252,6 +252,15 @@ function mergeHeaders(
   };
 }
 
+function lacksAutoBuildReadinessInput(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Field "cleanForAutoBuild" is not defined by type "Worktree(?:Inventory|ActivityReport)Input"/.test(
+      error.message,
+    )
+  );
+}
+
 export class AgentGraphQLClient {
   private readonly server: string;
   private readonly credential: string | null;
@@ -403,16 +412,28 @@ export class AgentGraphQLClient {
   }
 
   async diskSpaceConfiguration(): Promise<AgentDiskSpaceConfiguration> {
-    const data = await this.request<{
-      agentDiskSpaceConfiguration: AgentDiskSpaceConfiguration;
-    }>(`query AgentDiskSpaceConfiguration {
+    const query = `query AgentDiskSpaceConfiguration {
       agentDiskSpaceConfiguration {
         enabled pollIntervalSeconds baseRepoDirectory
-        derivedDataLocationMode derivedDataPath managedDerivedDataRoot
+        derivedDataLocationMode derivedDataPath managedDerivedDataRoot managedGradleRoot
         worktrees { id folder }
       }
-    }`);
-    return data.agentDiskSpaceConfiguration;
+    }`;
+    type Response = {
+      agentDiskSpaceConfiguration: AgentDiskSpaceConfiguration;
+    };
+    try {
+      return (await this.request<Response>(query)).agentDiskSpaceConfiguration;
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !/Cannot query field "managedGradleRoot"/.test(error.message)
+      )
+        throw error;
+      return (
+        await this.request<Response>(query.replace(" managedGradleRoot", ""))
+      ).agentDiskSpaceConfiguration;
+    }
   }
 
   reportDiskSpace(input: AgentDiskSpaceReport) {
@@ -1283,24 +1304,40 @@ export class AgentGraphQLClient {
     );
   }
 
-  reportWorktrees(reports: CodebaseWorktreeReport[]) {
-    return this.request<{ reportWorktrees: Array<{ id: string }> }>(
-      `mutation ReportWorktrees($reports: [CodebaseWorktreeReportInput!]!) {
+  async reportWorktrees(reports: CodebaseWorktreeReport[]) {
+    const query = `mutation ReportWorktrees($reports: [CodebaseWorktreeReportInput!]!) {
         reportWorktrees(reports: $reports) { id }
-      }`,
-      { reports },
-    );
+      }`;
+    type Result = { reportWorktrees: Array<{ id: string }> };
+    try {
+      return await this.request<Result>(query, { reports });
+    } catch (error) {
+      if (!lacksAutoBuildReadinessInput(error)) throw error;
+      return this.request<Result>(query, {
+        reports: reports.map((report) => ({
+          ...report,
+          worktrees: report.worktrees.map(
+            ({ cleanForAutoBuild: _clean, ...item }) => item,
+          ),
+        })),
+      });
+    }
   }
 
-  reportWorktreeActivity(input: WorktreeActivityReport) {
-    return this.request<{
-      reportWorktreeActivity: { worktreeId: string; observedAt: string };
-    }>(
-      `mutation ReportWorktreeActivity($input: WorktreeActivityReportInput!) {
+  async reportWorktreeActivity(input: WorktreeActivityReport) {
+    const query = `mutation ReportWorktreeActivity($input: WorktreeActivityReportInput!) {
         reportWorktreeActivity(input: $input) { worktreeId observedAt }
-      }`,
-      { input },
-    );
+      }`;
+    type Result = {
+      reportWorktreeActivity: { worktreeId: string; observedAt: string };
+    };
+    try {
+      return await this.request<Result>(query, { input });
+    } catch (error) {
+      if (!lacksAutoBuildReadinessInput(error)) throw error;
+      const { cleanForAutoBuild: _clean, ...legacyInput } = input;
+      return this.request<Result>(query, { input: legacyInput });
+    }
   }
 }
 

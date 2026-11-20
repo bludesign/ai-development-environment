@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { MANAGED_GRADLE_CACHE_DIRECTORY } from "@ai-development-environment/agent-contract/build-data";
 import {
   ANDROID_BUILD_DESTINATION,
   androidAssembleTask,
@@ -489,12 +490,13 @@ export const runAndroidBuild: AgentJobHandler = async (
     Math.min(timeoutMs, 60_000),
     signal,
   );
-  await verifyQueuedBuildCheckout(
+  const skipped = await verifyQueuedBuildCheckout(
     root,
     input,
     Math.min(timeoutMs, 60_000),
     signal,
   );
+  if (skipped) return skipped;
   const project = await checkedPath(root, settings.projectPath);
   const gradlew = await checkedPath(
     root,
@@ -513,7 +515,7 @@ export const runAndroidBuild: AgentJobHandler = async (
   const artifactRoot = dirname(input.artifactDirectory);
   const expectedCache = join(
     artifactRoot,
-    ".android-gradle",
+    MANAGED_GRADLE_CACHE_DIRECTORY,
     input.worktreeId,
     hash,
   );

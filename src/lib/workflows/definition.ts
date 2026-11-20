@@ -1354,10 +1354,9 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     [],
     ["agent.*", "disk.*"],
     {
-      description:
-        "Loads the current Derived Data disk-space monitor snapshot for an agent.",
+      description: "Loads an agent's current build data disk-space snapshot.",
       details:
-        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. The least-free monitored Derived Data volume supplies `disk.freeBytes`, `disk.freeGiB`, and the percentage fields; root and base-repository volumes remain in `disk.volumes` for context only. Read-only and does not request a new report.",
+        "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. The monitored build data volume with the least free space supplies `disk.freeBytes`, `disk.freeGiB`, and the percentage fields. `disk.volumes` includes all reported volumes. Reads the latest report.",
     },
   ),
   step(
@@ -1402,7 +1401,7 @@ export const WORKFLOW_STEP_CATALOG: readonly WorkflowCatalogEntry[] = [
     ["agent.*", "disk.*"],
     {
       description:
-        "Enables or disables Derived Data disk-space monitoring for an agent.",
+        "Enables or disables build data disk-space monitoring for an agent.",
       details:
         "Targets the configured agent, then falls back to `agent.id` or `codebase.agentId`. Disabling monitoring also clears manual and automatic pressure mode and releases cleanup leases that have not started a job. Refreshes `agent.*` and `disk.*`.",
     },
@@ -2579,7 +2578,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       ["agent.*", "codebase.agentId", "disk.*"],
       {
         description:
-          "Fires whenever the Derived Data monitor accepts a new agent disk report.",
+          "Fires whenever the build data monitor accepts a new agent disk report.",
         details: `Seeds the complete monitor snapshot under \`disk.*\`, while \`agent.diskFreeBytes\` remains the legacy root-disk inventory value. This can fire at the agent poll cadence; use filters when every report is not needed. ${FILTERS_NOTE}`,
       },
     ),
@@ -2590,8 +2589,8 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       ["agent.*", "codebase.agentId", "disk.*"],
       {
         description:
-          "Fires when monitored Derived Data free space crosses a threshold you set.",
-        details: `Use \`disk.freeGiB\`, \`disk.freeBytes\`, or \`disk.freePercent\` to evaluate the least-free monitored Derived Data volume. \`agent.diskFreeBytes\` remains available for older root-disk workflows. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
+          "Fires when monitored build data free space crosses a threshold you set.",
+        details: `Use \`disk.freeGiB\`, \`disk.freeBytes\`, or \`disk.freePercent\` to evaluate the monitored build data volume with the least free space. Use \`agent.diskFreeBytes\` for the root disk. ${THRESHOLD_NOTE} ${FILTERS_NOTE}`,
       },
     ),
     trigger(
@@ -2612,7 +2611,7 @@ export const WORKFLOW_TRIGGER_CATALOG: readonly WorkflowTriggerCatalogEntry[] =
       ["agent.*", "codebase.agentId", "disk.*", "cleanup.*"],
       {
         description:
-          "Fires whenever a monitor-managed automatic Derived Data cleanup finishes.",
+          "Fires whenever the disk-space monitor finishes automatic build data cleanup.",
         details: `Seeds the terminal agent job under \`cleanup.*\`, including status, error, targets, and deleted entries. Every cleanup job is independent, so two successive successes both fire. Manual Build Data deletions remain outside this trigger. ${FILTERS_NOTE}`,
       },
     ),

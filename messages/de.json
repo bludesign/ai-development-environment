@@ -1189,7 +1189,7 @@
       },
       "WORKTREE_CLEANUP_FAILED": {
         "title": "Bereinigung der Worktree-Builddaten fehlgeschlagen",
-        "description": "Xcode-Builddaten eines gelöschten Worktrees konnten nicht entfernt werden."
+        "description": "Einige Builddaten eines gelöschten Worktrees konnten nicht entfernt werden."
       },
       "GITHUB_PULL_REQUEST_APPROVED": {
         "title": "Pull Request genehmigt",
@@ -1593,7 +1593,7 @@
   },
   "diskSpace": {
     "title": "Speicherplatzüberwachung",
-    "description": "Überwacht jedes Agent-Volume und entfernt bei wenig freiem Speicher automatisch die ältesten sicheren Derived Data.",
+    "description": "Überwacht den Build-Speicher und entfernt bei wenig freiem Speicher automatisch geeignete Xcode- und Gradle-Caches.",
     "loading": "Datenträgerberichte werden geladen…",
     "settings": "Einstellungen",
     "normalThreshold": "Bereinigungsschwelle (GiB)",
@@ -1621,7 +1621,8 @@
     "role": {
       "MAIN": "Hauptdatenträger",
       "BASE_REPO": "Basis-Repository",
-      "DERIVED_DATA": "Abgeleitete Daten"
+      "DERIVED_DATA": "Abgeleitete Daten",
+      "GRADLE_BUILD_DATA": "Gradle-Builddaten"
     },
     "status": {
       "DISABLED": "Deaktiviert",
@@ -1762,7 +1763,7 @@
     "deleteDeviceSupportDescription": "{count} Ordner dauerhaft löschen? Xcode kann sie beim Verbinden eines passenden Geräts neu erstellen.",
     "refresh": "Aktualisieren",
     "calculateSizes": "Größen berechnen",
-    "loading": "Derived Data wird durchsucht…",
+    "loading": "Builddaten werden durchsucht…",
     "emptyTitle": "Keine Derived Data gefunden",
     "emptyDescription": "Die konfigurierten DerivedData-Verzeichnisse enthalten keine Einträge.",
     "progress": "{complete} von {total} geeigneten Agenten durchsucht",
@@ -1788,13 +1789,13 @@
     "deleteTitle": "Derived Data löschen?",
     "deleteDescription": "{count} ausgewählte Derived-Data-Einträge dauerhaft löschen? Dies kann nicht rückgängig gemacht werden.",
     "history": "Löschverlauf",
-    "historyDescription": "In den letzten 90 Tagen von registrierten Agenten entfernte Derived Data.",
+    "historyDescription": "In den letzten 90 Tagen von registrierten Agenten entfernte Builddaten.",
     "clearHistory": "Verlauf löschen",
     "clearHistoryTitle": "Löschverlauf leeren?",
     "clearHistoryDescription": "Alle gespeicherten Löschdatensätze entfernen? Dateien auf Agenten bleiben unverändert.",
-    "clearAgentHistoryDescription": "Die gespeicherten Derived-Data-Löschprotokolle des ausgewählten Agenten entfernen? Dateien auf dem Agenten bleiben erhalten.",
+    "clearAgentHistoryDescription": "Die gespeicherten Builddaten-Löschprotokolle des ausgewählten Agenten entfernen? Dadurch wird nur der Verlauf gelöscht.",
     "loadingHistory": "Löschverlauf wird geladen…",
-    "noHistory": "Es wurden noch keine Derived Data gelöscht.",
+    "noHistory": "Es wurden noch keine Builddaten gelöscht.",
     "deleted": "Gelöscht",
     "sourceLabel": "Quelle",
     "loadMore": "Mehr laden",
@@ -6699,6 +6700,26 @@
     "directoryStale": "Veraltet",
     "directoryRefresh": "Verzeichnis aktualisieren",
     "directoryDelete": "Verzeichnis löschen"
+  },
+  "worktreeAutoBuild": {
+    "title": "Automatischer Build",
+    "enabled": "Aktiviert",
+    "description": "Der nächste ausgecheckte Commit wird gebaut, sobald dieser Worktree sauber ist.",
+    "noConfigurations": "Füge diesem Repository eine Build-Konfiguration hinzu, um automatische Builds zu aktivieren.",
+    "configure": "Automatischen Build konfigurieren",
+    "configuration": "Build-Konfiguration",
+    "platform": "Plattform",
+    "destination": "Ziel",
+    "enable": "Automatischen Build aktivieren",
+    "save": "Automatischen Build speichern",
+    "disable": "Automatischen Build deaktivieren",
+    "lastQueuedBuild": "Zuletzt eingereihter Build",
+    "missingConfiguration": "Konfiguration nicht verfügbar",
+    "retry": "Erneut versuchen",
+    "SIMULATOR": "Beliebiger Simulator",
+    "PHYSICAL_DEVICE": "Beliebiges physisches Gerät",
+    "LOCAL_MAC": "Beliebiger Mac",
+    "HOST": "Agent-Host"
   },
   "worktreeSettings": {
     "title": "Worktrees",

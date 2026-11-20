@@ -236,7 +236,7 @@ describe("BuildDataPage", () => {
                 worktreeId: null,
                 worktreePath: null,
                 source: "USER",
-                entryKind: "PROJECT",
+                entryKind: "GRADLE_PROJECT",
                 deletedAt: new Date(0).toISOString(),
               },
             ],
@@ -273,7 +273,10 @@ describe("BuildDataPage", () => {
     );
     await screen.findByText("Apple TV symbols");
     expect(screen.getByText("tvOS")).toBeTruthy();
-    await screen.findByText("Other deleted folder");
+    const gradleDeletion = await screen.findByRole("row", {
+      name: /Other deleted folder/,
+    });
+    expect(within(gradleDeletion).getByText("Gradle Build Data")).toBeTruthy();
     await act(async () => finishOriginal({ refreshDerivedData: snapshot }));
     expect(screen.queryByText("App-hash")).toBeNull();
     expect(
@@ -355,7 +358,7 @@ describe("BuildDataPage", () => {
     );
     await act(async () => finishClear());
 
-    await screen.findByText("No Derived Data has been deleted yet.");
+    await screen.findByText("No build data has been deleted yet.");
     expect(screen.queryByText("Deleted app cache")).toBeNull();
   });
 

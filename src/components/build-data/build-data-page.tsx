@@ -788,8 +788,17 @@ function BuildDataScope({
                     </TableRow>
                     {group.items.map((item) => (
                       <TableRow key={item.id}>
-                        <TableCell className="font-mono text-xs">
-                          {item.folderName}
+                        <TableCell>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs">
+                              {item.folderName}
+                            </span>
+                            {item.entryKind === "GRADLE_PROJECT" && (
+                              <Badge variant="outline">
+                                {t("gradleTitle")}
+                              </Badge>
+                            )}
+                          </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">
                           {item.worktreePath ?? "—"}

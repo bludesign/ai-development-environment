@@ -279,6 +279,7 @@ export class JobExecutor {
           (log) => this.client.appendLog(claimed.id, log).then(() => undefined),
           {
             agentId: claimed.agentId,
+            worktreeId: claimed.worktreeId,
             withOperationResources: (resources, task) =>
               this.repositoryCoordinator.withResources(
                 resources.map((resource) => ({

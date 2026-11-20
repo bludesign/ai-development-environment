@@ -35,6 +35,8 @@ export type RouteEntry = {
    * fold can only be photographed by scrolling to it first.
    */
   scrollTo?: string;
+  /** Crop the capture to a specific element. */
+  screenshotTarget?: string;
   /** Accessible button name clicked after the page reaches its ready state. */
   clickButton?: string;
   /** Accessible tab name selected after the page reaches its ready state. */
@@ -81,6 +83,16 @@ const simulatorInventoryCapture = {
   initScript: `Object.defineProperty(crypto, "randomUUID", {
     configurable: true,
     value: () => "${ids.simulators.inventoryRequest}",
+  });`,
+} satisfies Omit<RouteEntry, "name">;
+
+const buildDataCapture = {
+  path: "/system/build-data",
+  // Find the finished collection seeded by scripts/mock-data/build-data.ts without queuing
+  // jobs for agents that are not connected during capture.
+  initScript: `Object.defineProperty(crypto, "randomUUID", {
+    configurable: true,
+    value: () => "${ids.buildDataCollections.captured}",
   });`,
 } satisfies Omit<RouteEntry, "name">;
 
@@ -440,29 +452,15 @@ export const routes: RouteEntry[] = [
     path: `/dashboard/builds/${ids.builds.archive}/coverage`,
   },
   {
+    ...buildDataCapture,
     name: "build-data",
-    path: "/system/build-data",
-    // The page starts a Derived Data scan under a request id from `createClientId()` and waits
-    // for every online agent to answer. No agent is connected during a capture, so a random id
-    // photographs the queued progress card and leaves three QUEUED jobs behind — jobs the
-    // Polling page counts as pending reconciliation work, making that count depend on how many
-    // captures ran first. Pinning the id to the finished collection the seed wrote
-    // (scripts/mock-data/build-data.ts) returns a completed scan and dispatches nothing.
-    initScript: `Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => "${ids.buildDataCollections.captured}",
-    });`,
   },
   {
+    ...buildDataCapture,
     name: "build-data-device-support",
-    path: "/system/build-data",
     readyTexts: ["26.2 (23K50)"],
     scrollTo:
       'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Device Support"))',
-    initScript: `Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => "${ids.buildDataCollections.captured}",
-    });`,
   },
   {
     ...simulatorInventoryCapture,
@@ -480,15 +478,20 @@ export const routes: RouteEntry[] = [
     });`,
   },
   {
+    ...buildDataCapture,
     name: "android-build-data",
-    path: "/system/build-data",
     readyTexts: ["web-app Android Gradle cache"],
     scrollTo:
       'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Gradle Build Data"))',
-    initScript: `Object.defineProperty(crypto, "randomUUID", {
-      configurable: true,
-      value: () => "${ids.buildDataCollections.captured}",
-    });`,
+  },
+  {
+    ...buildDataCapture,
+    name: "build-data-deletion-history",
+    desktopOnly: true,
+    readyGraphqlOperation: "DerivedDataDeletionHistory",
+    readyTexts: ["Automatic"],
+    screenshotTarget:
+      'main [data-slot="card"]:has([data-slot="card-title"]:text-is("Deletion history"))',
   },
   {
     ...simulatorInventoryCapture,

@@ -1,4 +1,5 @@
 import {
+  isBuildDataEntryKind,
   parseDerivedDataLocationMode,
   type BuildDataScanEntryKind,
   type BuildDataWorktreeRoot,
@@ -15,22 +16,23 @@ export const DISK_SPACE_VOLUME_ROLES = [
   "MAIN",
   "BASE_REPO",
   "DERIVED_DATA",
+  "GRADLE_BUILD_DATA",
 ] as const;
 
 export type DiskSpaceVolumeRole = (typeof DISK_SPACE_VOLUME_ROLES)[number];
-
-/**
- * Free space is only actionable on the volume holding Derived Data, because
- * Derived Data is the only thing cleanup can reclaim. Other volumes are
- * reported for visibility and never drive status, admission control, or
- * automatic cleanup.
- */
 export const DISK_SPACE_MONITORED_ROLE: DiskSpaceVolumeRole = "DERIVED_DATA";
 
+/**
+ * Volumes containing reclaimable build data drive disk status, admission
+ * control, and automatic cleanup. Other volumes are reported for visibility.
+ */
 export function isMonitoredDiskSpaceVolume(volume: {
   roles: DiskSpaceVolumeRole[];
 }): boolean {
-  return volume.roles.includes(DISK_SPACE_MONITORED_ROLE);
+  return volume.roles.some(
+    (role) =>
+      role === DISK_SPACE_MONITORED_ROLE || role === "GRADLE_BUILD_DATA",
+  );
 }
 
 export function monitoredDiskSpaceVolumes<
@@ -46,6 +48,7 @@ export type AgentDiskSpaceConfiguration = {
   derivedDataLocationMode: DerivedDataLocationMode;
   derivedDataPath: string | null;
   managedDerivedDataRoot?: string | null;
+  managedGradleRoot?: string | null;
   worktrees: BuildDataWorktreeRoot[];
 };
 
@@ -141,6 +144,14 @@ export function parseAgentDiskSpaceConfiguration(
             "disk space configuration.managedDerivedDataRoot",
           ),
         }),
+    ...(input.managedGradleRoot === undefined
+      ? {}
+      : {
+          managedGradleRoot: nullableText(
+            input.managedGradleRoot,
+            "disk space configuration.managedGradleRoot",
+          ),
+        }),
     worktrees: input.worktrees.map((raw, index) => {
       const worktree = objectValue(raw, `disk space worktrees[${index}]`);
       return {
@@ -214,10 +225,7 @@ export function parseAgentDiskSpaceReport(
     entries: input.entries.map((raw, index) => {
       const entry = objectValue(raw, `disk space entries[${index}]`);
       const kind = entry.kind;
-      if (
-        typeof kind !== "string" ||
-        !["PROJECT", "PENDING", "SHARED_CACHE", "DEVICE_SUPPORT"].includes(kind)
-      ) {
+      if (!isBuildDataEntryKind(kind)) {
         throw new Error(`disk space entries[${index}].kind is invalid`);
       }
       const modifiedAt = text(
@@ -233,7 +241,7 @@ export function parseAgentDiskSpaceReport(
         path: text(entry.path, `disk space entries[${index}].path`),
         rootPath: text(entry.rootPath, `disk space entries[${index}].rootPath`),
         name: text(entry.name, `disk space entries[${index}].name`),
-        kind: kind as BuildDataScanEntryKind,
+        kind,
         workspacePath: nullableText(
           entry.workspacePath,
           `disk space entries[${index}].workspacePath`,
