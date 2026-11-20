@@ -24,6 +24,7 @@ import {
 } from "vitest";
 
 import { captureCommand } from "../capture-command.js";
+import { parseAgentDiskSpaceReport } from "@ai-development-environment/agent-contract/disk-space";
 import {
   collectAgentDiskSpace,
   ownedWorktreeBuildData,
@@ -146,6 +147,58 @@ describe("Build Data agent handlers", () => {
         { path, rootPath, kind: "GRADLE_PROJECT", workspacePath: worktreePath },
       ],
     });
+    const report = parseAgentDiskSpaceReport(
+      await collectAgentDiskSpace(
+        {
+          enabled: true,
+          pollIntervalSeconds: 60,
+          baseRepoDirectory: null,
+          derivedDataLocationMode: "RELATIVE",
+          derivedDataPath: "DerivedData",
+          managedGradleRoot: join(builds, ".android-gradle"),
+          worktrees: [],
+        },
+        signal(),
+      ),
+    );
+    expect(report.entries).toEqual([
+      expect.objectContaining({
+        kind: "GRADLE_PROJECT",
+        path,
+        workspacePath: worktreePath,
+      }),
+    ]);
+    expect(report.volumes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: report.entries[0]?.volumeId,
+          paths: expect.arrayContaining([join(builds, ".android-gradle")]),
+          roles: expect.arrayContaining(["GRADLE_BUILD_DATA"]),
+        }),
+      ]),
+    );
+    expect(
+      (
+        await ownedWorktreeBuildData(
+          worktreePath,
+          configuration,
+          10_000,
+          signal(),
+          "recreated-worktree",
+        )
+      ).targets,
+    ).toEqual([]);
+    expect(
+      (
+        await ownedWorktreeBuildData(
+          worktreePath,
+          configuration,
+          10_000,
+          signal(),
+          worktreeId,
+        )
+      ).targets,
+    ).toEqual([{ path, rootPath }]);
     const target = { path, rootPath };
     const size = await sizeBuildData(
       { targets: [target] },
@@ -162,6 +215,45 @@ describe("Build Data agent handlers", () => {
     await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(generated)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readFile(retained, "utf8")).toBe("tracked");
+  });
+
+  test("sizes and deletes only the unlinked Gradle cache when its workspace was reused", async () => {
+    const builds = await realpath(await temporaryDirectory());
+    const worktreePath = await realpath(await temporaryDirectory());
+    const worktreeId = "removed-worktree";
+    const rootPath = join(builds, ".android-gradle", worktreeId);
+    const path = join(
+      rootPath,
+      createHash("sha256").update(".").digest("hex").slice(0, 16),
+    );
+    const output = join(worktreePath, "app", "build", "outputs", "apk");
+    await mkdir(path, { recursive: true });
+    await mkdir(output, { recursive: true });
+    const replacementApk = join(output, "replacement.apk");
+    await writeFile(replacementApk, "replacement build");
+    await writeFile(
+      join(path, ".aide-android-gradle.json"),
+      JSON.stringify({
+        worktreeId,
+        worktreePath,
+        projectPath: ".",
+        module: ":app",
+      }),
+    );
+    const marker = await lstat(join(path, ".aide-android-gradle.json"));
+    const cacheBytes = ((await lstat(path)).blocks + marker.blocks) * 512;
+    const target = { path, rootPath, cacheOnly: true };
+    expect(
+      await sizeBuildData({ targets: [target] }, 10_000, signal(), log),
+    ).toMatchObject({ sizes: [{ path, sizeBytes: cacheBytes, error: null }] });
+    expect(
+      await deleteBuildData({ targets: [target] }, 10_000, signal(), log),
+    ).toMatchObject({
+      deleted: [{ path, deleted: true, error: null }],
+    });
+    await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await readFile(replacementApk, "utf8")).toBe("replacement build");
+    expect(capture).not.toHaveBeenCalled();
   });
   test("discovers and deletes only the removed worktree's managed cache without an Xcode plist", async () => {
     const root = await realpath(await temporaryDirectory());

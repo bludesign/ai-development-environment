@@ -23,7 +23,9 @@ import {
   buildDataScanPayload,
   buildDataDeletePayload,
   buildDataTargetsPayload,
+  MANAGED_GRADLE_CACHE_DIRECTORY,
   type BuildDataDeleteResult,
+  type BuildDataDeleteTarget,
   type BuildDataScanEntry,
   type BuildDataSizeResult,
   type BuildDataTarget,
@@ -252,28 +254,34 @@ async function scanDeviceSupport(
 }
 
 async function scanGradleProjects(
-  managedRoot: string | null | undefined,
+  root: string | null | undefined,
   signal: AbortSignal,
-): Promise<{ entries: BuildDataScanEntry[]; warnings: string[] }> {
+): Promise<{
+  rootPath: string | null;
+  entries: BuildDataScanEntry[];
+  warnings: string[];
+}> {
   const entries: BuildDataScanEntry[] = [];
   const warnings: string[] = [];
   if (
-    !managedRoot ||
-    !isAbsolute(managedRoot) ||
-    basename(managedRoot) !== ".worktree-derived-data"
+    !root ||
+    !isAbsolute(root) ||
+    basename(root) !== MANAGED_GRADLE_CACHE_DIRECTORY
   )
-    return { entries, warnings };
-
-  const root = join(dirname(managedRoot), ".android-gradle");
+    return { rootPath: null, entries, warnings };
+  let scannedRoot: string | null = null;
   try {
     const canonicalRoot = await realpath(root);
     if (canonicalRoot !== join(await realpath(dirname(root)), basename(root)))
       throw new Error("Gradle project cache root must not be a symbolic link");
-    for (const worktree of await readdir(canonicalRoot, {
+    const worktrees = await readdir(canonicalRoot, {
       withFileTypes: true,
-    })) {
+    });
+    scannedRoot = canonicalRoot;
+    for (const worktree of worktrees) {
       signal.throwIfAborted();
-      if (!worktree.isDirectory()) continue;
+      if (!worktree.isDirectory() || !/^[A-Za-z0-9_-]+$/.test(worktree.name))
+        continue;
       const rootPath = join(canonicalRoot, worktree.name);
       try {
         for (const project of await readdir(rootPath, {
@@ -315,7 +323,17 @@ async function scanGradleProjects(
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       warnings.push(`${root}: ${errorMessage(error)}`);
   }
-  return { entries, warnings };
+  return { rootPath: scannedRoot, entries, warnings };
+}
+
+function gradleRootBesideDerivedData(
+  managedRoot: string | null | undefined,
+): string | null {
+  return managedRoot &&
+    isAbsolute(managedRoot) &&
+    basename(managedRoot) === ".worktree-derived-data"
+    ? join(dirname(managedRoot), MANAGED_GRADLE_CACHE_DIRECTORY)
+    : null;
 }
 
 async function gradleProjectRecord(cache: string) {
@@ -352,16 +370,23 @@ async function gradleProjectRecord(cache: string) {
     )
       modulePaths.add(name.slice(1).replaceAll(":", "/"));
   }
-  return { worktreePath, projectPath, modulePaths };
+  return { worktreeId, worktreePath, projectPath, modulePaths };
 }
 
 async function generatedGradleDirectories(
-  cache: string,
+  target: BuildDataDeleteTarget,
   signal: AbortSignal,
 ): Promise<string[]> {
-  if (basename(dirname(dirname(cache))) !== ".android-gradle") return [];
-  const { worktreePath, projectPath, modulePaths } =
+  const cache = target.path;
+  if (basename(dirname(dirname(cache))) !== MANAGED_GRADLE_CACHE_DIRECTORY)
+    return [];
+  const { worktreeId, worktreePath, projectPath, modulePaths } =
     await gradleProjectRecord(cache);
+  if (target.cacheOnly || target.worktreeId === null) return [];
+  if (target.worktreeId !== undefined && worktreeId !== target.worktreeId)
+    throw new Error(
+      "Gradle project cache no longer matches the selected worktree",
+    );
   const workspace = await realpath(worktreePath).catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return null;
@@ -437,7 +462,10 @@ export const scanBuildData: AgentJobHandler = async (
   const deviceSupport = await scanDeviceSupport(signal);
   entries.push(...deviceSupport.entries);
   warnings.push(...deviceSupport.warnings);
-  const gradle = await scanGradleProjects(payload.managedRoot, signal);
+  const gradle = await scanGradleProjects(
+    gradleRootBesideDerivedData(payload.managedRoot),
+    signal,
+  );
   entries.push(...gradle.entries);
   warnings.push(...gradle.warnings);
   return { ...successfulProcess, entries, warnings };
@@ -453,6 +481,7 @@ export async function ownedWorktreeBuildData(
   },
   timeoutMs: number,
   signal: AbortSignal,
+  worktreeId?: string | null,
 ): Promise<{ targets: BuildDataTarget[]; warnings: string[] }> {
   const within = (parent: string, child: string) => {
     const path = relative(parent, child);
@@ -512,11 +541,16 @@ export async function ownedWorktreeBuildData(
       targets.push({ path: entry.path, rootPath: entry.rootPath });
     }
   }
-  const gradle = await scanGradleProjects(configuration.managedRoot, signal);
+  const gradle = await scanGradleProjects(
+    gradleRootBesideDerivedData(configuration.managedRoot),
+    signal,
+  );
   warnings.push(...gradle.warnings);
   targets.push(
     ...gradle.entries.flatMap(({ workspacePath, path, rootPath }) =>
-      workspacePath && resolve(workspacePath) === resolve(folder)
+      workspacePath &&
+      resolve(workspacePath) === resolve(folder) &&
+      (!worktreeId || basename(rootPath) === worktreeId)
         ? [{ path, rootPath }]
         : [],
     ),
@@ -582,7 +616,7 @@ export const sizeBuildData: AgentJobHandler = async (
       if (!stats.isDirectory() || stats.isSymbolicLink()) {
         throw new Error("Build Data target is not a directory");
       }
-      const generated = await generatedGradleDirectories(target.path, signal);
+      const generated = await generatedGradleDirectories(target, signal);
       let sizeBytes = await allocatedBytes(target.path, signal);
       for (const directory of generated)
         sizeBytes += await allocatedBytes(directory, signal);
@@ -629,7 +663,7 @@ export const deleteBuildData: AgentJobHandler = async (
           throw new Error("Build Data target is not a directory");
         }
         for (const directory of await generatedGradleDirectories(
-          target.path,
+          target,
           signal,
         )) {
           await rm(directory, { recursive: true, force: false, maxRetries: 3 });
@@ -769,16 +803,26 @@ export async function collectAgentDiskSpace(
     worktrees: configuration.worktrees,
   });
   const roots = await configuredRoots(scanPayload);
+  const gradle = await scanGradleProjects(
+    configuration.managedGradleRoot,
+    signal,
+  );
   const requested: Array<{ path: string; role: DiskSpaceVolumeRole }> = [
     { path: "/", role: "MAIN" },
     ...(configuration.baseRepoDirectory
       ? [{ path: configuration.baseRepoDirectory, role: "BASE_REPO" as const }]
       : []),
     ...roots.map((path) => ({ path, role: "DERIVED_DATA" as const })),
+    ...(gradle.rootPath
+      ? [{ path: gradle.rootPath, role: "GRADLE_BUILD_DATA" as const }]
+      : []),
   ];
-  const warnings: string[] = [];
+  const warnings = [...gradle.warnings];
   const volumes = new Map<string, MutableVolume>();
-  for (const request of requested) {
+  const recordVolume = async (request: {
+    path: string;
+    role: DiskSpaceVolumeRole;
+  }) => {
     signal.throwIfAborted();
     try {
       const inspected = await inspectVolume(
@@ -802,11 +846,16 @@ export async function collectAgentDiskSpace(
         volumes.set(inspected.volume.id, inspected.volume);
       }
     } catch (error) {
+      signal.throwIfAborted();
       warnings.push(`${request.path}: ${errorMessage(error)}`);
     }
+  };
+  for (const request of requested) {
+    await recordVolume(request);
   }
 
   const entries: AgentDiskSpaceReport["entries"] = [];
+  const gradlePaths = new Set(gradle.entries.map(({ path }) => path));
   const scannedRoots = new Set<string>();
   for (const root of roots) {
     signal.throwIfAborted();
@@ -821,7 +870,21 @@ export async function collectAgentDiskSpace(
     const result = await scanRoot(root, 45_000, signal);
     if (result.warning) warnings.push(result.warning);
     for (const entry of result.entries) {
-      if (!entry.modifiedAt || !entry.volumeId) continue;
+      if (!entry.modifiedAt || !entry.volumeId || gradlePaths.has(entry.path))
+        continue;
+      entries.push({
+        ...entry,
+        modifiedAt: entry.modifiedAt,
+        volumeId: entry.volumeId,
+      });
+    }
+  }
+  for (const entry of gradle.entries) {
+    if (!entry.modifiedAt || !entry.volumeId) continue;
+    if (!volumes.get(entry.volumeId)?.roles.has("GRADLE_BUILD_DATA")) {
+      await recordVolume({ path: entry.path, role: "GRADLE_BUILD_DATA" });
+    }
+    if (volumes.get(entry.volumeId)?.roles.has("GRADLE_BUILD_DATA")) {
       entries.push({
         ...entry,
         modifiedAt: entry.modifiedAt,

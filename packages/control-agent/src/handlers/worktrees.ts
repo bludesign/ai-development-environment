@@ -176,7 +176,7 @@ async function gitStatePathExists(
   }
 }
 
-async function inspectWorktreeRefreshState(
+export async function inspectWorktreeRefreshState(
   folder: string,
   timeoutMs: number,
   signal: AbortSignal,
@@ -210,6 +210,50 @@ async function inspectWorktreeRefreshState(
     hasConflicts: statusChangeState(status.stdout).hasConflicts,
     rebaseInProgress: rebaseMerge || rebaseApply,
     mergeInProgress,
+  };
+}
+
+export function cleanForAutoBuild(state: WorktreeRefreshState): boolean {
+  return !state.dirty && !state.mergeInProgress && !state.rebaseInProgress;
+}
+
+async function reportedWorktreeState(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const strict = await inspectWorktreeRefreshState(
+    folder,
+    timeoutMs,
+    signal,
+  ).catch(() => {
+    signal.throwIfAborted();
+    return null;
+  });
+  // A clean strict status is also clean under the repository's submodule
+  // settings. For dirty or incomplete results, preserve the usual Git status.
+  let statusText = "";
+  if (!strict || strict.dirty) {
+    const status = await git(
+      folder,
+      [
+        "--no-optional-locks",
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all",
+      ],
+      timeoutMs,
+      signal,
+    );
+    if (status.exitCode === 0) statusText = status.stdout;
+  }
+  return {
+    ...statusChangeState(statusText),
+    rebaseInProgress:
+      strict?.rebaseInProgress ??
+      (await rebaseInProgress(folder, timeoutMs, signal)),
+    cleanForAutoBuild: strict !== null && cleanForAutoBuild(strict),
   };
 }
 
@@ -277,46 +321,25 @@ async function flushWorktreeActivity(entry: ActiveWorktreeWatch) {
   entry.pending = false;
   try {
     const signal = new AbortController().signal;
-    const [status, symbolicBranch, headResult, codeStateHash, rebasing] =
+    const [changes, symbolicBranch, headResult, codeStateHash] =
       await Promise.all([
-        git(
-          entry.folder,
-          [
-            "--no-optional-locks",
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-          ],
-          entry.timeoutMs,
-          signal,
-        ),
+        reportedWorktreeState(entry.folder, entry.timeoutMs, signal),
         currentBranch(entry.folder, entry.timeoutMs, signal),
         git(entry.folder, ["rev-parse", "HEAD"], entry.timeoutMs, signal),
         worktreeCodeStateHash(entry.folder, entry.timeoutMs, signal),
-        rebaseInProgress(entry.folder, entry.timeoutMs, signal),
       ]);
     const branch =
       symbolicBranch ??
-      (rebasing
+      (changes.rebaseInProgress
         ? await rebaseBranch(entry.folder, entry.timeoutMs, signal)
         : null);
     const headSha = headResult.exitCode === 0 ? headResult.stdout.trim() : null;
     const headIdentity = headSha ? `${branch ?? ""}\0${headSha}` : null;
-    const changes =
-      status.exitCode === 0
-        ? statusChangeState(status.stdout)
-        : {
-            hasStagedChanges: false,
-            hasUnstagedChanges: false,
-            hasConflicts: false,
-          };
     const report: WorktreeActivityReport = {
       codebaseId: entry.codebaseId,
       gitDirectory: entry.gitDirectory,
       codeStateHash,
       ...changes,
-      rebaseInProgress: rebasing,
       pushStatus: await worktreePushStatus(
         entry.folder,
         branch,
@@ -591,28 +614,17 @@ export async function inspectWorktreeItem(
   const checkedAt = new Date().toISOString();
   try {
     const folder = await realpath(folderValue);
-    const [gitDir, symbolicBranch, headResult, statusResult, rebasing] =
-      await Promise.all([
-        gitDirectory(folder, timeoutMs, signal),
-        currentBranch(folder, timeoutMs, signal),
-        git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
-        git(
-          folder,
-          [
-            "--no-optional-locks",
-            "status",
-            "--porcelain=v1",
-            "-z",
-            "--untracked-files=all",
-          ],
-          timeoutMs,
-          signal,
-        ),
-        rebaseInProgress(folder, timeoutMs, signal),
-      ]);
+    const [gitDir, symbolicBranch, headResult, changes] = await Promise.all([
+      gitDirectory(folder, timeoutMs, signal),
+      currentBranch(folder, timeoutMs, signal),
+      git(folder, ["rev-parse", "HEAD"], timeoutMs, signal),
+      reportedWorktreeState(folder, timeoutMs, signal),
+    ]);
     const branch =
       symbolicBranch ??
-      (rebasing ? await rebaseBranch(folder, timeoutMs, signal) : null);
+      (changes.rebaseInProgress
+        ? await rebaseBranch(folder, timeoutMs, signal)
+        : null);
     const upstreamResult = branch
       ? await git(
           folder,
@@ -635,14 +647,6 @@ export async function inspectWorktreeItem(
         )
       : { ahead: null, behind: null };
     const syncState = worktreeSyncState(branch, upstream, upstreamCounts);
-    const changes =
-      statusResult.exitCode === 0
-        ? statusChangeState(statusResult.stdout)
-        : {
-            hasStagedChanges: false,
-            hasUnstagedChanges: false,
-            hasConflicts: false,
-          };
     return {
       gitDirectory: gitDir,
       folder,
@@ -658,7 +662,6 @@ export async function inspectWorktreeItem(
       baseAhead: baseCounts.ahead,
       baseBehind: baseCounts.behind,
       ...changes,
-      rebaseInProgress: rebasing,
       pushStatus: await worktreePushStatus(
         folder,
         branch,
@@ -3007,13 +3010,14 @@ export const deleteWorktree: AgentJobHandler = async (
       input.derivedData,
       timeoutMs,
       signal,
+      context?.worktreeId,
     );
     buildDataTargets = owned.targets;
     buildDataCleanup.warnings.push(...owned.warnings);
   } catch (error) {
     signal.throwIfAborted();
     buildDataCleanup.warnings.push(
-      `Could not inspect Xcode build data: ${error instanceof Error ? error.message : String(error)}`,
+      `Could not inspect build data: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
   requireSuccess(
@@ -3040,13 +3044,13 @@ export const deleteWorktree: AgentJobHandler = async (
           .filter((entry) => !entry.deleted)
           .map(
             (entry) =>
-              `${entry.path}: ${entry.error ?? "Could not remove Xcode build data"}`,
+              `${entry.path}: ${entry.error ?? "Could not remove build data"}`,
           ),
       );
     } catch (error) {
       // The Git folder is already gone; report cleanup failure without retaining a ghost worktree.
       buildDataCleanup.warnings.push(
-        `Could not remove Xcode build data: ${error instanceof Error ? error.message : String(error)}`,
+        `Could not remove build data: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

@@ -174,6 +174,7 @@ export type WorktreeActivityReport = {
   baseBehind?: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  cleanForAutoBuild?: boolean;
   rebaseInProgress?: boolean;
   hasConflicts?: boolean;
   pushStatus?: WorktreePushStatus;
@@ -196,6 +197,7 @@ export type WorktreeInventoryItem = {
   baseBehind: number | null;
   hasStagedChanges?: boolean;
   hasUnstagedChanges?: boolean;
+  cleanForAutoBuild?: boolean;
   rebaseInProgress?: boolean;
   hasConflicts?: boolean;
   pushStatus?: WorktreePushStatus;
@@ -655,6 +657,10 @@ export function parseWorktreeInventoryItem(
     hasUnstagedChanges: optionalBoolean(
       item.hasUnstagedChanges,
       `${name}.hasUnstagedChanges`,
+    ),
+    cleanForAutoBuild: optionalBoolean(
+      item.cleanForAutoBuild,
+      `${name}.cleanForAutoBuild`,
     ),
     rebaseInProgress: optionalBoolean(
       item.rebaseInProgress,
@@ -1916,6 +1922,7 @@ export function parseWorktreeActivityReport(
     "baseBehind",
     "hasStagedChanges",
     "hasUnstagedChanges",
+    "cleanForAutoBuild",
     "rebaseInProgress",
     "hasConflicts",
     "pushStatus",
@@ -1977,6 +1984,10 @@ export function parseWorktreeActivityReport(
     hasUnstagedChanges: optionalBoolean(
       report.hasUnstagedChanges,
       "worktree activity report.hasUnstagedChanges",
+    ),
+    cleanForAutoBuild: optionalBoolean(
+      report.cleanForAutoBuild,
+      "worktree activity report.cleanForAutoBuild",
     ),
     rebaseInProgress: optionalBoolean(
       report.rebaseInProgress,

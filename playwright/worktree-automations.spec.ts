@@ -2,12 +2,14 @@ import { mkdir } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
 import { screenshotSessionToken } from "../scripts/mock-data/auth";
+import { ids } from "../scripts/mock-data/ids";
 import type {
   Worktree,
   WorktreeCodebaseGroup,
   WorktreeOverview,
 } from "../src/components/worktrees/types";
 import { setScreenshotTime } from "./screenshot-time";
+import { stubWorktreeAgent } from "./worktree-stub";
 
 const updatedAt = "2026-10-27T12:00:00Z";
 
@@ -332,6 +334,39 @@ test("active worktree automations stay green for native and managed merges on bo
       await page.keyboard.press("Escape");
     }
   }
+});
+
+test("configure Auto Build for an Android worktree", async ({ page }, info) => {
+  test.skip(!info.project.name.startsWith("desktop"));
+  await page.setExtraHTTPHeaders({
+    Authorization: `Bearer ${screenshotSessionToken}`,
+  });
+  await setScreenshotTime(page);
+  await stubWorktreeAgent(page);
+  await page.goto(`/en/dashboard/worktrees/${ids.worktrees.webMain}`);
+
+  await page
+    .getByRole("button", { name: "Configure Auto Build", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Configure Auto Build" });
+  await expect(
+    dialog.getByRole("combobox", { name: "Build configuration" }),
+  ).toHaveText("Android QA Debug");
+  await expect(dialog.getByRole("combobox", { name: "Platform" })).toHaveText(
+    "Android",
+  );
+  await expect(
+    dialog.getByRole("combobox", { name: "Destination" }),
+  ).toHaveText("Agent host");
+  await expect(
+    dialog.getByRole("button", { name: "Enable Auto Build" }),
+  ).toBeEnabled();
+
+  await mkdir(`screenshots/${info.project.name}`, { recursive: true });
+  await dialog.screenshot({
+    path: `screenshots/${info.project.name}/worktree-auto-build.png`,
+    animations: "disabled",
+  });
 });
 
 test("an idle conflict action leaves no extra space on a default branch card", async ({

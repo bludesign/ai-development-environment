@@ -30,9 +30,11 @@ import {
   SIDEBAR_STATUS_CHANGED_TOPIC,
 } from "@/services/agent-control";
 import { worktreeDisplayPath } from "@/services/worktrees/worktrees.service";
+import { buildDataWorktree } from "@/services/build-data/worktree-ownership";
 import {
   effectiveBuildsDirectory,
   managedDerivedDataRoot,
+  managedGradleRoot,
 } from "@/services/builds/build-directory";
 
 import { executingResourcesByWorktree } from "./executing-work";
@@ -71,7 +73,7 @@ export type DiskSpaceVolumeView = AgentDiskSpaceVolumeReport & {
 };
 
 export const NO_MONITORED_VOLUME_WARNING =
-  "No Derived Data volume was reported, so free space is not being monitored for this agent";
+  "No build data volume was reported, so free space is not being monitored for this agent";
 
 export type AgentDiskSpaceView = {
   agent: Agent;
@@ -124,11 +126,6 @@ function parseArray<T>(value: string | null | undefined): T[] {
   }
 }
 
-function pathContains(folder: string, candidate: string): boolean {
-  const normalized = folder === "/" ? folder : folder.replace(/\/+$/, "");
-  return candidate === normalized || candidate.startsWith(`${normalized}/`);
-}
-
 function finiteThreshold(value: number, label: string): number {
   if (!Number.isFinite(value) || value <= 0 || value > 1_000_000) {
     throw new Error(`${label} must be a positive finite GiB value`);
@@ -151,6 +148,7 @@ type DiskStatusState = Pick<
   | "automaticPressureMode"
   | "lastReportedAt"
   | "lastError"
+  | "lastCleanupError"
   | "volumesJson"
   | "warningsJson"
 >;
@@ -194,6 +192,7 @@ function projectDiskStatus(
   )
     status = "ERROR";
   else if (critical) status = "CRITICAL";
+  else if (state?.lastCleanupError) status = "ERROR";
   else if (deleting.has(agentId)) status = "DELETING";
   else if (manualPressureMode || automaticPressureMode) status = "PRESSURE";
   else if (cleanupRequired) status = "CLEANUP_REQUIRED";
@@ -234,7 +233,7 @@ function projectDiskStatus(
     manualPressureMode,
     automaticPressureMode,
     lastReportedAt: lastReportedAt?.toISOString() ?? null,
-    lastError: state?.lastError ?? null,
+    lastError: state?.lastError ?? state?.lastCleanupError ?? null,
     warnings,
     volumes: volumeViews,
   };
@@ -313,14 +312,18 @@ export class DiskSpaceService {
       }),
     ]);
     if (!agent) throw new Error("Agent not found");
+    const buildsDirectory = effectiveBuildsDirectory(agent);
     return {
       enabled: state?.enabled ?? true,
       pollIntervalSeconds: DISK_SPACE_POLL_INTERVAL_SECONDS,
       baseRepoDirectory: agent.baseRepoDirectory,
       derivedDataLocationMode: agent.derivedDataLocationMode,
       derivedDataPath: agent.derivedDataPath,
-      managedDerivedDataRoot: effectiveBuildsDirectory(agent)
-        ? managedDerivedDataRoot(effectiveBuildsDirectory(agent)!)
+      managedDerivedDataRoot: buildsDirectory
+        ? managedDerivedDataRoot(buildsDirectory)
+        : null,
+      managedGradleRoot: buildsDirectory
+        ? managedGradleRoot(buildsDirectory)
         : null,
       worktrees,
     };
@@ -339,15 +342,7 @@ export class DiskSpaceService {
     if (!agent) throw new Error("Agent not found");
     const observedAt = new Date(report.observedAt);
     const entries: StoredEntry[] = report.entries.map((entry) => {
-      const worktree = entry.workspacePath
-        ? worktrees
-            .filter((candidate) =>
-              pathContains(candidate.folder, entry.workspacePath!),
-            )
-            .sort(
-              (first, second) => second.folder.length - first.folder.length,
-            )[0]
-        : null;
+      const worktree = buildDataWorktree(entry, worktrees);
       return {
         ...entry,
         worktreeId: worktree?.id ?? null,
@@ -372,6 +367,7 @@ export class DiskSpaceService {
         warningsJson: JSON.stringify(report.warnings),
         lastReportedAt: observedAt,
         lastError: null,
+        lastCleanupError: null,
       },
     });
     this.publish(agentId, "REPORT_RECEIVED");
@@ -427,6 +423,7 @@ export class DiskSpaceService {
               automaticPressureMode: true,
               lastReportedAt: true,
               lastError: true,
+              lastCleanupError: true,
               volumesJson: true,
               warningsJson: true,
             },
@@ -545,7 +542,7 @@ export class DiskSpaceService {
     ]);
     if (lease) {
       throw new Error(
-        "Derived Data cleanup is in progress for this worktree; try again shortly",
+        "Build Data cleanup is in progress for this worktree; try again shortly",
       );
     }
     if (worktree) await this.assertAgentCanStart(worktree.codebase.agentId);
@@ -605,6 +602,7 @@ export class DiskSpaceService {
       !state?.enabled ||
       !state.lastReportedAt ||
       state.lastError ||
+      state.lastCleanupError ||
       activeLease ||
       !agent ||
       agent.disconnectedAt !== null ||
@@ -622,9 +620,7 @@ export class DiskSpaceService {
     const allVolumes = parseArray<AgentDiskSpaceVolumeReport>(
       state.volumesJson,
     );
-    // Only the Derived Data volume drives pressure mode and cleanup; capacity
-    // ids below still resolve against every reported volume so entries keep
-    // matching volumes that share an APFS container.
+    // Capacity IDs also resolve against unmonitored volumes that share an APFS container.
     const volumes = monitoredDiskSpaceVolumes(allVolumes);
     const worktreeIds = entries
       .map((entry) => entry.worktreeId)
@@ -633,7 +629,7 @@ export class DiskSpaceService {
     const lockedPaths = new Set(locks.map((lock) => lock.path));
     entries = entries.filter(
       (entry) =>
-        entry.kind === "PROJECT" &&
+        (entry.kind === "PROJECT" || entry.kind === "GRADLE_PROJECT") &&
         Boolean(entry.worktreeId) &&
         !lockedPaths.has(entry.path) &&
         (active.get(entry.worktreeId!)?.length ?? 0) === 0,
@@ -709,7 +705,30 @@ export class DiskSpaceService {
     const becameActive = await executingResourcesByWorktree([
       candidate.worktreeId,
     ]);
-    if ((becameActive.get(candidate.worktreeId)?.length ?? 0) > 0) {
+    const becameLocked =
+      (
+        await prisma.derivedDataLock.findMany({
+          where: { agentId, path: candidate.path },
+          select: { path: true },
+        })
+      ).length > 0;
+    const gradleOwner =
+      candidate.kind === "GRADLE_PROJECT"
+        ? await prisma.worktree.findFirst({
+            where: {
+              id: candidate.worktreeId,
+              missingAt: null,
+              codebase: { agentId },
+            },
+            select: { id: true, folder: true },
+          })
+        : null;
+    if (
+      (becameActive.get(candidate.worktreeId)?.length ?? 0) > 0 ||
+      becameLocked ||
+      (candidate.kind === "GRADLE_PROJECT" &&
+        !buildDataWorktree(candidate, gradleOwner ? [gradleOwner] : []))
+    ) {
       await prisma.derivedDataCleanupLease.deleteMany({
         where: { worktreeId: candidate.worktreeId, jobId: null },
       });
@@ -749,7 +768,8 @@ export class DiskSpaceService {
       await prisma.agentDiskSpaceState.update({
         where: { agentId },
         data: {
-          lastError: error instanceof Error ? error.message : String(error),
+          lastCleanupError:
+            error instanceof Error ? error.message : String(error),
         },
       });
       this.publish(agentId, "CLEANUP_START_FAILED");
@@ -779,41 +799,60 @@ export class DiskSpaceService {
     const released = await prisma.derivedDataCleanupLease.deleteMany({
       where: { jobId: job.id },
     });
-    if (source === "AUTOMATIC" && job.status !== "SUCCEEDED") {
+    if (released.count || source === "AUTOMATIC") {
+      const cleanup =
+        source === "AUTOMATIC"
+          ? await this.automaticCleanupResult(job, targets)
+          : null;
+      this.publish(job.agentId, "CLEANUP_COMPLETED", cleanup);
+      if (!cleanup || cleanup.status === "SUCCEEDED") {
+        this.agentControl.requestDiskSpacePoll(job.agentId);
+      }
+    }
+  }
+
+  private async automaticCleanupResult(
+    job: Parameters<DiskSpaceService["observeCompletion"]>[0],
+    targets: DiskSpaceCleanupChange["targets"],
+  ): Promise<DiskSpaceCleanupChange> {
+    let deleted: ReturnType<typeof parseBuildDataDeleteResult>["deleted"] = [];
+    let error = job.error;
+    let status = job.status;
+    if (status === "SUCCEEDED") {
+      try {
+        deleted = parseBuildDataDeleteResult(
+          JSON.parse(job.resultJson ?? "null"),
+        ).deleted;
+        if (
+          targets.some(
+            ({ path }) =>
+              !deleted.some((item) => item.path === path && item.deleted),
+          )
+        ) {
+          status = "FAILED";
+          error ??= deleted.find((item) => !item.deleted)?.error ?? null;
+        }
+      } catch (failure) {
+        status = "INVALID";
+        error ??= failure instanceof Error ? failure.message : String(failure);
+      }
+    }
+    if (status !== "SUCCEEDED") {
+      error ||= "Automatic Build Data cleanup failed";
+      const prisma = await getPrismaClient();
       await prisma.agentDiskSpaceState.updateMany({
         where: { agentId: job.agentId },
-        data: {
-          lastError: job.error || "Automatic Derived Data cleanup failed",
-        },
+        data: { lastCleanupError: error },
       });
     }
-    if (released.count || source === "AUTOMATIC") {
-      let deleted: unknown[] = [];
-      if (source === "AUTOMATIC" && job.resultJson) {
-        try {
-          deleted = parseBuildDataDeleteResult(
-            JSON.parse(job.resultJson),
-          ).deleted;
-        } catch {
-          // The Build Data service owns malformed-result reporting.
-        }
-      }
-      this.publish(
-        job.agentId,
-        "CLEANUP_COMPLETED",
-        source === "AUTOMATIC"
-          ? {
-              jobId: job.id,
-              status: job.status,
-              source,
-              error: job.error,
-              targets,
-              deleted,
-            }
-          : null,
-      );
-      this.agentControl.requestDiskSpacePoll(job.agentId);
-    }
+    return {
+      jobId: job.id,
+      status,
+      source: "AUTOMATIC",
+      error,
+      targets,
+      deleted,
+    };
   }
 
   private publish(

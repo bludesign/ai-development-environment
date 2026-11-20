@@ -18,7 +18,7 @@ import {
 
 registerWorktreeFixtures();
 
-describe("worktree deletion Xcode cleanup", () => {
+describe("worktree build data cleanup", () => {
   test("inspects ownership before Git removal and reports cleanup failure after successful removal", async () => {
     const root = await repository();
     const linked = `${root}-deleted`;
@@ -68,6 +68,11 @@ describe("worktree deletion Xcode cleanup", () => {
       20_000,
       new AbortController().signal,
       async () => undefined,
+      {
+        agentId: "agent-1",
+        worktreeId: "worktree-1",
+        reportWorktreeActivity: vi.fn(),
+      },
     );
     expect(result).toMatchObject({
       exitCode: 0,
@@ -81,6 +86,7 @@ describe("worktree deletion Xcode cleanup", () => {
       { mode: "ABSOLUTE", path: "/DerivedData" },
       20_000,
       expect.any(AbortSignal),
+      "worktree-1",
     );
     expect(cleanup.remove).toHaveBeenCalledOnce();
   });

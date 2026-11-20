@@ -190,6 +190,7 @@ import {
 
 export type AgentJobHandlerContext = {
   agentId: string;
+  worktreeId?: string | null;
   withOperationResources?: <T>(
     resources: readonly OperationResource[],
     task: () => Promise<T>,

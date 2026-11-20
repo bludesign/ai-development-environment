@@ -1,0 +1,1 @@
+ALTER TABLE "WorktreeAutoBuild" ADD COLUMN "queuedBuildCount" INTEGER NOT NULL DEFAULT 0;

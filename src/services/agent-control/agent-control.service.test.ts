@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { IOS_ARTIFACT_DOWNLOAD_JOB_KIND } from "@ai-development-environment/agent-contract/builds";
+import {
+  ANDROID_BUILD_JOB_KIND,
+  IOS_ARTIFACT_DOWNLOAD_JOB_KIND,
+  IOS_BUILD_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
 import { CODEBASE_BRANCHES_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/codebases";
 import {
   WORKTREE_OPERATION_JOB_KIND,
@@ -665,7 +669,8 @@ describe("AgentControlService.claimJob", () => {
           agentId: "agent-1",
           status: "QUEUED",
           worktreeId: "worktree-1",
-          kind: "ios.build.run",
+          kind: IOS_BUILD_JOB_KIND,
+          payloadJson: "{}",
         }),
       },
     });
@@ -677,6 +682,62 @@ describe("AgentControlService.claimJob", () => {
       where: { jobId: null, expiresAt: { lte: expect.any(Date) } },
     });
   });
+
+  test.each([IOS_BUILD_JOB_KIND, ANDROID_BUILD_JOB_KIND])(
+    "blocks an older agent from claiming a guarded %s job",
+    async (kind) => {
+      getPrismaClient.mockResolvedValue({
+        derivedDataCleanupLease: {
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
+        agentJob: {
+          findUnique: vi.fn().mockResolvedValue({
+            agentId: "agent-1",
+            status: "QUEUED",
+            worktreeId: "worktree-1",
+            kind,
+            payloadJson: JSON.stringify({ requireCleanWorktree: true }),
+          }),
+        },
+      });
+
+      await expect(
+        new AgentControlService().claimJob("agent-1", "build-1"),
+      ).rejects.toThrow("Update the build agent to run automatic builds");
+    },
+  );
+
+  test.each([
+    ["buildData.size", { cacheOnly: true }],
+    ["buildData.delete", { cacheOnly: true }],
+    ["buildData.delete", { kind: "GRADLE_PROJECT", worktreeId: null }],
+  ])(
+    "blocks a downgraded agent from claiming a cache-only %s job",
+    async (kind, scope) => {
+      getPrismaClient.mockResolvedValue({
+        derivedDataCleanupLease: { deleteMany: vi.fn() },
+        agentJob: {
+          findUnique: vi.fn().mockResolvedValue({
+            agentId: "agent-1",
+            status: "QUEUED",
+            kind,
+            payloadJson: JSON.stringify({
+              targets: [
+                {
+                  path: "/Builds/.android-gradle/old/hash",
+                  rootPath: "/Builds/.android-gradle/old",
+                  ...scope,
+                },
+              ],
+            }),
+          }),
+        },
+      });
+      await expect(
+        new AgentControlService().claimJob("agent-1", "cache-job"),
+      ).rejects.toThrow("Update the agent");
+    },
+  );
 });
 
 describe("AgentControlService.createJob", () => {

@@ -1,5 +1,9 @@
 import type { Agent, AgentJob } from "@/components/agents/types";
 import type {
+  BuildDestinationType,
+  BuildPlatform,
+} from "@ai-development-environment/agent-contract/builds";
+import type {
   BuildArtifact,
   BuildDestination,
   BuildRecord,
@@ -58,6 +62,15 @@ export type WorktreeLatestBuild = Pick<
     Pick<BuildArtifact, "id" | "kind"> &
       Partial<Pick<BuildArtifact, "metadata" | "checksum">>
   >;
+};
+
+export type WorktreeAutoBuild = {
+  configurationId: string;
+  platform: BuildPlatform;
+  destinationType: BuildDestinationType | "HOST";
+  lastQueuedHeadSha: string | null;
+  lastQueuedBuildId: string | null;
+  lastError: string | null;
 };
 
 export type WorktreeAutoSync = {
@@ -145,6 +158,7 @@ export type Worktree = {
   activeJob: AgentJob | null;
   blockingJob?: AgentJob | null;
   activeJobs?: AgentJob[];
+  autoBuild?: WorktreeAutoBuild | null;
   autoSync?: WorktreeAutoSync | null;
   autoMerge?: WorktreeAutoMerge | null;
   lastCheckedAt: string | null;

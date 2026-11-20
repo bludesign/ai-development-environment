@@ -2926,6 +2926,7 @@ describe("WorktreesService", () => {
         lastCheckedAt: new Date(0),
         hasStagedChanges: false,
         hasUnstagedChanges: true,
+        cleanForAutoBuild: false,
       },
     });
     expect(findFirst).toHaveBeenCalledWith(

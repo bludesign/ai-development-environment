@@ -1189,7 +1189,7 @@
       },
       "WORKTREE_CLEANUP_FAILED": {
         "title": "Worktree build data cleanup failed",
-        "description": "A deleted worktree has Xcode build data that could not be removed."
+        "description": "Some build data for a deleted worktree could not be removed."
       },
       "GITHUB_PULL_REQUEST_APPROVED": {
         "title": "Pull request approved",
@@ -1593,7 +1593,7 @@
   },
   "diskSpace": {
     "title": "Disk Space Monitor",
-    "description": "Monitor each agent volume and automatically reclaim the oldest safe Derived Data when free space is low.",
+    "description": "Monitor build storage and automatically remove eligible Xcode and Gradle caches when free space is low.",
     "loading": "Loading disk reports…",
     "settings": "Settings",
     "normalThreshold": "Cleanup threshold (GiB)",
@@ -1621,7 +1621,8 @@
     "role": {
       "MAIN": "Main disk",
       "BASE_REPO": "Base repository",
-      "DERIVED_DATA": "Derived Data"
+      "DERIVED_DATA": "Derived Data",
+      "GRADLE_BUILD_DATA": "Gradle Build Data"
     },
     "status": {
       "DISABLED": "Disabled",
@@ -1762,7 +1763,7 @@
     "deleteDeviceSupportDescription": "Permanently delete {count} selected Device Support folders? Xcode can recreate them when a matching device is connected.",
     "refresh": "Refresh",
     "calculateSizes": "Calculate sizes",
-    "loading": "Scanning Derived Data…",
+    "loading": "Scanning build data…",
     "emptyTitle": "No Derived Data found",
     "emptyDescription": "No configured DerivedData directories currently contain entries.",
     "progress": "Scanned {complete} of {total} eligible agents",
@@ -1788,13 +1789,13 @@
     "deleteTitle": "Delete Derived Data?",
     "deleteDescription": "Permanently delete {count} selected Derived Data entries? This cannot be undone.",
     "history": "Deletion history",
-    "historyDescription": "Derived Data removed from enrolled agents during the last 90 days.",
+    "historyDescription": "Build data removed from enrolled agents during the last 90 days.",
     "clearHistory": "Clear history",
     "clearHistoryTitle": "Clear deletion history?",
-    "clearHistoryDescription": "Delete all retained Derived Data deletion records? This does not affect files on any agent.",
-    "clearAgentHistoryDescription": "Delete the retained Derived Data deletion records for the selected agent? This does not affect files on the agent.",
+    "clearHistoryDescription": "Delete all retained build data deletion records? This only clears the history.",
+    "clearAgentHistoryDescription": "Delete the retained build data deletion records for the selected agent? This only clears the history.",
     "loadingHistory": "Loading deletion history…",
-    "noHistory": "No Derived Data has been deleted yet.",
+    "noHistory": "No build data has been deleted yet.",
     "deleted": "Deleted",
     "sourceLabel": "Source",
     "loadMore": "Load more",
@@ -6699,6 +6700,26 @@
     "directoryStale": "Stale",
     "directoryRefresh": "Refresh directory",
     "directoryDelete": "Delete directory"
+  },
+  "worktreeAutoBuild": {
+    "title": "Auto Build",
+    "enabled": "Enabled",
+    "description": "Build the next checked-out commit when this worktree is clean.",
+    "noConfigurations": "Add a build configuration to this repository to enable Auto Build.",
+    "configure": "Configure Auto Build",
+    "configuration": "Build configuration",
+    "platform": "Platform",
+    "destination": "Destination",
+    "enable": "Enable Auto Build",
+    "save": "Save Auto Build",
+    "disable": "Disable Auto Build",
+    "lastQueuedBuild": "Last queued build",
+    "missingConfiguration": "Configuration unavailable",
+    "retry": "Retry",
+    "SIMULATOR": "Any simulator",
+    "PHYSICAL_DEVICE": "Any physical device",
+    "LOCAL_MAC": "Any Mac",
+    "HOST": "Agent host"
   },
   "worktreeSettings": {
     "title": "Worktrees",

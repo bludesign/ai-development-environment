@@ -726,11 +726,18 @@ test.describe("app screenshots", () => {
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);
 
-      await page.screenshot({
+      const screenshot = {
         path: `screenshots/${testInfo.project.name}/${route.name}.png`,
-        fullPage: route.fullPage ?? true,
-        animations: "disabled",
-      });
+        animations: "disabled" as const,
+      };
+      if (route.screenshotTarget) {
+        await page.locator(route.screenshotTarget).screenshot(screenshot);
+      } else {
+        await page.screenshot({
+          ...screenshot,
+          fullPage: route.fullPage ?? true,
+        });
+      }
 
       expect(
         response,

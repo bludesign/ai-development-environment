@@ -120,6 +120,7 @@ import type {
 } from "@/services/notifications";
 import type { WorkflowEventsService } from "@/services/workflows/workflow-events.service";
 import { buildOutOfDate } from "@/services/builds/build-freshness";
+import type { BuildsService } from "@/services/builds/builds.service";
 import {
   effectiveBuildsDirectory,
   managedDerivedDataRoot,
@@ -136,6 +137,7 @@ import {
   type BranchBatchTargetSelection,
 } from "./worktree-branch-batch.service";
 import { WorktreeSyncService } from "./worktree-sync.service";
+import { WorktreeAutoBuildService } from "./worktree-auto-build.service";
 
 const SETTINGS_ID = "default";
 const ACTIVE_STATUSES = ["QUEUED", "RUNNING"];
@@ -266,6 +268,7 @@ const worktreeInclude = {
       },
     },
   },
+  autoBuild: true,
   autoSync: true,
   autoMerge: true,
   pullRequest: true,
@@ -668,6 +671,7 @@ export class WorktreesService {
   >();
   private readonly diffInspections = new Map<string, Promise<object>>();
   private readonly watchDemand = new Map<string, WorktreeWatchDemand>();
+  readonly autoBuilds?: WorktreeAutoBuildService;
 
   constructor(
     private readonly agentControl: AgentControlService,
@@ -678,7 +682,14 @@ export class WorktreesService {
     private readonly pipelineStatus = new GitHubPipelineStatusService(),
     private readonly gitLabService?: GitLabService,
     private readonly notifications?: NotificationsService,
+    builds?: BuildsService,
   ) {
+    if (builds) {
+      this.autoBuilds = new WorktreeAutoBuildService(
+        builds,
+        (worktreeId, codebaseId) => this.publish(worktreeId, codebaseId),
+      );
+    }
     this.agentControl.registerCompletionHandler(
       WORKTREE_OPERATION_JOB_KIND,
       (job) => this.projectOperation(job),
@@ -2423,6 +2434,7 @@ export class WorktreesService {
       hasCommitStatus ||
       report.hasStagedChanges !== undefined ||
       report.hasUnstagedChanges !== undefined ||
+      report.cleanForAutoBuild !== undefined ||
       report.rebaseInProgress !== undefined ||
       report.hasConflicts !== undefined ||
       report.codeStateHash !== undefined ||
@@ -2463,6 +2475,7 @@ export class WorktreesService {
             ? {}
             : { baseBehind: report.baseBehind }),
           lastCheckedAt: new Date(report.observedAt),
+          cleanForAutoBuild: report.cleanForAutoBuild ?? false,
           ...(report.hasStagedChanges === undefined
             ? {}
             : { hasStagedChanges: report.hasStagedChanges }),
@@ -2550,6 +2563,7 @@ export class WorktreesService {
       baseBehind: item.baseBehind,
       hasStagedChanges: item.hasStagedChanges ?? false,
       hasUnstagedChanges: item.hasUnstagedChanges ?? false,
+      cleanForAutoBuild: item.cleanForAutoBuild ?? false,
       rebaseInProgress: item.rebaseInProgress ?? false,
       hasConflicts: item.hasConflicts ?? false,
       pushStatus: item.pushStatus ?? "UNKNOWN",
@@ -4735,6 +4749,7 @@ export class WorktreesService {
   }
 
   private publish(worktreeId: string | null, codebaseId: string | null) {
+    this.autoBuilds?.requestReconcile();
     agentEventBus.publish(SIDEBAR_STATUS_CHANGED_TOPIC, {
       sidebarStatusChanged: true,
     });
@@ -5454,6 +5469,7 @@ export class WorktreesService {
         baseBehind: item.baseBehind,
         hasStagedChanges: item.hasStagedChanges ?? false,
         hasUnstagedChanges: item.hasUnstagedChanges ?? false,
+        cleanForAutoBuild: item.cleanForAutoBuild ?? false,
         rebaseInProgress: item.rebaseInProgress ?? false,
         hasConflicts: item.hasConflicts ?? false,
         pushStatus: item.pushStatus ?? "UNKNOWN",

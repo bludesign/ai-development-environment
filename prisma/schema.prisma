@@ -642,6 +642,7 @@ model Worktree {
   baseBehind               Int?
   hasStagedChanges         Boolean                      @default(false)
   hasUnstagedChanges       Boolean                      @default(false)
+  cleanForAutoBuild        Boolean                      @default(false)
   rebaseInProgress         Boolean                      @default(false)
   hasConflicts             Boolean                      @default(false)
   pushStatus               String                       @default("UNKNOWN")
@@ -670,6 +671,7 @@ model Worktree {
   workflowRuns             WorkflowRun[]
   commandRuns              CommandRun[]
   derivedDataCleanupLease  DerivedDataCleanupLease?
+  autoBuild                WorktreeAutoBuild?
   autoSync                 WorktreeAutoSync?
   autoMerge                WorktreeAutoMerge?
   pullRequestLookupOrigin  String?
@@ -818,6 +820,25 @@ model GitHubPipelineRecord {
   @@index([workflowRunId])
   @@index([checkSuiteId])
   @@index([lastObservedAt])
+}
+
+model WorktreeAutoBuild {
+  worktreeId        String   @id
+  generation        String
+  queuedBuildCount  Int      @default(0)
+  configurationId   String
+  platform          String
+  destinationType   String
+  lastHandledHeadSha String?
+  lastQueuedHeadSha String?
+  lastQueuedObservationAt DateTime?
+  lastQueuedBuildId String?
+  lastError         String?
+  updatedAt         DateTime @updatedAt
+  worktree          Worktree @relation(fields: [worktreeId], references: [id], onDelete: Cascade)
+  lastQueuedBuild   Build?   @relation(fields: [lastQueuedBuildId], references: [id], onDelete: SetNull)
+
+  @@index([lastQueuedBuildId])
 }
 
 model WorktreeAutoSync {
@@ -1841,6 +1862,7 @@ model Build {
   exports                BuildExport[]
   reports                BuildReport[]
   dsymUploads            DsymUpload[]
+  autoBuildRules         WorktreeAutoBuild[]
 
   @@index([status, createdAt])
   @@index([agentId, createdAt])
@@ -2340,6 +2362,7 @@ model AgentDiskSpaceState {
   warningsJson          String    @default("[]")
   lastReportedAt        DateTime?
   lastError             String?
+  lastCleanupError      String?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
   agent                 Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
