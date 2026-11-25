@@ -87,25 +87,32 @@ export function CommandQuickActions({
     }
   };
 
-  const start = async (command: CommandActionDefinition) => {
+  const start = async (
+    command: CommandActionDefinition,
+    anchor: HTMLButtonElement,
+  ) => {
     setStarting(command.id);
     setError(null);
     const idempotencyKey = command.port == null ? undefined : createClientId();
-    await conflict.submit(async (portConflictResolution) => {
-      await controlPlaneRequest(
-        "mutation RunCommandQuickAction($input: StartCommandRunInput!) { startCommandRun(input: $input) { id } }",
-        {
-          input: {
-            commandId: command.id,
-            origin: "QUICK_ACTION",
-            ...(idempotencyKey ? { idempotencyKey } : {}),
-            ...(portConflictResolution ? { portConflictResolution } : {}),
-            ...(agentId ? { agentId } : { worktreeId }),
+    await conflict.submit(
+      async (portConflictResolution) => {
+        await controlPlaneRequest(
+          "mutation RunCommandQuickAction($input: StartCommandRunInput!) { startCommandRun(input: $input) { id } }",
+          {
+            input: {
+              commandId: command.id,
+              origin: "QUICK_ACTION",
+              ...(idempotencyKey ? { idempotencyKey } : {}),
+              ...(portConflictResolution ? { portConflictResolution } : {}),
+              ...(agentId ? { agentId } : { worktreeId }),
+            },
           },
-        },
-      );
-      summary.refresh();
-    }, setError);
+        );
+        summary.refresh();
+      },
+      setError,
+      anchor,
+    );
     setStarting(null);
   };
 
@@ -249,7 +256,7 @@ export function CommandQuickActions({
                 onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  void start(command);
+                  void start(command, event.currentTarget);
                 }}
                 size="sm"
                 title={

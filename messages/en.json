@@ -5948,6 +5948,7 @@
     "portConflictTitle": "Port {port} is in use",
     "portConflictDescription": "The following command runs are using or waiting to use this port on {agent}. Continuing may cause the command to fail.",
     "portConflictContinue": "Continue",
+    "portConflictRunAnyway": "Run anyway",
     "portConflictTerminate": "Terminate and run",
     "portConflictCancelStep": "Cancel command",
     "queuedWaitingForPort": "Waiting for the conflicting command runs to release the port.",

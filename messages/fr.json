@@ -5948,6 +5948,7 @@
     "portConflictTitle": "Le port {port} est utilisé",
     "portConflictDescription": "Les exécutions suivantes utilisent ce port sur {agent} ou attendent de l’utiliser. Si vous continuez, la commande risque d’échouer.",
     "portConflictContinue": "Continuer",
+    "portConflictRunAnyway": "Exécuter quand même",
     "portConflictTerminate": "Arrêter et exécuter",
     "portConflictCancelStep": "Annuler la commande",
     "queuedWaitingForPort": "En attente de la libération du port par les autres exécutions.",
