@@ -10,6 +10,10 @@ vi.mock("@/services/disk-space/executing-work", () => ({
 }));
 
 import type { AgentControlService } from "@/services/agent-control";
+import {
+  GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+} from "@ai-development-environment/agent-contract/build-data";
 
 import { BuildDataService } from "./build-data.service";
 
@@ -169,7 +173,11 @@ describe("BuildDataService", () => {
             ],
           }),
           error: null,
-          payloadJson: "{}",
+          payloadJson: JSON.stringify({
+            targets: [
+              { path: "/DerivedData/App-hash", rootPath: "/DerivedData" },
+            ],
+          }),
           createdAt: new Date(1),
         },
       ],
@@ -441,6 +449,108 @@ describe("BuildDataService", () => {
       }),
     );
   });
+
+  test.each(["calculateSizes", "deleteEntries"] as const)(
+    "%s requires cache-only support when a different worktree occupies the recorded path",
+    async (operation) => {
+      const rootPath = "/Builds/.android-gradle/old";
+      const path = `${rootPath}/cdb4ee2aea69cc6a`;
+      const collection = collectionWithOperation({
+        id: "previous-size",
+        kind: "buildData.size",
+        resultJson: JSON.stringify({
+          sizes: [{ path, sizeBytes: 6000, error: null }],
+        }),
+      });
+      collection.jobs[0]!.resultJson = JSON.stringify({
+        entries: [
+          {
+            path,
+            rootPath,
+            kind: "GRADLE_PROJECT",
+            name: "App",
+            workspacePath: "/Repos/App",
+          },
+        ],
+        warnings: [],
+      });
+      collection.jobs[1]!.payloadJson = JSON.stringify({
+        targets: [{ path, rootPath }],
+      });
+      const currentAgent = agent();
+      const owner = {
+        id: "replacement",
+        folder: "/Repos/App",
+        gitDirectory: "/Repos/.git/worktrees/App",
+        codebase: { agentId: currentAgent.id },
+      };
+      getPrismaClient.mockResolvedValue({
+        ...unlockedEntries(),
+        buildDataDeletionHistory: { deleteMany: vi.fn() },
+        buildDataCollection: {
+          findUnique: vi.fn().mockResolvedValue(collection),
+        },
+        worktree: {
+          findMany: vi.fn().mockResolvedValue([owner]),
+        },
+        agent: { findUnique: vi.fn().mockResolvedValue(currentAgent) },
+        derivedDataCleanupLease: { create: vi.fn(), updateMany: vi.fn() },
+      });
+      const createJob = vi.fn().mockResolvedValue({ id: "operation-1" });
+      const service = new BuildDataService({
+        registerCompletionHandler: vi.fn(),
+        createJob,
+      } as unknown as AgentControlService);
+      const snapshot = await service.getCollection(collection.id);
+      const entry = snapshot!.entries[0]!;
+      expect(entry).toMatchObject({ status: "UNLINKED", sizeBytes: null });
+      const submit = () =>
+        service[operation](collection.id, [entry.id], "request");
+      await expect(submit()).rejects.toThrow("Update Builder");
+      expect(createJob).not.toHaveBeenCalled();
+
+      currentAgent.capabilitiesJson = JSON.stringify([
+        ...JSON.parse(currentAgent.capabilitiesJson),
+        GRADLE_CACHE_ONLY_CAPABILITY,
+      ]);
+      await submit();
+      expect(createJob).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: {
+            targets: [
+              expect.objectContaining({ path, rootPath, cacheOnly: true }),
+            ],
+          },
+        }),
+      );
+      collection.jobs[1]!.payloadJson = JSON.stringify({
+        targets: [{ path, rootPath, cacheOnly: true }],
+      });
+      expect(
+        (await service.getCollection(collection.id))!.entries[0]?.sizeBytes,
+      ).toBe(6000);
+      owner.id = "old";
+      await expect(submit()).rejects.toThrow("Update Builder");
+      currentAgent.capabilitiesJson = JSON.stringify([
+        ...JSON.parse(currentAgent.capabilitiesJson),
+        GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+      ]);
+      await submit();
+      expect(createJob).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          payload: {
+            targets: [
+              expect.objectContaining({
+                path,
+                rootPath,
+                gitDirectory: owner.gitDirectory,
+              }),
+            ],
+          },
+        }),
+      );
+    },
+  );
 
   test("holds provisional user cleanup leases for the full job timeout", async () => {
     const collection = collectionWithOperation();

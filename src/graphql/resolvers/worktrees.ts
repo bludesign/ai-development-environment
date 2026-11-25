@@ -18,6 +18,7 @@ import type {
   WorktreesService,
 } from "@/services/worktrees";
 import type { GitHubMergeMethod } from "@/services/github";
+import type { AutomaticBuildSettings } from "@/services/builds/builds.service";
 
 function requireAgent(context: GraphQLContext): string {
   if (!context.agentId) throw new Error("Agent authentication is required");
@@ -59,6 +60,9 @@ export const createWorktreeResolvers = (
     destination: (value: { destinationJson: string }) =>
       JSON.parse(value.destinationJson) as unknown,
     createdAt: (value: { createdAt: Date }) => value.createdAt.toISOString(),
+  },
+  WorktreeAutoBuild: {
+    updatedAt: (value: { updatedAt: Date }) => value.updatedAt.toISOString(),
   },
   WorktreeLatestBuildArtifact: {
     metadata: ({ metadataJson }: { metadataJson?: string | null }) => {
@@ -298,6 +302,14 @@ export const createWorktreeResolvers = (
     ) => {
       requireControlPlane(context);
       return service.getMove(id);
+    },
+    worktreeAutoBuild: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.autoBuilds?.get(worktreeId) ?? null;
     },
     worktreeAutoSync: (
       _root: unknown,
@@ -645,6 +657,24 @@ export const createWorktreeResolvers = (
     ) => {
       requireControlPlane(context);
       return service.purgeAll();
+    },
+    configureWorktreeAutoBuild: (
+      _root: unknown,
+      { input }: { input: AutomaticBuildSettings },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      if (!service.autoBuilds)
+        throw new Error("Automatic builds are unavailable");
+      return service.autoBuilds.configure(input);
+    },
+    cancelWorktreeAutoBuild: (
+      _root: unknown,
+      { worktreeId }: { worktreeId: string },
+      context: GraphQLContext,
+    ) => {
+      requireControlPlane(context);
+      return service.autoBuilds?.cancel(worktreeId) ?? false;
     },
     configureWorktreeAutoSync: (
       _root: unknown,

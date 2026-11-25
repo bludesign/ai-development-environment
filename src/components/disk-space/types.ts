@@ -1,4 +1,5 @@
 import type { Agent } from "@/components/agents/types";
+import type { DiskSpaceVolumeRole } from "@ai-development-environment/agent-contract/disk-space";
 
 export type DiskSpaceStatus =
   | "DISABLED"
@@ -14,7 +15,7 @@ export type DiskSpaceVolume = {
   id: string;
   totalBytes: number;
   freeBytes: number;
-  roles: Array<"MAIN" | "BASE_REPO" | "DERIVED_DATA">;
+  roles: DiskSpaceVolumeRole[];
   paths: string[];
   status: DiskSpaceStatus;
   effectiveThresholdBytes: number;
@@ -62,9 +63,7 @@ export const AGENT_DISK_SPACE_FIELDS = `
 `;
 
 /**
- * The volume the free-space indicators represent: the Derived Data volume,
- * which is the only one monitoring acts on. Agents reporting Derived Data
- * across several volumes fall back to the one with the least free space.
+ * The monitored build data volume with the least free space.
  */
 export function monitoredVolume(
   agent: Pick<AgentDiskSpace, "volumes">,

@@ -1,5 +1,11 @@
 import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
+  ANDROID_BUILD_JOB_KIND,
+  AUTO_BUILD_READINESS_CAPABILITY,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
+  IOS_BUILD_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
+import {
   act,
   cleanup,
   fireEvent,
@@ -17,7 +23,11 @@ import {
 } from "@/lib/control-plane-client";
 
 import { WorktreeDetailPage } from "./worktree-detail-page";
-import type { WorktreeDetail, WorktreeOverview } from "./types";
+import type {
+  WorktreeAutoBuild,
+  WorktreeDetail,
+  WorktreeOverview,
+} from "./types";
 
 vi.mock("@/lib/control-plane-client", () => ({
   onControlPlaneRecovery: vi.fn(() => vi.fn()),
@@ -75,6 +85,7 @@ class ResizeObserverMock {
 function overview(
   overrides: {
     online?: boolean;
+    autoBuild?: WorktreeAutoBuild | null;
     iosBuildConfigured?: boolean;
     worktrees?: WorktreeOverview["agents"][number]["codebases"][number]["worktrees"];
   } = {},
@@ -212,6 +223,7 @@ function overview(
                   },
                 ],
                 activeJob: null,
+                autoBuild: overrides.autoBuild ?? null,
                 lastCheckedAt: now,
                 missingAt: null,
                 createdAt: now,
@@ -784,9 +796,15 @@ describe("WorktreeDetailPage", () => {
   });
 
   test("keeps saved metadata read-only when the agent is offline", async () => {
-    request.mockResolvedValue({
-      worktreeOverview: overview({ online: false }),
-    } as never);
+    request.mockImplementation(
+      async (query) =>
+        (query.includes("WorktreeAutoBuildOptions")
+          ? {
+              buildConfigurations: [],
+              androidBuildConfigurations: [],
+            }
+          : { worktreeOverview: overview({ online: false }) }) as never,
+    );
 
     render(<WorktreeDetailPage worktreeId="worktree-1" />);
 
@@ -796,6 +814,155 @@ describe("WorktreeDetailPage", () => {
       request.mock.calls.some(([query]) => query.includes("InspectWorktree")),
     ).toBe(false);
   });
+
+  test("configures an Android build, shows live rule changes and can disable it", async () => {
+    let overviewSink: { next: (value: unknown) => void } | undefined;
+    subscriptions.mockReturnValue({
+      subscribe: vi.fn(
+        (operation: { query: string }, sink: typeof overviewSink) => {
+          if (operation.query.includes("WorktreeDetailChanged"))
+            overviewSink = sink;
+          return vi.fn();
+        },
+      ),
+    } as never);
+    const saved = {
+      worktreeId: "worktree-1",
+      configurationId: "android-debug",
+      platform: "ANDROID",
+      destinationType: "HOST",
+      lastQueuedHeadSha: null,
+      lastQueuedBuildId: null,
+      lastError: null,
+    } satisfies WorktreeAutoBuild & { worktreeId: string };
+    let rule: WorktreeAutoBuild | null = null;
+    let online = true;
+    request.mockImplementation(async (query) => {
+      if (query.includes("WorktreeAutoBuildOptions")) {
+        return {
+          buildConfigurations: [
+            { id: "ios", name: "iOS Debug", platformConfigurations: [] },
+          ],
+          androidBuildConfigurations: [
+            { id: "android-debug", name: "Android Debug" },
+          ],
+        } as never;
+      }
+      if (query.includes("mutation ConfigureWorktreeAutoBuild")) {
+        rule = saved;
+        return { configureWorktreeAutoBuild: rule } as never;
+      }
+      if (query.includes("mutation CancelWorktreeAutoBuild")) {
+        rule = null;
+        return { cancelWorktreeAutoBuild: true } as never;
+      }
+      const data = overview({ online, autoBuild: rule });
+      data.agents[0]!.agent.capabilities = [
+        CLEAN_WORKTREE_BUILD_CAPABILITY,
+        AUTO_BUILD_READINESS_CAPABILITY,
+        ANDROID_BUILD_JOB_KIND,
+      ];
+      return { worktreeOverview: data } as never;
+    });
+
+    render(<WorktreeDetailPage worktreeId="worktree-1" />);
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Configure Auto Build" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Configure Auto Build" });
+    expect(within(dialog).getByText("Android Debug")).toBeDefined();
+    expect(within(dialog).getByText("Agent host")).toBeDefined();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Enable Auto Build" }),
+    );
+    expect(
+      await screen.findByText("Android Debug · Android · Agent host"),
+    ).toBeDefined();
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation ConfigureWorktreeAutoBuild"),
+      {
+        input: {
+          worktreeId: "worktree-1",
+          configurationId: "android-debug",
+          platform: "ANDROID",
+          destinationType: "HOST",
+        },
+      },
+    );
+
+    online = false;
+    rule = { ...saved, lastError: "Agent is offline" };
+    expect(overviewSink).toBeDefined();
+    overviewSink!.next({
+      data: {
+        worktreeOverviewChanged: {
+          worktreeId: "worktree-1",
+          codebaseId: "codebase-1",
+        },
+      },
+    });
+    expect(
+      await screen.findByText("Agent is offline", { exact: true }),
+    ).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: "Configure Auto Build" }),
+    ).toBeNull();
+    expect(
+      screen.getByText("Android Debug · Android · Agent host"),
+    ).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable Auto Build" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Disable Auto Build" }),
+      ).toBeNull(),
+    );
+    expect(request).toHaveBeenCalledWith(
+      expect.stringContaining("mutation CancelWorktreeAutoBuild"),
+      { worktreeId: "worktree-1" },
+    );
+  });
+
+  test.each([
+    {
+      capabilities: [CLEAN_WORKTREE_BUILD_CAPABILITY, ANDROID_BUILD_JOB_KIND],
+      reason: "Update the agent to configure Auto Build.",
+    },
+    {
+      capabilities: [
+        CLEAN_WORKTREE_BUILD_CAPABILITY,
+        AUTO_BUILD_READINESS_CAPABILITY,
+        IOS_BUILD_JOB_KIND,
+      ],
+      reason: "This agent cannot build any of the configured platforms.",
+    },
+  ])(
+    "explains why the agent cannot configure Auto Build: $reason",
+    async ({ capabilities, reason }) => {
+      const data = overview();
+      data.agents[0]!.agent.capabilities = capabilities;
+      request.mockImplementation(async (query) => {
+        if (query.includes("WorktreeAutoBuildOptions"))
+          return {
+            buildConfigurations: [
+              {
+                id: "mac",
+                name: "Mac",
+                platformConfigurations: [{ platform: "MACOS" }],
+              },
+            ],
+            androidBuildConfigurations: [{ id: "android", name: "Android" }],
+          } as never;
+        return { worktreeOverview: data } as never;
+      });
+      render(<WorktreeDetailPage worktreeId="worktree-1" />);
+      await screen.findByText(reason);
+      expect(
+        screen.queryByRole("button", { name: "Configure Auto Build" }),
+      ).toBeNull();
+    },
+  );
 
   test("shows a paused conflict and cancels its rebase inline", async () => {
     let cancelled = false;
@@ -1005,7 +1172,12 @@ describe("WorktreeDetailPage", () => {
     const response = overview({ iosBuildConfigured: true });
     const { agent, codebases } = response.agents[0]!;
     const group = codebases[0]!;
-    agent.capabilities.push("ios.build.run", "android.build.run");
+    agent.capabilities.push(
+      IOS_BUILD_JOB_KIND,
+      ANDROID_BUILD_JOB_KIND,
+      CLEAN_WORKTREE_BUILD_CAPABILITY,
+      AUTO_BUILD_READINESS_CAPABILITY,
+    );
     group.androidProjectEnabled = true;
     group.androidBuildConfigured = false;
     group.worktrees[0]!.latestBuild = null;
@@ -1027,6 +1199,14 @@ describe("WorktreeDetailPage", () => {
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeDetailOverview")) {
         return { worktreeOverview: structuredClone(response) } as never;
+      }
+      if (query.includes("WorktreeAutoBuildOptions")) {
+        return {
+          buildConfigurations: [],
+          androidBuildConfigurations: group.androidBuildConfigured
+            ? [{ id: "debug", name: "Debug" }]
+            : [],
+        } as never;
       }
       if (query.includes("GitHubWorktreeWorkflowRuns")) {
         return { githubWorktreeWorkflowRuns: [] } as never;
@@ -1052,12 +1232,16 @@ describe("WorktreeDetailPage", () => {
         "aria-haspopup",
       ),
     ).toBeNull();
+    await screen.findByText(
+      "Add a build configuration to this repository to enable Auto Build.",
+    );
     group.androidBuildConfigured = true;
     const requestCountBeforeChange = overviewRequestCount();
     notifySettingsChange("unrelated-repository");
     expect(overviewRequestCount()).toBe(requestCountBeforeChange);
 
     notifySettingsChange(group.repository.id);
+    await screen.findByRole("button", { name: "Configure Auto Build" });
     await waitFor(() =>
       expect(buildButton().getAttribute("aria-haspopup")).toBe("menu"),
     );
@@ -1070,6 +1254,9 @@ describe("WorktreeDetailPage", () => {
 
     group.androidBuildConfigured = false;
     notifySettingsChange(group.repository.id);
+    await screen.findByText(
+      "Add a build configuration to this repository to enable Auto Build.",
+    );
     await waitFor(() =>
       expect(buildButton().getAttribute("aria-haspopup")).toBeNull(),
     );

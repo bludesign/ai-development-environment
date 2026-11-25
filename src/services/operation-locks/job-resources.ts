@@ -38,6 +38,8 @@ export type JobResourceInput = {
   blocksGitOperations?: boolean;
 };
 
+export class BuildCheckoutChangedError extends Error {}
+
 export function worktreeOperationResource(
   target: { gitDirectory: string; codebaseId: string },
   agentId: string,
@@ -305,6 +307,15 @@ export async function jobOperationDescriptor(
       },
       include: { codebase: { include: { repository: true } } },
     });
+    if (
+      isBuild &&
+      p.requireCleanWorktree === true &&
+      (!worktree || worktree.missingAt || worktree.availability !== "AVAILABLE")
+    ) {
+      throw new BuildCheckoutChangedError(
+        "The automatic build worktree is unavailable",
+      );
+    }
     if (!worktree) {
       if (read && targetFolder) {
         resources.push({
@@ -369,14 +380,21 @@ export async function jobOperationDescriptor(
       (targetGit && targetGit !== worktree.gitDirectory) ||
       (targetFolder && targetFolder !== worktree.folder) ||
       (input.codebaseId && input.codebaseId !== worktree.codebaseId)
-    )
+    ) {
+      if (isBuild && p.requireCleanWorktree === true)
+        throw new BuildCheckoutChangedError(
+          "The automatic build worktree identity changed",
+        );
       throw new Error("Job target no longer matches its registered worktree");
+    }
     if (
       isBuild &&
-      ((typeof p.branch === "string" && p.branch !== worktree.branch) ||
+      (((typeof p.branch === "string" ||
+        (p.requireCleanWorktree === true && p.branch === null)) &&
+        p.branch !== worktree.branch) ||
         (typeof p.headSha === "string" && p.headSha !== worktree.headSha))
     )
-      throw new Error(
+      throw new BuildCheckoutChangedError(
         "Build source branch or HEAD changed while queued; start a new build",
       );
     resources.push(worktreeOperationResource(worktree, input.agentId, mode));

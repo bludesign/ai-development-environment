@@ -940,6 +940,7 @@ describe("BuildsService", () => {
       data: {
         codeStateHash: "state-after-post-hooks",
         lastCheckedAt: new Date("2026-07-18T20:00:00.000Z"),
+        cleanForAutoBuild: false,
       },
     });
   });

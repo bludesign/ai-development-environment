@@ -203,21 +203,28 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "warnings", description: "Current disk report warnings" },
     {
       name: "monitoredVolumeId",
-      description: "Least-free monitored Derived Data volume id",
+      description:
+        "ID of the monitored build data volume with the least free space",
     },
-    { name: "freeBytes", description: "Monitored Derived Data free bytes" },
-    { name: "totalBytes", description: "Monitored Derived Data total bytes" },
+    {
+      name: "freeBytes",
+      description: "Monitored build data volume free bytes",
+    },
+    {
+      name: "totalBytes",
+      description: "Monitored build data volume total bytes",
+    },
     {
       name: "freeGiB",
-      description: "Monitored Derived Data free space in GiB",
+      description: "Monitored build data volume free space in GiB",
     },
     {
       name: "freePercent",
-      description: "Monitored Derived Data free percentage",
+      description: "Monitored build data volume free percentage",
     },
     {
       name: "usedPercent",
-      description: "Monitored Derived Data used percentage",
+      description: "Monitored build data volume used percentage",
     },
     {
       name: "effectiveThresholdBytes",
@@ -252,9 +259,9 @@ export const SESSION_NAMESPACE_FIELDS: Record<string, NamespaceField[]> = {
     { name: "error", description: "Cleanup error, if any" },
     {
       name: "targets",
-      description: "Derived Data entries selected for cleanup",
+      description: "Build data entries selected for cleanup",
     },
-    { name: "deleted", description: "Derived Data entries reported deleted" },
+    { name: "deleted", description: "Build data entries reported deleted" },
   ],
   command: [
     { name: "id", description: "Command run id" },

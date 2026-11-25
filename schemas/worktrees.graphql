@@ -234,6 +234,26 @@ type WorktreeLatestBuild {
   createdAt: String!
 }
 
+"Build configuration automatically queued after clean worktree updates."
+type WorktreeAutoBuild {
+  "Identifier of the related worktree."
+  worktreeId: ID!
+  "Saved build configuration for this worktree's repository."
+  configurationId: ID!
+  "Platform of the automatic builds."
+  platform: BuildPlatform!
+  "Generic Apple destination type or the Android host."
+  destinationType: BuildDestinationType!
+  "Local commit of the most recent automatic build."
+  lastQueuedHeadSha: String
+  "Identifier of the most recent automatic build, when it still exists."
+  lastQueuedBuildId: ID
+  "Most recent error while dispatching an automatic build."
+  lastError: String
+  "ISO 8601 timestamp when the rule was last updated."
+  updatedAt: String!
+}
+
 "Represents a worktree auto sync in the GraphQL API."
 type WorktreeAutoSync {
   "Identifier of the related worktree."
@@ -467,6 +487,8 @@ type Worktree {
   blockingJob: AgentJob
   "Concurrent queued or executing jobs associated with this worktree."
   activeJobs: [AgentJob!]!
+  "Enabled automatic build rule for this worktree."
+  autoBuild: WorktreeAutoBuild
   "The auto sync associated with this worktree. May be null when unavailable or not applicable."
   autoSync: WorktreeAutoSync
   "The auto merge associated with this worktree. May be null when unavailable or not applicable."
@@ -1265,6 +1287,8 @@ input WorktreeInventoryInput {
   hasStagedChanges: Boolean
   "Whether has unstaged changes applies to the request."
   hasUnstagedChanges: Boolean
+  "Whether the checkout has no changes, including inside submodules, and no merge or rebase in progress."
+  cleanForAutoBuild: Boolean
   "Whether rebase in progress applies to the request."
   rebaseInProgress: Boolean
   "Whether has conflicts applies to the request."
@@ -1331,6 +1355,8 @@ input WorktreeActivityReportInput {
   hasStagedChanges: Boolean
   "Whether has unstaged changes applies to the request."
   hasUnstagedChanges: Boolean
+  "Whether the checkout has no changes, including inside submodules, and no merge or rebase in progress."
+  cleanForAutoBuild: Boolean
   "Whether rebase in progress applies to the request."
   rebaseInProgress: Boolean
   "Whether has conflicts applies to the request."
@@ -1471,6 +1497,18 @@ input DeleteWorktreeInput {
   requestId: ID!
 }
 
+"Values used to enable automatic builds for a worktree."
+input ConfigureWorktreeAutoBuildInput {
+  "Identifier of the worktree to build."
+  worktreeId: ID!
+  "Saved configuration for the worktree's repository."
+  configurationId: ID!
+  "Platform to build."
+  platform: BuildPlatform!
+  "Generic Apple destination type or the Android host."
+  destinationType: BuildDestinationType!
+}
+
 "Values used to configure a worktree auto sync."
 input ConfigureWorktreeAutoSyncInput {
   "Identifier of the worktree to use."
@@ -1563,6 +1601,11 @@ extend type Query {
     "Identifier of the resource to return or affect."
     id: ID!
   ): WorktreeMove
+  "Returns the automatic build rule for a worktree when enabled."
+  worktreeAutoBuild(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): WorktreeAutoBuild
   "Returns a worktree auto sync, or null when it cannot be found."
   worktreeAutoSync(
     "Identifier of the worktree."
@@ -1709,6 +1752,16 @@ extend type Mutation {
   ): Boolean!
   "Purges all hidden worktrees and returns the number of affected records."
   purgeAllHiddenWorktrees: Int!
+  "Enables automatic builds for future clean local revisions of a worktree."
+  configureWorktreeAutoBuild(
+    "Build settings for this worktree."
+    input: ConfigureWorktreeAutoBuildInput!
+  ): WorktreeAutoBuild!
+  "Disables automatic builds for this worktree."
+  cancelWorktreeAutoBuild(
+    "Identifier of the worktree."
+    worktreeId: ID!
+  ): Boolean!
   "Configures a worktree auto sync and returns the updated worktree auto sync."
   configureWorktreeAutoSync(
     "Values for the requested operation."

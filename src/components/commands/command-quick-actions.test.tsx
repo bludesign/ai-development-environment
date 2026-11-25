@@ -54,6 +54,26 @@ const serve = {
   quickActionButtonVariant: "default",
 };
 
+const portBlocker = {
+  id: "blocker",
+  displayNumber: 8,
+  name: "Dev site",
+  status: "RUNNING",
+};
+
+const portConflict = (runs = [portBlocker]) =>
+  Object.assign(new Error("Port conflict"), {
+    code: "COMMAND_PORT_CONFLICT",
+    extensions: {
+      portConflict: {
+        agentId: "agent-1",
+        agentName: "Studio",
+        port: 3000,
+        runs,
+      },
+    },
+  });
+
 /**
  * Routes each call by the operation in its query so a test can describe the
  * eligible commands and the runs those commands currently have.
@@ -249,32 +269,17 @@ describe("CommandQuickActions", () => {
   });
 
   test("asks for consent again when another run takes the same port", async () => {
-    respondWith([], { ...serve, port: 3000 });
+    respondWith([{ ...portBlocker, commandId: serve.id, snapshotPort: 3000 }], {
+      ...serve,
+      port: 3000,
+    });
     const original = request.getMockImplementation()!;
-    const start = vi.fn();
-    const run = {
-      id: "blocker",
-      displayNumber: 8,
-      name: "Dev site",
-      status: "RUNNING",
-    };
-    const conflict = (runs: (typeof run)[]) =>
-      Object.assign(new Error("Port conflict"), {
-        code: "COMMAND_PORT_CONFLICT",
-        extensions: {
-          portConflict: {
-            agentId: "agent-1",
-            agentName: "Studio",
-            port: 3000,
-            runs,
-          },
-        },
-      });
-    start.mockRejectedValueOnce(conflict([run]));
-    start.mockRejectedValueOnce(
-      conflict([run, { ...run, id: "new-blocker", displayNumber: 9 }]),
-    );
-    start.mockResolvedValueOnce({ startCommandRun: { id: "successor" } });
+    const retry = Promise.withResolvers<never>();
+    const start = vi
+      .fn()
+      .mockRejectedValueOnce(portConflict())
+      .mockReturnValueOnce(retry.promise)
+      .mockResolvedValueOnce({ startCommandRun: { id: "successor" } });
     request.mockImplementation((query, variables, options) =>
       query.includes("startCommandRun")
         ? start(variables?.input)
@@ -288,22 +293,34 @@ describe("CommandQuickActions", () => {
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Serve" }));
-    const dialog = await screen.findByRole("alertdialog", {
+    const popover = await screen.findByRole("dialog", {
       name: "Port 3000 is in use",
     });
+    expect(popover.getAttribute("data-slot")).toBe("popover-content");
+    expect(screen.queryByText("Port conflict")).toBeNull();
     expect(
-      within(dialog)
+      within(popover)
         .getByRole("link", { name: "#8 Dev site" })
         .getAttribute("href"),
     ).toBe("/dashboard/commands/runs/blocker");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Continue" }));
-    await within(dialog).findByRole("link", { name: "#9 Dev site" });
+    const runAnyway = within(popover).getByRole("button", {
+      name: "Run anyway",
+    });
+    fireEvent.click(runAnyway);
+    expect(runAnyway.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(runAnyway);
+    expect(start).toHaveBeenCalledTimes(2);
+    retry.reject(
+      portConflict([
+        portBlocker,
+        { ...portBlocker, id: "new-blocker", displayNumber: 9 },
+      ]),
+    );
+    await within(popover).findByRole("link", { name: "#9 Dev site" });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: "Terminate and run" }),
+      within(popover).getByRole("button", { name: "Terminate and run" }),
     );
-    await vi.waitFor(() =>
-      expect(screen.queryByRole("alertdialog")).toBeNull(),
-    );
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     const initial = start.mock.calls[0][0];
     expect(initial.idempotencyKey).toEqual(expect.any(String));
     expect(start.mock.calls[1][0]).toEqual({
@@ -324,6 +341,64 @@ describe("CommandQuickActions", () => {
         runIds: ["blocker", "new-blocker"],
       },
     });
+  });
+
+  test.each(["Cancel", "Escape"])(
+    "dismisses the port warning with %s without retrying the launch",
+    async (dismissal) => {
+      respondWith([], { ...serve, port: 3000 });
+      const original = request.getMockImplementation()!;
+      const start = vi.fn().mockRejectedValue(portConflict());
+      request.mockImplementation((query, variables, options) =>
+        query.includes("startCommandRun")
+          ? start(variables?.input)
+          : original(query, variables, options),
+      );
+      render(
+        <CommandQuickActions
+          agentCapabilities={["command.run"]}
+          agentId="agent-1"
+        />,
+      );
+      const trigger = await screen.findByRole("button", { name: "Serve" });
+      fireEvent.click(trigger);
+      const popover = await screen.findByRole("dialog", {
+        name: "Port 3000 is in use",
+      });
+      const cancel = within(popover).getByRole("button", { name: "Cancel" });
+      await vi.waitFor(() => expect(document.activeElement).toBe(cancel));
+      if (dismissal === "Escape") fireEvent.keyDown(cancel, { key: "Escape" });
+      else fireEvent.click(cancel);
+      await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await vi.waitFor(() => expect(document.activeElement).toBe(trigger));
+      expect(start).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  test("keeps the existing confirmation when restarting from the run menu", async () => {
+    respondWith([
+      { id: "run-1", displayNumber: 7, status: "RUNNING", commandId: "quick" },
+    ]);
+    const original = request.getMockImplementation()!;
+    request.mockImplementation((query, variables, options) =>
+      query.includes("rerunCommandRun")
+        ? Promise.reject(portConflict())
+        : original(query, variables, options),
+    );
+    render(
+      <CommandQuickActions
+        agentCapabilities={["command.run"]}
+        agentId="agent-1"
+      />,
+    );
+    await openRunMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Restart" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Port 3000 is in use",
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Continue" }),
+    ).toBeTruthy();
   });
 
   test("terminates the run the menu was opened for", async () => {

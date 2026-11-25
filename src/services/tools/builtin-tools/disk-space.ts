@@ -1,4 +1,5 @@
 import * as z from "zod/v4";
+import { DISK_SPACE_VOLUME_ROLES } from "@ai-development-environment/agent-contract/disk-space";
 
 import {
   diskSpaceSessionData,
@@ -44,7 +45,7 @@ const VolumeSchema = z.object({
   capacityId: z.string(),
   totalBytes: z.number(),
   freeBytes: z.number(),
-  roles: z.array(z.enum(["MAIN", "BASE_REPO", "DERIVED_DATA"])),
+  roles: z.array(z.enum(DISK_SPACE_VOLUME_ROLES)),
   paths: z.array(z.string()),
   status: StatusSchema,
   effectiveThresholdBytes: z.number(),
@@ -95,7 +96,7 @@ export function createDiskSpaceToolGroup(
         name: "get_disk_space_overview",
         title: "Get disk-space overview",
         description:
-          "Get global thresholds and canonical Derived Data disk snapshots for every agent.",
+          "Get global thresholds and build data disk snapshots for every agent.",
         inputSchema: z.object({}),
         outputSchema: z.object({
           settings: SettingsSchema,
@@ -124,8 +125,7 @@ export function createDiskSpaceToolGroup(
       defineTool({
         name: "get_agent_disk_space",
         title: "Get agent disk space",
-        description:
-          "Get one agent's canonical Derived Data disk-space monitor snapshot.",
+        description: "Get one agent's build data disk-space monitor snapshot.",
         inputSchema: AgentIdSchema,
         outputSchema: z.object({ snapshot: SnapshotSchema }),
         annotations: READ_ONLY_ANNOTATIONS,
@@ -152,7 +152,7 @@ export function createDiskSpaceToolGroup(
         name: "set_agent_disk_space_monitoring",
         title: "Set agent disk-space monitoring",
         description:
-          "Enable or disable Derived Data disk-space monitoring for an agent.",
+          "Enable or disable build data disk-space monitoring for an agent.",
         inputSchema: AgentIdSchema.extend({ enabled: z.boolean() }),
         outputSchema: z.object({ snapshot: SnapshotSchema }),
         annotations: WRITE_ANNOTATIONS,

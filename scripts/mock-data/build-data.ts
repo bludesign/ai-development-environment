@@ -234,4 +234,20 @@ export async function seedBuildData(prisma: PrismaClient): Promise<void> {
       finishedAt: secondsAgo(105),
     })),
   });
+
+  await prisma.buildDataDeletionHistory.create({
+    data: {
+      id: "build-data-deletion-gradle",
+      agentId: ids.agents.studio,
+      agentName: "Studio Mac",
+      folderName: "android",
+      worktreeId: ids.worktrees.webMain,
+      worktreePath: "web-app",
+      source: "AUTOMATIC",
+      entryKind: "GRADLE_PROJECT",
+      jobId: "job-build-data-delete-gradle",
+      targetKey: "build-data-gradle-android",
+      deletedAt: hoursAgo(22),
+    },
+  });
 }

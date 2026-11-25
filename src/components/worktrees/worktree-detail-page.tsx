@@ -89,6 +89,7 @@ import {
   WorktreeDetailPanel,
 } from "./worktree-detail-panel";
 import { WorktreeErrorAlert } from "./worktree-error-alert";
+import { WorktreeAutoBuildCard } from "./worktree-auto-build-card";
 import { WorktreeMergeFollowUps } from "./worktree-merge-follow-ups";
 import {
   CODEBASE_FIELDS,
@@ -148,7 +149,10 @@ export const WORKTREE_DETAIL_OVERVIEW_QUERY = `query WorktreeDetailOverview($wor
         failingPipelineQuickActions { ${WORKTREE_QUICK_ACTION_FIELDS} }
         repository { id canonicalOrigin displayOrigin name description jiraBranchRegex defaultBranchPatterns keepBaseBranchUpToDate createdAt updatedAt }
         codebase { ${CODEBASE_FIELDS} }
-        worktrees { gitLabProjectId ${WORKTREE_FIELDS} ${WORKTREE_HEAD_PIPELINE_FIELDS} }
+        worktrees {
+          gitLabProjectId ${WORKTREE_FIELDS} ${WORKTREE_HEAD_PIPELINE_FIELDS}
+          autoBuild { configurationId platform destinationType lastQueuedHeadSha lastQueuedBuildId lastError }
+        }
       }
     }
   }
@@ -192,6 +196,7 @@ function replaceIssueParam(issueKey: string | null) {
 export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
   const t = useTranslations("worktreeDetail");
   const [overview, setOverview] = useState<WorktreeOverview | null>(null);
+  const [repositorySettingsVersion, setRepositorySettingsVersion] = useState(0);
   const [builds, setBuilds] = useState<BuildRecord[]>([]);
   const [buildsNextCursor, setBuildsNextCursor] = useState<string | null>(null);
   const [buildsLoadingMore, setBuildsLoadingMore] = useState(false);
@@ -469,6 +474,7 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
             change?.codebaseId === null &&
             change.repositoryId === displayedWorktree.current?.repositoryId
           ) {
+            setRepositorySettingsVersion((version) => version + 1);
             live.invalidate();
           }
         },
@@ -637,8 +643,10 @@ export function WorktreeDetailPage({ worktreeId }: { worktreeId: string }) {
       buildsLoadingMore={buildsLoadingMore}
       buildsNextCursor={buildsNextCursor}
       entry={entry}
+      repositorySettingsVersion={repositorySettingsVersion}
       key={entry.worktree.id}
       loadError={error}
+      onAutoBuildChanged={loadOverview}
       onLoadMoreBuilds={loadMoreBuilds}
       onPipelineCancelled={() => undefined}
       onPipelineRetried={() => undefined}
@@ -660,11 +668,13 @@ function LoadedWorktreeDetail({
   buildsLoadingMore,
   buildsNextCursor,
   entry,
+  repositorySettingsVersion,
   overview,
   pipelines,
   pipelinesError,
   queue,
   loadError,
+  onAutoBuildChanged,
   onLoadMoreBuilds,
   onPipelineCancelled,
   onPipelineRetried,
@@ -678,11 +688,13 @@ function LoadedWorktreeDetail({
   buildsLoadingMore: boolean;
   buildsNextCursor: string | null;
   entry: WorktreeOverviewEntry;
+  repositorySettingsVersion: number;
   overview: WorktreeOverview;
   pipelines: GitHubActionsWorkflowRunView[];
   pipelinesError: string | null;
   queue: WorktreeRunQueueEntry[];
   loadError: string | null;
+  onAutoBuildChanged: () => Promise<void>;
   onLoadMoreBuilds: () => Promise<void>;
   onPipelineCancelled: (runId: string) => void;
   onPipelineRetried: (runId: string) => void;
@@ -1056,6 +1068,19 @@ function LoadedWorktreeDetail({
         />
       )}
 
+      <WorktreeAutoBuildCard
+        key={worktree.id}
+        agent={entry.agentGroup.agent}
+        worktreeAvailable={
+          worktree.availability === "AVAILABLE" && !worktree.missingAt
+        }
+        worktreeId={worktree.id}
+        repositoryId={entry.group.repository.id}
+        repositorySettingsVersion={repositorySettingsVersion}
+        lastCheckedAt={worktree.lastCheckedAt}
+        rule={worktree.autoBuild ?? null}
+        onRuleChanged={onAutoBuildChanged}
+      />
       <WorktreeBuildTable
         builds={builds}
         loadingMore={buildsLoadingMore}

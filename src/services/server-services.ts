@@ -209,6 +209,7 @@ function createServerServices(): ServerServices {
     gitHubPipelineStatusService,
     gitLabService,
     notificationsService,
+    buildsService,
   );
   const reviewersService = new ReviewersService(
     new ReviewerProviders(gitHubService, gitLabService),
@@ -376,6 +377,7 @@ function createServerServices(): ServerServices {
   workflowEventBridge.start();
   workflowsService.startRuntime();
   worktreeAutomationService.startRuntime();
+  worktreesService.autoBuilds?.startRuntime();
   worktreesService.syncBatches.startRuntime(pollingService);
   worktreesService.branchBatches.startRuntime(pollingService);
   const gitLabMergeService = new GitLabMergeService(

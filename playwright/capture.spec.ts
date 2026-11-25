@@ -103,9 +103,41 @@ test.describe("app screenshots", () => {
       if (route.jiraProjectSettings) await stubJiraProjectSettings(page);
       if (route.stubJiraCacheTicket) await stubJiraCacheTicket(page);
       if (route.commandPortCapture === "conflict") {
-        await page.route("**/api/graphql", (request) => {
-          if (!request.request().postData()?.includes("startCommandRun("))
-            return request.fallback();
+        const conflictingRun = {
+          id: ids.commandRuns.devServer,
+          displayNumber: displayNumbers.commandRuns.devServer,
+          name: "Start Dev Server",
+          status: "RUNNING",
+        };
+        await page.route("**/api/graphql", async (request) => {
+          const query = request.request().postDataJSON()?.query as
+            string | undefined;
+          if (query?.includes("query CommandTargetSummaries(")) {
+            const response = await request.fetch();
+            const json = (await response.json()) as {
+              data?: {
+                commandTargetSummaries: Array<{
+                  resourceId: string;
+                  activeRuns: unknown[];
+                }>;
+              };
+            };
+            const target = json.data?.commandTargetSummaries.find(
+              ({ resourceId }) => resourceId === ids.worktrees.webFeature,
+            );
+            if (target) {
+              target.activeRuns.push({
+                id: conflictingRun.id,
+                displayNumber: conflictingRun.displayNumber,
+                status: conflictingRun.status,
+                commandId: ids.commands.devServer,
+                snapshotPort: 3000,
+                tailscaleAddresses: [],
+              });
+            }
+            return request.fulfill({ response, json });
+          }
+          if (!query?.includes("startCommandRun(")) return request.fallback();
           return request.fulfill({
             json: {
               data: null,
@@ -118,14 +150,7 @@ test.describe("app screenshots", () => {
                       agentId: ids.agents.studio,
                       agentName: "Studio Mac",
                       port: 3000,
-                      runs: [
-                        {
-                          id: ids.commandRuns.devServer,
-                          displayNumber: displayNumbers.commandRuns.devServer,
-                          name: "Start Dev Server",
-                          status: "RUNNING",
-                        },
-                      ],
+                      runs: [conflictingRun],
                     },
                   },
                 },
@@ -309,12 +334,28 @@ test.describe("app screenshots", () => {
         ).toBeVisible();
       }
       if (route.commandPortCapture === "conflict") {
-        await page
-          .getByRole("button", { name: "Start Dev Server", exact: true })
-          .first()
-          .click();
+        const runningMenu = page.getByRole("button", {
+          name: "Manage running Start Dev Server",
+        });
+        const quickAction = runningMenu.locator("..").getByRole("button", {
+          name: "Start Dev Server",
+          exact: true,
+        });
+        await quickAction.click();
+        const warning = page.getByRole("dialog", {
+          name: "Port 3000 is in use",
+        });
+        await expect(warning).toHaveAttribute("data-slot", "popover-content");
         await expect(
-          page.getByRole("button", { name: /^Terminate and run$/i }),
+          warning.getByRole("button", { name: "Run anyway" }),
+        ).toBeVisible();
+        await expect(
+          warning.getByRole("button", { name: "Terminate and run" }),
+        ).toBeVisible();
+        await expect(
+          warning.getByRole("link", {
+            name: `#${displayNumbers.commandRuns.devServer} Start Dev Server`,
+          }),
         ).toBeVisible();
       }
       if (route.simulatorAutomation === "tools") {
@@ -726,11 +767,18 @@ test.describe("app screenshots", () => {
       await waitForVisualSettle(page);
       await normalizeScreenshotValues(page);
 
-      await page.screenshot({
+      const screenshot = {
         path: `screenshots/${testInfo.project.name}/${route.name}.png`,
-        fullPage: route.fullPage ?? true,
-        animations: "disabled",
-      });
+        animations: "disabled" as const,
+      };
+      if (route.screenshotTarget) {
+        await page.locator(route.screenshotTarget).screenshot(screenshot);
+      } else {
+        await page.screenshot({
+          ...screenshot,
+          fullPage: route.fullPage ?? true,
+        });
+      }
 
       expect(
         response,

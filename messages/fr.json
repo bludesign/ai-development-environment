@@ -1189,7 +1189,7 @@
       },
       "WORKTREE_CLEANUP_FAILED": {
         "title": "Échec du nettoyage des données de build du worktree",
-        "description": "Les données de build Xcode d’un worktree supprimé n’ont pas pu être effacées."
+        "description": "Certaines données de build d’un worktree supprimé n’ont pas pu être effacées."
       },
       "GITHUB_PULL_REQUEST_APPROVED": {
         "title": "Pull request approuvée",
@@ -1593,7 +1593,7 @@
   },
   "diskSpace": {
     "title": "Surveillance de l’espace disque",
-    "description": "Surveille chaque volume d’agent et récupère automatiquement les Derived Data sûres les plus anciennes quand l’espace manque.",
+    "description": "Surveille le stockage des builds et supprime automatiquement les caches Xcode et Gradle éligibles lorsque l’espace vient à manquer.",
     "loading": "Chargement des rapports de disque…",
     "settings": "Paramètres",
     "normalThreshold": "Seuil de nettoyage (Gio)",
@@ -1621,7 +1621,8 @@
     "role": {
       "MAIN": "Disque principal",
       "BASE_REPO": "Dépôt de base",
-      "DERIVED_DATA": "Données dérivées"
+      "DERIVED_DATA": "Données dérivées",
+      "GRADLE_BUILD_DATA": "Données de build Gradle"
     },
     "status": {
       "DISABLED": "Désactivé",
@@ -1762,7 +1763,7 @@
     "deleteDeviceSupportDescription": "Supprimer définitivement {count} dossiers ? Xcode peut les recréer à la connexion d’un appareil compatible.",
     "refresh": "Actualiser",
     "calculateSizes": "Calculer les tailles",
-    "loading": "Analyse de Derived Data…",
+    "loading": "Analyse des données de build…",
     "emptyTitle": "Aucune Derived Data trouvée",
     "emptyDescription": "Les répertoires DerivedData configurés ne contiennent aucune entrée.",
     "progress": "{complete} agents analysés sur {total} éligibles",
@@ -1788,13 +1789,13 @@
     "deleteTitle": "Supprimer Derived Data ?",
     "deleteDescription": "Supprimer définitivement {count} entrées sélectionnées ? Cette action est irréversible.",
     "history": "Historique des suppressions",
-    "historyDescription": "Derived Data supprimées des agents inscrits au cours des 90 derniers jours.",
+    "historyDescription": "Données de build supprimées des agents inscrits au cours des 90 derniers jours.",
     "clearHistory": "Effacer l’historique",
     "clearHistoryTitle": "Effacer l’historique ?",
     "clearHistoryDescription": "Supprimer tous les enregistrements conservés ? Cela n’affecte pas les fichiers des agents.",
-    "clearAgentHistoryDescription": "Supprimer les enregistrements de suppression de Derived Data de l’agent sélectionné ? Cette action ne modifie aucun fichier sur l’agent.",
+    "clearAgentHistoryDescription": "Supprimer les enregistrements de suppression de données de build de l’agent sélectionné ? Seul l’historique est effacé.",
     "loadingHistory": "Chargement de l’historique…",
-    "noHistory": "Aucune Derived Data n’a encore été supprimée.",
+    "noHistory": "Aucune donnée de build n’a encore été supprimée.",
     "deleted": "Supprimé",
     "sourceLabel": "Source",
     "loadMore": "Charger plus",
@@ -5947,6 +5948,7 @@
     "portConflictTitle": "Le port {port} est utilisé",
     "portConflictDescription": "Les exécutions suivantes utilisent ce port sur {agent} ou attendent de l’utiliser. Si vous continuez, la commande risque d’échouer.",
     "portConflictContinue": "Continuer",
+    "portConflictRunAnyway": "Exécuter quand même",
     "portConflictTerminate": "Arrêter et exécuter",
     "portConflictCancelStep": "Annuler la commande",
     "queuedWaitingForPort": "En attente de la libération du port par les autres exécutions.",
@@ -6699,6 +6701,30 @@
     "directoryStale": "Périmé",
     "directoryRefresh": "Actualiser le répertoire",
     "directoryDelete": "Supprimer le répertoire"
+  },
+  "worktreeAutoBuild": {
+    "agentOffline": "Reconnectez l’agent pour configurer la compilation automatique.",
+    "worktreeUnavailable": "Rétablissez l’accès à cet arbre de travail pour configurer la compilation automatique.",
+    "updateAgent": "Mettez à jour l’agent pour configurer la compilation automatique.",
+    "noCompatibleConfigurations": "Cet agent ne peut compiler pour aucune des plateformes configurées.",
+    "title": "Compilation automatique",
+    "enabled": "Activée",
+    "description": "Compilez le prochain commit extrait dès que cet arbre de travail est propre.",
+    "noConfigurations": "Ajoutez une configuration de compilation à ce dépôt pour activer la compilation automatique.",
+    "configure": "Configurer la compilation automatique",
+    "configuration": "Configuration de compilation",
+    "platform": "Plateforme",
+    "destination": "Cible",
+    "enable": "Activer la compilation automatique",
+    "save": "Enregistrer la compilation automatique",
+    "disable": "Désactiver la compilation automatique",
+    "lastQueuedBuild": "Dernière compilation mise en file d’attente",
+    "missingConfiguration": "Configuration indisponible",
+    "retry": "Réessayer",
+    "SIMULATOR": "Tout simulateur",
+    "PHYSICAL_DEVICE": "Tout appareil physique",
+    "LOCAL_MAC": "Tout Mac",
+    "HOST": "Hôte de l’agent"
   },
   "worktreeSettings": {
     "title": "Arbres de travail",

@@ -14,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { tmpdir } from "node:os";
+import { MANAGED_GRADLE_CACHE_DIRECTORY } from "@ai-development-environment/agent-contract/build-data";
 import {
   ANDROID_BUILD_DESTINATION,
   androidAssembleTask,
@@ -29,6 +30,7 @@ import { bootAndroidAvd, runningAndroidAvds } from "../android-simulators.js";
 import { captureCommand } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
 import { withRepositoryMetadata } from "../repository-metadata.js";
+import { gradleCheckoutIdentity } from "./build-data.js";
 import {
   BuildLogger,
   containedPath,
@@ -489,12 +491,13 @@ export const runAndroidBuild: AgentJobHandler = async (
     Math.min(timeoutMs, 60_000),
     signal,
   );
-  await verifyQueuedBuildCheckout(
+  const skipped = await verifyQueuedBuildCheckout(
     root,
     input,
     Math.min(timeoutMs, 60_000),
     signal,
   );
+  if (skipped) return skipped;
   const project = await checkedPath(root, settings.projectPath);
   const gradlew = await checkedPath(
     root,
@@ -513,7 +516,7 @@ export const runAndroidBuild: AgentJobHandler = async (
   const artifactRoot = dirname(input.artifactDirectory);
   const expectedCache = join(
     artifactRoot,
-    ".android-gradle",
+    MANAGED_GRADLE_CACHE_DIRECTORY,
     input.worktreeId,
     hash,
   );
@@ -532,6 +535,7 @@ export const runAndroidBuild: AgentJobHandler = async (
   );
   const recordPath = join(cache, ".aide-android-gradle.json");
   const recordTemp = `${recordPath}.${randomUUID()}`;
+  const checkoutIdentity = await gradleCheckoutIdentity(input.gitDirectory);
   const modules = new Set([settings.module]);
   try {
     const info = await lstat(recordPath);
@@ -540,6 +544,7 @@ export const runAndroidBuild: AgentJobHandler = async (
       if (
         prior.worktreeId === input.worktreeId &&
         prior.worktreePath === root &&
+        prior.checkoutIdentity === checkoutIdentity &&
         prior.projectPath === settings.projectPath
       ) {
         for (const gradleModule of [
@@ -566,6 +571,7 @@ export const runAndroidBuild: AgentJobHandler = async (
       JSON.stringify({
         worktreeId: input.worktreeId,
         worktreePath: root,
+        checkoutIdentity,
         projectPath: settings.projectPath,
         module: settings.module,
         modules: [...modules].slice(0, 50),

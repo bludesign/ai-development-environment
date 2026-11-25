@@ -1,4 +1,5 @@
 import { posix, win32 } from "node:path";
+import { MANAGED_GRADLE_CACHE_DIRECTORY } from "@ai-development-environment/agent-contract/build-data";
 
 type BuildDirectoryAgent = {
   baseRepoDirectory: string | null;
@@ -31,6 +32,10 @@ export function managedDerivedDataRoot(buildsDirectory: string): string {
       ? win32
       : posix;
   return paths.join(buildsDirectory, ".worktree-derived-data");
+}
+
+export function managedGradleRoot(buildsDirectory: string): string {
+  return posix.join(buildsDirectory, MANAGED_GRADLE_CACHE_DIRECTORY);
 }
 
 export function worktreeDerivedDataDirectory(

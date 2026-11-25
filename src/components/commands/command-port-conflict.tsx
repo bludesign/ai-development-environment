@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import {
@@ -11,6 +12,14 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+} from "@/components/ui/popover";
 import { Link } from "@/i18n/navigation";
 
 import { commandStatusKey } from "./types";
@@ -111,9 +120,80 @@ export function CommandPortConflictRuns({
   );
 }
 
+function CommandPortConflictPopover({
+  actions,
+  anchor,
+  conflict,
+  dismiss,
+  error,
+  resolving,
+}: {
+  actions: ReactNode;
+  anchor: HTMLButtonElement;
+  conflict: CommandPortConflict;
+  dismiss: () => void;
+  error: ReactNode;
+  resolving: boolean;
+}) {
+  const t = useTranslations("commands");
+  const titleId = useId();
+  const descriptionId = useId();
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(true);
+
+  return (
+    <Popover open onOpenChange={(open) => !open && dismiss()}>
+      <PopoverAnchor virtualRef={{ current: anchor }} />
+      <PopoverContent
+        align="start"
+        aria-describedby={descriptionId}
+        aria-labelledby={titleId}
+        className="w-[min(25rem,calc(100vw-2rem))] p-3"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          if (restoreFocus.current) anchor.focus();
+        }}
+        onInteractOutside={(event) => {
+          if (resolving) event.preventDefault();
+          else restoreFocus.current = false;
+        }}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          cancelButton.current?.focus();
+        }}
+      >
+        <PopoverHeader>
+          <PopoverTitle className="flex items-center gap-2" id={titleId}>
+            <TriangleAlert aria-hidden className="size-4 text-amber-500" />
+            {t("portConflictTitle", { port: conflict.port })}
+          </PopoverTitle>
+          <PopoverDescription id={descriptionId}>
+            {t("portConflictDescription", { agent: conflict.agentName })}
+          </PopoverDescription>
+        </PopoverHeader>
+        <CommandPortConflictRuns runs={conflict.runs} />
+        {error}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button
+            disabled={resolving}
+            onClick={dismiss}
+            ref={cancelButton}
+            size="sm"
+            variant="ghost"
+          >
+            {t("cancel")}
+          </Button>
+          {actions}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function useCommandPortConflict() {
   const t = useTranslations("commands");
   const [pending, setPending] = useState<{
+    anchor?: HTMLButtonElement;
     conflict: CommandPortConflict;
     submit: Submission;
   } | null>(null);
@@ -123,6 +203,7 @@ export function useCommandPortConflict() {
   const submit = async (
     perform: Submission,
     onError: (error: string) => void,
+    anchor?: HTMLButtonElement,
   ) => {
     try {
       await perform();
@@ -130,7 +211,7 @@ export function useCommandPortConflict() {
       const conflict = readConflict(value);
       if (conflict) {
         setError(null);
-        setPending({ conflict, submit: perform });
+        setPending({ anchor, conflict, submit: perform });
       } else onError(value instanceof Error ? value.message : String(value));
     }
   };
@@ -157,14 +238,52 @@ export function useCommandPortConflict() {
     }
   };
 
+  const dismiss = () => {
+    if (!resolving) setPending(null);
+  };
+  const retryError = error && (
+    <p className="text-sm text-destructive" role="alert">
+      {error}
+    </p>
+  );
+  const retryButtons = (
+    <>
+      <Button
+        disabled={resolving}
+        onClick={() => void resolve("CONTINUE")}
+        size={pending?.anchor ? "sm" : undefined}
+        variant="outline"
+      >
+        {t(pending?.anchor ? "portConflictRunAnyway" : "portConflictContinue")}
+      </Button>
+      <Button
+        disabled={resolving}
+        onClick={() => void resolve("TERMINATE_AND_RUN")}
+        size={pending?.anchor ? "sm" : undefined}
+        variant="destructive"
+      >
+        {t("portConflictTerminate")}
+      </Button>
+    </>
+  );
+
   return {
     submit,
     pending: Boolean(pending),
-    dialog: (
+    dialog: pending?.anchor ? (
+      <CommandPortConflictPopover
+        actions={retryButtons}
+        anchor={pending.anchor}
+        conflict={pending.conflict}
+        dismiss={dismiss}
+        error={retryError}
+        resolving={resolving}
+      />
+    ) : (
       <AlertDialog
         open={Boolean(pending)}
         onOpenChange={(open) => {
-          if (!open && !resolving) setPending(null);
+          if (!open) dismiss();
         }}
       >
         {pending && (
@@ -180,29 +299,12 @@ export function useCommandPortConflict() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <CommandPortConflictRuns runs={pending.conflict.runs} />
-            {error && (
-              <p className="text-sm text-destructive" role="alert">
-                {error}
-              </p>
-            )}
+            {retryError}
             <AlertDialogFooter>
               <AlertDialogCancel disabled={resolving}>
                 {t("cancel")}
               </AlertDialogCancel>
-              <Button
-                disabled={resolving}
-                onClick={() => void resolve("CONTINUE")}
-                variant="outline"
-              >
-                {t("portConflictContinue")}
-              </Button>
-              <Button
-                disabled={resolving}
-                onClick={() => void resolve("TERMINATE_AND_RUN")}
-                variant="destructive"
-              >
-                {t("portConflictTerminate")}
-              </Button>
+              {retryButtons}
             </AlertDialogFooter>
           </AlertDialogContent>
         )}

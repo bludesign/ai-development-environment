@@ -23,6 +23,9 @@ import {
   ANDROID_RUN_DESTINATIONS_JOB_KIND,
   ANDROID_DEPLOY_JOB_KIND,
   ANDROID_REMOTE_DEPLOY_JOB_KIND,
+  AUTO_BUILD_CHECKOUT_CHANGED,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
+  AUTO_BUILD_READINESS_CAPABILITY,
   androidAssembleTask,
   parseAndroidBuildSettings,
   parseAndroidDestination,
@@ -70,7 +73,8 @@ import {
 } from "@ai-development-environment/agent-contract/coverage";
 
 import { getPrismaClient } from "@/data/prisma-client";
-import type { Prisma } from "@/generated/prisma/client";
+import type { AgentJob, Prisma } from "@/generated/prisma/client";
+import { BuildCheckoutChangedError } from "@/services/operation-locks/job-resources";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -648,6 +652,75 @@ type StartBuildContext = BuildConfigurationSelection & {
 type StartBuildsInput = StartBuildContext & {
   selections: (StartBuildOptions & { platform: BuildPlatform })[];
 };
+
+export type AutomaticBuildSettings = {
+  worktreeId: string;
+  configurationId: string;
+  platform: BuildPlatform;
+  destinationType: BuildDestination["type"] | "HOST";
+};
+
+export const activeAutomaticBuild = {
+  requestId: { startsWith: "auto-build:" },
+  status: { in: ACTIVE_BUILD_STATUSES },
+} satisfies Prisma.BuildWhereInput;
+
+type AutomaticBuildRevision = {
+  generation: string;
+  headSha: string;
+  branch: string | null;
+  queuedBuildCount: number;
+};
+
+function buildJobKey(kind: string, requestId: string, worktreeId: string) {
+  const platform = kind === ANDROID_BUILD_JOB_KIND ? "android" : "ios";
+  return `${platform}:build:${requestId}:${worktreeId}`;
+}
+
+function automaticBuildDestination(settings: AutomaticBuildSettings) {
+  if (settings.platform === "ANDROID" && settings.destinationType === "HOST")
+    return ANDROID_BUILD_DESTINATION;
+  const destination = genericBuildDestinations("BUILD", [
+    requireBuildPlatform(settings.platform),
+  ]).find(({ type }) => type === settings.destinationType);
+  if (!destination)
+    throw new Error(
+      "Select a generic destination for the automatic build platform",
+    );
+  return destination;
+}
+
+function requireAutomaticBuildAgent(
+  agent: { capabilitiesJson: string },
+  mode: "schedule" | "resume" = "schedule",
+) {
+  const supported = capabilities(agent);
+  if (
+    !supported.includes(CLEAN_WORKTREE_BUILD_CAPABILITY) ||
+    (mode === "schedule" &&
+      !supported.includes(AUTO_BUILD_READINESS_CAPABILITY))
+  ) {
+    throw new Error("Update the build agent to enable automatic builds");
+  }
+}
+
+function verifyAutomaticBuildRevision(
+  worktree: {
+    headSha: string | null;
+    branch: string | null;
+    codebase: { agent: { capabilitiesJson: string } };
+  },
+  revision: AutomaticBuildRevision,
+) {
+  requireAutomaticBuildAgent(worktree.codebase.agent);
+  if (
+    worktree.headSha !== revision.headSha ||
+    worktree.branch !== revision.branch
+  )
+    throw new Error(
+      "The worktree revision changed before the automatic build was queued",
+    );
+}
 
 function stableDigest(value: unknown): string {
   const json = JSON.stringify(value, (_key, item: unknown) =>
@@ -1233,6 +1306,211 @@ export class BuildsService {
       baseBranch:
         worktree.baseBranchOverride ?? worktree.codebase.defaultBranch ?? null,
     };
+  }
+
+  async validateAutomaticBuildSettings(settings: AutomaticBuildSettings) {
+    automaticBuildDestination(settings);
+    const android = settings.platform === "ANDROID";
+    const worktree = await this.requireWorktree(
+      settings.worktreeId,
+      android ? ANDROID_BUILD_JOB_KIND : IOS_BUILD_JOB_KIND,
+      "The selected automatic build platform is unavailable on this agent",
+    );
+    requireAutomaticBuildAgent(worktree.codebase.agent);
+    if (android) {
+      const prisma = await getPrismaClient();
+      const configuration = await prisma.androidBuildConfiguration.findFirst({
+        where: {
+          id: settings.configurationId,
+          project: {
+            repositoryId: worktree.codebase.repositoryId,
+            type: "ANDROID_APP",
+          },
+        },
+        select: { id: true },
+      });
+      if (!configuration)
+        throw new Error(
+          "Android build configuration is unavailable for this repository",
+        );
+    } else {
+      requirePlatformAgent(worktree.codebase.agent, settings.platform);
+      await this.resolveConfiguration(
+        settings,
+        worktree.codebase.repositoryId,
+        settings.platform,
+      );
+    }
+    return worktree;
+  }
+
+  async startAutomaticBuild(
+    settings: AutomaticBuildSettings,
+    revision: AutomaticBuildRevision,
+  ) {
+    const destination = automaticBuildDestination(settings);
+    const input = {
+      worktreeId: settings.worktreeId,
+      configurationId: settings.configurationId,
+      requestId: `auto-build:${stableDigest([revision.generation, revision.headSha, revision.queuedBuildCount])}`,
+    };
+    if (settings.platform === "ANDROID") {
+      return this.startAndroidBuild(input, undefined, revision);
+    }
+    return this.startBuild({
+      ...input,
+      destination,
+      action: "BUILD",
+      automaticBuild: revision,
+    });
+  }
+
+  async resumeAutomaticBuild({ id }: { id: string }) {
+    const prisma = await getPrismaClient();
+    const submission = await prisma.$transaction(async (transaction) => {
+      const build = await transaction.build.findFirst({
+        where: {
+          id,
+          ...activeAutomaticBuild,
+          jobId: null,
+          queuePayloadJson: { not: null },
+        },
+        include: {
+          worktree: { include: { codebase: { include: { agent: true } } } },
+        },
+      });
+      if (!build?.queuePayloadJson) return;
+      const payload = objectValue(
+        JSON.parse(build.queuePayloadJson),
+        "automatic build payload",
+      );
+      const kind =
+        build.destinationType === "HOST"
+          ? ANDROID_BUILD_JOB_KIND
+          : IOS_BUILD_JOB_KIND;
+      // The captured ID survives deletion of the worktree and its foreign key.
+      if (build.agentId && typeof payload.worktreeId === "string") {
+        const job = await transaction.agentJob.findUnique({
+          where: {
+            agentId_idempotencyKey: {
+              agentId: build.agentId,
+              idempotencyKey: buildJobKey(
+                kind,
+                build.requestId,
+                payload.worktreeId,
+              ),
+            },
+          },
+        });
+        if (job) return { state: "existing" as const, job };
+      }
+
+      const { worktree } = build;
+      if (
+        !worktree ||
+        !build.agentId ||
+        !build.codebaseId ||
+        worktree.missingAt ||
+        worktree.availability !== "AVAILABLE" ||
+        worktree.branch !== payload.branch ||
+        worktree.headSha !== payload.headSha ||
+        worktree.hasStagedChanges ||
+        worktree.hasUnstagedChanges ||
+        worktree.rebaseInProgress ||
+        worktree.hasConflicts ||
+        (capabilities(worktree.codebase.agent).includes(
+          AUTO_BUILD_READINESS_CAPABILITY,
+        ) &&
+          !worktree.cleanForAutoBuild)
+      ) {
+        await transaction.build.update({
+          where: { id },
+          data: {
+            status: "CANCELLED",
+            errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+            error:
+              "The checkout changed before the automatic build was submitted",
+            queuePayloadJson: null,
+            finishedAt: new Date(),
+          },
+        });
+        return { state: "skipped" as const };
+      }
+      const { agent } = worktree.codebase;
+      if (!online(agent)) throw new Error("Agent is offline");
+      if (!capabilities(agent).includes(kind))
+        throw new Error(
+          "The selected automatic build platform is unavailable on this agent",
+        );
+      requireAutomaticBuildAgent(agent, "resume");
+      return {
+        state: "ready" as const,
+        input: {
+          id,
+          requestId: build.requestId,
+          worktreeId: worktree.id,
+          codebaseId: build.codebaseId,
+          agentId: build.agentId,
+          kind,
+          payload,
+        } as const,
+      };
+    });
+    if (!submission) return;
+    if (submission.state === "ready") return this.queueBuild(submission.input);
+    if (submission.state === "existing")
+      return this.attachBuildJob(id, submission.job);
+    this.publish(id);
+    return { id };
+  }
+
+  private async persistBuild(
+    data: Prisma.BuildUncheckedCreateInput,
+    revision?: AutomaticBuildRevision,
+  ) {
+    const prisma = await getPrismaClient();
+    if (!revision) return prisma.build.create({ data });
+    return prisma.$transaction(async (transaction) => {
+      const rule = await transaction.worktreeAutoBuild.findFirst({
+        where: {
+          worktreeId: data.worktreeId!,
+          generation: revision.generation,
+          queuedBuildCount: revision.queuedBuildCount,
+          worktree: {
+            branch: revision.branch,
+            headSha: revision.headSha,
+            missingAt: null,
+            availability: "AVAILABLE",
+            cleanForAutoBuild: true,
+            hasStagedChanges: false,
+            hasUnstagedChanges: false,
+            rebaseInProgress: false,
+            hasConflicts: false,
+            builds: { none: activeAutomaticBuild },
+          },
+        },
+        select: {
+          worktreeId: true,
+          worktree: { select: { lastCheckedAt: true } },
+        },
+      });
+      if (!rule?.worktree.lastCheckedAt)
+        throw new Error("The worktree or its automatic build settings changed");
+
+      const build = await transaction.build.create({ data });
+      await transaction.worktreeAutoBuild.update({
+        where: { worktreeId: rule.worktreeId },
+        data: {
+          queuedBuildCount: { increment: 1 },
+          lastHandledHeadSha: revision.headSha,
+          lastQueuedHeadSha: revision.headSha,
+          lastQueuedObservationAt: rule.worktree.lastCheckedAt,
+          lastQueuedBuildId: build.id,
+          lastError: null,
+        },
+      });
+      return build;
+    });
   }
 
   private async ensureProject(codebaseId: string) {
@@ -2467,6 +2745,7 @@ export class BuildsService {
     input: StartBuildContext &
       StartBuildOptions & {
         worktreeCoverage?: boolean;
+        automaticBuild?: AutomaticBuildRevision;
         capturedPlatformConfiguration?: {
           source: { kind: BuildSourceKind; relativePath: string };
           scheme: string;
@@ -2509,6 +2788,8 @@ export class BuildsService {
       input.worktreeId,
       IOS_BUILD_JOB_KIND,
     );
+    if (input.automaticBuild)
+      verifyAutomaticBuildRevision(worktree, input.automaticBuild);
     requirePlatformAgent(worktree.codebase.agent, platform);
     await this.diskSpace?.assertWorktreeCanStart(worktree.id);
     if (input.worktreeCoverage) {
@@ -2780,7 +3061,11 @@ export class BuildsService {
         "A selected build script is not allowed for this codebase",
       );
     }
-    const selected = allowed.filter((entry) => selectedIds.has(entry.scriptId));
+    const selected = allowed.filter(({ script, scriptId }) =>
+      input.automaticBuild
+        ? script.enabledByDefault
+        : selectedIds.has(scriptId),
+    );
     const buildId = randomUUID();
     const buildRoot = effectiveBuildsDirectory(worktree.codebase.agent);
     if (!buildRoot)
@@ -2887,6 +3172,7 @@ export class BuildsService {
     const payload = {
       ...this.identity(worktree),
       buildId,
+      ...(input.automaticBuild && { requireCleanWorktree: true }),
       artifactDirectory,
       derivedDataPath,
       source,
@@ -2917,8 +3203,8 @@ export class BuildsService {
     };
     const buildCreatedAt = new Date();
     try {
-      await prisma.build.create({
-        data: {
+      await this.persistBuild(
+        {
           id: buildId,
           requestKey,
           requestId,
@@ -2969,7 +3255,8 @@ export class BuildsService {
             ]),
           },
         },
-      });
+        input.automaticBuild,
+      );
     } catch (error) {
       if (!(
         error &&
@@ -2999,6 +3286,7 @@ export class BuildsService {
   async startAndroidBuild(
     input: StartAndroidBuildInput,
     capturedSettings?: ReturnType<typeof parseAndroidBuildSettings>,
+    automaticBuild?: AutomaticBuildRevision,
   ): Promise<Prisma.BuildGetPayload<{ include: typeof buildInclude }>> {
     const prisma = await getPrismaClient();
     const requestId = cleanName(input.requestId, "Request ID", 200);
@@ -3033,6 +3321,7 @@ export class BuildsService {
       ANDROID_BUILD_JOB_KIND,
       "Android build tooling is unavailable on this agent. Install the Android SDK command-line tools, Build Tools, and a compatible JDK.",
     );
+    if (automaticBuild) verifyAutomaticBuildRevision(worktree, automaticBuild);
     await this.diskSpace?.assertWorktreeCanStart(worktree.id);
     const configuration = await prisma.androidBuildConfiguration.findFirst({
       where: {
@@ -3141,6 +3430,7 @@ export class BuildsService {
     const payload = {
       ...this.identity(worktree),
       buildId,
+      ...(automaticBuild && { requireCleanWorktree: true }),
       artifactDirectory,
       gradleCachePath,
       settings,
@@ -3148,8 +3438,8 @@ export class BuildsService {
       ...hookSettings,
     };
     try {
-      await prisma.build.create({
-        data: {
+      await this.persistBuild(
+        {
           id: buildId,
           requestKey,
           requestId,
@@ -3168,7 +3458,8 @@ export class BuildsService {
           queuePayloadJson: JSON.stringify(payload),
           scriptExecutions: { create: androidScriptExecutions(scripts) },
         },
-      });
+        automaticBuild,
+      );
     } catch (error) {
       if (!(
         error &&
@@ -3184,7 +3475,7 @@ export class BuildsService {
         }))
       )
         throw error;
-      return this.startAndroidBuild(input, capturedSettings);
+      return this.startAndroidBuild(input, capturedSettings, automaticBuild);
     }
     return this.queueBuild({
       id: buildId,
@@ -3216,7 +3507,7 @@ export class BuildsService {
       kind = IOS_BUILD_JOB_KIND,
     } = input;
     const prisma = await getPrismaClient();
-    const idempotencyKey = `${kind === ANDROID_BUILD_JOB_KIND ? "android" : "ios"}:build:${requestId}:${worktreeId}`;
+    const idempotencyKey = buildJobKey(kind, requestId, worktreeId);
     let job;
     try {
       job = await this.agentControl.createJob({
@@ -3234,20 +3525,35 @@ export class BuildsService {
         idempotencyKey,
       );
       if (!job) {
+        const checkoutChanged =
+          error instanceof BuildCheckoutChangedError &&
+          (payload as { requireCleanWorktree?: boolean }).requireCleanWorktree;
         await prisma.build.updateMany({
           where: { id, jobId: null, status: "QUEUED" },
           data: {
-            status: "FAILED",
-            errorCode: "QUEUE_FAILED",
+            status: checkoutChanged ? "CANCELLED" : "FAILED",
+            errorCode: checkoutChanged
+              ? AUTO_BUILD_CHECKOUT_CHANGED
+              : "QUEUE_FAILED",
             error: error instanceof Error ? error.message : String(error),
             queuePayloadJson: null,
             finishedAt: new Date(),
           },
         });
         this.publish(id);
+        if (checkoutChanged)
+          return prisma.build.findUniqueOrThrow({
+            where: { id },
+            include: buildInclude,
+          });
         throw error;
       }
     }
+    return this.attachBuildJob(id, job);
+  }
+
+  private async attachBuildJob(id: string, job: AgentJob) {
+    const prisma = await getPrismaClient();
     const attached = await prisma.build.update({
       where: { id },
       data: { jobId: job.id, queuePayloadJson: null },
@@ -4957,17 +5263,22 @@ export class BuildsService {
             }),
           status,
           errorCode:
-            typeof result.errorCode === "string"
-              ? result.errorCode
-              : job.status === "TIMED_OUT"
-                ? "TIMEOUT"
-                : status === "FAILED"
-                  ? android
-                    ? "GRADLE_BUILD_FAILED"
-                    : "XCODEBUILD_FAILED"
-                  : build.errorCode,
+            build.status === "CANCELLED" && build.errorCode === "CANCELLED"
+              ? build.errorCode
+              : typeof result.errorCode === "string"
+                ? result.errorCode
+                : job.status === "TIMED_OUT"
+                  ? "TIMEOUT"
+                  : status === "FAILED"
+                    ? android
+                      ? "GRADLE_BUILD_FAILED"
+                      : "XCODEBUILD_FAILED"
+                    : build.errorCode,
           error:
-            job.error ??
+            (result.errorCode === AUTO_BUILD_CHECKOUT_CHANGED &&
+            typeof result.error === "string"
+              ? result.error
+              : job.error) ??
             (typeof result.error === "string" ? result.error : build.error),
           startedAt: build.startedAt ?? new Date(),
           finishedAt: completedAt,
@@ -4983,7 +5294,11 @@ export class BuildsService {
               { lastCheckedAt: { lt: observedAt } },
             ],
           },
-          data: { codeStateHash: finalStateHash, lastCheckedAt: observedAt },
+          data: {
+            codeStateHash: finalStateHash,
+            lastCheckedAt: observedAt,
+            cleanForAutoBuild: false,
+          },
         });
       }
       if (Array.isArray(result.artifacts)) {

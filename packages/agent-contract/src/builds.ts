@@ -17,6 +17,11 @@ export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
 export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
 export const XCODE_MULTIPLATFORM_BUILD_CAPABILITY =
   "xcode.build.multiplatform.v1";
+// v2 verifies initialized nested submodules and treats incomplete status as a retryable skip.
+export const CLEAN_WORKTREE_BUILD_CAPABILITY = "build.clean-worktree.v2";
+export const AUTO_BUILD_READINESS_CAPABILITY =
+  "worktree.auto-build-readiness.v1";
+export const AUTO_BUILD_CHECKOUT_CHANGED = "AUTO_BUILD_CHECKOUT_CHANGED";
 
 export const ANDROID_BUILD_JOB_KIND = "android.build.run";
 export const ANDROID_BUILD_DESTINATION = {
@@ -503,6 +508,7 @@ export type BuildAgentRunDestinationsPayload = {
 export type BuildJobPayload = BuildWorktreeIdentity & {
   buildId: string;
   artifactDirectory: string;
+  requireCleanWorktree?: boolean;
   /** Stable, worktree-owned Xcode cache directory. Absent on legacy jobs. */
   derivedDataPath?: string;
   source: BuildSourceSnapshot;
@@ -817,6 +823,7 @@ export function parseAndroidBuildPayload(value: unknown) {
   return {
     ...worktreeIdentity(input),
     ...parseBuildDeletePayload(input),
+    ...parseCleanWorktreeBuild(input),
     settings: parseAndroidBuildSettings(input.settings),
     gradleCachePath: safeAbsolutePath(
       input.gradleCachePath,
@@ -827,6 +834,17 @@ export function parseAndroidBuildPayload(value: unknown) {
     server: parseBuildServer(input.server),
     endpointPaths: parseBuildEndpointPaths(input.endpointPaths),
   };
+}
+
+function parseCleanWorktreeBuild(input: JsonObject) {
+  return input.requireCleanWorktree === undefined
+    ? {}
+    : {
+        requireCleanWorktree: booleanValue(
+          input.requireCleanWorktree,
+          "build job payload.requireCleanWorktree",
+        ),
+      };
 }
 
 export function parseAndroidDestination(value: unknown): BuildDestination {
@@ -1323,6 +1341,7 @@ export function parseBuildJobPayload(value: unknown): BuildJobPayload {
   }
   return {
     ...worktreeIdentity(input),
+    ...parseCleanWorktreeBuild(input),
     buildId: stringValue(input.buildId, "build job payload.buildId"),
     artifactDirectory: stringValue(
       input.artifactDirectory,

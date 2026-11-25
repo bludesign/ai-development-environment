@@ -1,6 +1,10 @@
 import type { PrismaClient } from "../../src/generated/prisma/client";
 import { SIMULATOR_JOB_KINDS } from "@ai-development-environment/agent-contract/simulators";
-import { ANDROID_BUILD_JOB_KINDS } from "@ai-development-environment/agent-contract/builds";
+import {
+  ANDROID_BUILD_JOB_KINDS,
+  AUTO_BUILD_READINESS_CAPABILITY,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
+} from "@ai-development-environment/agent-contract/builds";
 
 import { ids } from "./ids";
 import { daysAgo, fromNow, hoursAgo, minutesAgo } from "./time";
@@ -213,6 +217,8 @@ export async function seedAgents(prisma: PrismaClient): Promise<void> {
       capabilitiesJson: JSON.stringify([
         ...AGENT_CAPABILITIES,
         ...ANDROID_BUILD_JOB_KINDS,
+        AUTO_BUILD_READINESS_CAPABILITY,
+        CLEAN_WORKTREE_BUILD_CAPABILITY,
         "android.simulators",
       ]),
       secretHash: "mock-secret-hash-studio-mac",
