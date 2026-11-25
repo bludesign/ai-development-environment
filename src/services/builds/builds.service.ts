@@ -73,7 +73,8 @@ import {
 } from "@ai-development-environment/agent-contract/coverage";
 
 import { getPrismaClient } from "@/data/prisma-client";
-import type { Prisma } from "@/generated/prisma/client";
+import type { AgentJob, Prisma } from "@/generated/prisma/client";
+import { BuildCheckoutChangedError } from "@/services/operation-locks/job-resources";
 import {
   agentOnlineWindowMs,
   AgentControlService,
@@ -670,6 +671,11 @@ type AutomaticBuildRevision = {
   branch: string | null;
   queuedBuildCount: number;
 };
+
+function buildJobKey(kind: string, requestId: string, worktreeId: string) {
+  const platform = kind === ANDROID_BUILD_JOB_KIND ? "android" : "ios";
+  return `${platform}:build:${requestId}:${worktreeId}`;
+}
 
 function automaticBuildDestination(settings: AutomaticBuildSettings) {
   if (settings.platform === "ANDROID" && settings.destinationType === "HOST")
@@ -1359,37 +1365,103 @@ export class BuildsService {
     });
   }
 
-  async resumeAutomaticBuild(build: {
-    id: string;
-    requestId: string;
-    worktreeId: string | null;
-    codebaseId: string | null;
-    agentId: string | null;
-    queuePayloadJson: string | null;
-    destinationType: string;
-  }) {
-    if (
-      !build.agentId ||
-      !build.codebaseId ||
-      !build.worktreeId ||
-      !build.queuePayloadJson
-    )
-      return;
-    const kind =
-      build.destinationType === "HOST"
-        ? ANDROID_BUILD_JOB_KIND
-        : IOS_BUILD_JOB_KIND;
-    const worktree = await this.requireWorktree(build.worktreeId, kind);
-    requireAutomaticBuildAgent(worktree.codebase.agent, "resume");
-    return this.queueBuild({
-      id: build.id,
-      requestId: build.requestId,
-      worktreeId: build.worktreeId,
-      codebaseId: build.codebaseId,
-      agentId: build.agentId,
-      payload: JSON.parse(build.queuePayloadJson),
-      kind,
+  async resumeAutomaticBuild({ id }: { id: string }) {
+    const prisma = await getPrismaClient();
+    const submission = await prisma.$transaction(async (transaction) => {
+      const build = await transaction.build.findFirst({
+        where: {
+          id,
+          ...activeAutomaticBuild,
+          jobId: null,
+          queuePayloadJson: { not: null },
+        },
+        include: {
+          worktree: { include: { codebase: { include: { agent: true } } } },
+        },
+      });
+      if (!build?.queuePayloadJson) return;
+      const payload = objectValue(
+        JSON.parse(build.queuePayloadJson),
+        "automatic build payload",
+      );
+      const kind =
+        build.destinationType === "HOST"
+          ? ANDROID_BUILD_JOB_KIND
+          : IOS_BUILD_JOB_KIND;
+      // The captured ID survives deletion of the worktree and its foreign key.
+      if (build.agentId && typeof payload.worktreeId === "string") {
+        const job = await transaction.agentJob.findUnique({
+          where: {
+            agentId_idempotencyKey: {
+              agentId: build.agentId,
+              idempotencyKey: buildJobKey(
+                kind,
+                build.requestId,
+                payload.worktreeId,
+              ),
+            },
+          },
+        });
+        if (job) return { state: "existing" as const, job };
+      }
+
+      const { worktree } = build;
+      if (
+        !worktree ||
+        !build.agentId ||
+        !build.codebaseId ||
+        worktree.missingAt ||
+        worktree.availability !== "AVAILABLE" ||
+        worktree.branch !== payload.branch ||
+        worktree.headSha !== payload.headSha ||
+        worktree.hasStagedChanges ||
+        worktree.hasUnstagedChanges ||
+        worktree.rebaseInProgress ||
+        worktree.hasConflicts ||
+        (capabilities(worktree.codebase.agent).includes(
+          AUTO_BUILD_READINESS_CAPABILITY,
+        ) &&
+          !worktree.cleanForAutoBuild)
+      ) {
+        await transaction.build.update({
+          where: { id },
+          data: {
+            status: "CANCELLED",
+            errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+            error:
+              "The checkout changed before the automatic build was submitted",
+            queuePayloadJson: null,
+            finishedAt: new Date(),
+          },
+        });
+        return { state: "skipped" as const };
+      }
+      const { agent } = worktree.codebase;
+      if (!online(agent)) throw new Error("Agent is offline");
+      if (!capabilities(agent).includes(kind))
+        throw new Error(
+          "The selected automatic build platform is unavailable on this agent",
+        );
+      requireAutomaticBuildAgent(agent, "resume");
+      return {
+        state: "ready" as const,
+        input: {
+          id,
+          requestId: build.requestId,
+          worktreeId: worktree.id,
+          codebaseId: build.codebaseId,
+          agentId: build.agentId,
+          kind,
+          payload,
+        } as const,
+      };
     });
+    if (!submission) return;
+    if (submission.state === "ready") return this.queueBuild(submission.input);
+    if (submission.state === "existing")
+      return this.attachBuildJob(id, submission.job);
+    this.publish(id);
+    return { id };
   }
 
   private async persistBuild(
@@ -3435,7 +3507,7 @@ export class BuildsService {
       kind = IOS_BUILD_JOB_KIND,
     } = input;
     const prisma = await getPrismaClient();
-    const idempotencyKey = `${kind === ANDROID_BUILD_JOB_KIND ? "android" : "ios"}:build:${requestId}:${worktreeId}`;
+    const idempotencyKey = buildJobKey(kind, requestId, worktreeId);
     let job;
     try {
       job = await this.agentControl.createJob({
@@ -3453,20 +3525,35 @@ export class BuildsService {
         idempotencyKey,
       );
       if (!job) {
+        const checkoutChanged =
+          error instanceof BuildCheckoutChangedError &&
+          (payload as { requireCleanWorktree?: boolean }).requireCleanWorktree;
         await prisma.build.updateMany({
           where: { id, jobId: null, status: "QUEUED" },
           data: {
-            status: "FAILED",
-            errorCode: "QUEUE_FAILED",
+            status: checkoutChanged ? "CANCELLED" : "FAILED",
+            errorCode: checkoutChanged
+              ? AUTO_BUILD_CHECKOUT_CHANGED
+              : "QUEUE_FAILED",
             error: error instanceof Error ? error.message : String(error),
             queuePayloadJson: null,
             finishedAt: new Date(),
           },
         });
         this.publish(id);
+        if (checkoutChanged)
+          return prisma.build.findUniqueOrThrow({
+            where: { id },
+            include: buildInclude,
+          });
         throw error;
       }
     }
+    return this.attachBuildJob(id, job);
+  }
+
+  private async attachBuildJob(id: string, job: AgentJob) {
+    const prisma = await getPrismaClient();
     const attached = await prisma.build.update({
       where: { id },
       data: { jobId: job.id, queuePayloadJson: null },

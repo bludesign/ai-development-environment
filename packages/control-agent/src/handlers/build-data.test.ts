@@ -5,7 +5,9 @@ import {
   mkdir,
   readFile,
   realpath,
+  rename,
   rm,
+  stat,
   symlink,
   utimes,
   writeFile,
@@ -29,11 +31,16 @@ import {
   collectAgentDiskSpace,
   ownedWorktreeBuildData,
   deleteBuildData,
+  gradleCheckoutIdentity,
   scanBuildData,
   sizeBuildData,
 } from "./build-data.js";
 
 vi.mock("../capture-command.js", () => ({ captureCommand: vi.fn() }));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs/promises")>();
+  return { ...fs, stat: vi.fn(fs.stat) };
+});
 vi.mock("node:os", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:os")>()),
   homedir: vi.fn(),
@@ -89,11 +96,17 @@ const signal = () => new AbortController().signal;
 const log = async () => undefined;
 
 describe("Build Data agent handlers", () => {
-  test("sizes and deletes a Gradle cache with its generated Android module outputs", async () => {
+  const capacities = test.each([
+    "same device",
+    "shared APFS capacity",
+    "separate capacity",
+  ] as const);
+  capacities("reclaims Gradle data on %s", async (capacity) => {
     const builds = await realpath(await temporaryDirectory());
     const worktreePath = await realpath(await temporaryDirectory());
     const projectPath = ".";
     const worktreeId = "android-worktree";
+    const gitDirectory = join(worktreePath, ".git");
     const rootPath = join(builds, ".android-gradle", worktreeId);
     const path = join(
       rootPath,
@@ -102,7 +115,7 @@ describe("Build Data agent handlers", () => {
     const generated = join(worktreePath, "app", "build", "outputs", "apk");
     const tracked = join(worktreePath, "tracked", "build", "outputs", "apk");
     await Promise.all(
-      [path, generated, tracked].map((directory) =>
+      [path, generated, tracked, gitDirectory].map((directory) =>
         mkdir(directory, { recursive: true }),
       ),
     );
@@ -111,6 +124,7 @@ describe("Build Data agent handlers", () => {
       JSON.stringify({
         worktreeId,
         worktreePath,
+        checkoutIdentity: await gradleCheckoutIdentity(gitDirectory),
         projectPath,
         module: ":app",
         modules: [":tracked"],
@@ -119,7 +133,7 @@ describe("Build Data agent handlers", () => {
     await writeFile(join(generated, "generated.apk"), Buffer.alloc(4096));
     const retained = join(tracked, "tracked.apk");
     await writeFile(retained, "tracked");
-    capture.mockImplementation(async ({ args }) => ({
+    capture.mockImplementation(async ({ command, args }) => ({
       exitCode: 0,
       signal: null,
       timedOut: false,
@@ -127,9 +141,13 @@ describe("Build Data agent handlers", () => {
       stderr: "",
       outputTruncated: false,
       stdout:
-        args[0] === "ls-files" && args.includes("tracked/build/")
-          ? "tracked/build/outputs/apk/tracked.apk\0"
-          : "",
+        args[0] === "rev-parse"
+          ? `${worktreePath}\n${gitDirectory}\n`
+          : command === "/usr/sbin/diskutil"
+            ? `<plist><dict><key>APFSContainerReference</key><string>${capacity === "separate capacity" && args.at(-1) === path ? "cache-container" : "checkout-container"}</string></dict></plist>`
+            : args[0] === "ls-files" && args.includes("tracked/build/")
+              ? "tracked/build/outputs/apk/tracked.apk\0"
+              : "",
     }));
     const configuration = {
       mode: "ABSOLUTE" as const,
@@ -144,7 +162,12 @@ describe("Build Data agent handlers", () => {
     );
     expect(scan).toMatchObject({
       entries: [
-        { path, rootPath, kind: "GRADLE_PROJECT", workspacePath: worktreePath },
+        {
+          path,
+          rootPath,
+          kind: "GRADLE_PROJECT",
+          workspacePath: worktreePath,
+        },
       ],
     });
     const report = parseAgentDiskSpaceReport(
@@ -199,7 +222,7 @@ describe("Build Data agent handlers", () => {
         )
       ).targets,
     ).toEqual([{ path, rootPath }]);
-    const target = { path, rootPath };
+    const target = { path, rootPath, gitDirectory };
     const size = await sizeBuildData(
       { targets: [target] },
       10_000,
@@ -209,15 +232,37 @@ describe("Build Data agent handlers", () => {
     expect(size).toMatchObject({
       sizes: [{ path, sizeBytes: expect.any(Number), error: null }],
     });
+    if (capacity !== "same device") {
+      const cacheStats = await stat(path);
+      cacheStats.dev += 1;
+      // The next stat inspects the cache device for this automatic deletion.
+      vi.mocked(stat).mockResolvedValueOnce(cacheStats);
+    }
     expect(
-      await deleteBuildData({ targets: [target] }, 10_000, signal(), log),
+      await deleteBuildData(
+        { source: "AUTOMATIC", targets: [target] },
+        10_000,
+        signal(),
+        log,
+      ),
     ).toMatchObject({ deleted: [{ path, deleted: true, error: null }] });
     await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(lstat(generated)).rejects.toMatchObject({ code: "ENOENT" });
+    if (capacity === "separate capacity")
+      expect((await lstat(generated)).isDirectory()).toBe(true);
+    else
+      await expect(lstat(generated)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     expect(await readFile(retained, "utf8")).toBe("tracked");
   });
 
-  test("sizes and deletes only the unlinked Gradle cache when its workspace was reused", async () => {
+  const checkouts = test.each([
+    "unlinked",
+    "moved",
+    "recreated",
+    "legacy",
+  ] as const);
+  checkouts("retains outputs for a %s Gradle checkout", async (scope) => {
     const builds = await realpath(await temporaryDirectory());
     const worktreePath = await realpath(await temporaryDirectory());
     const worktreeId = "removed-worktree";
@@ -231,21 +276,62 @@ describe("Build Data agent handlers", () => {
     await mkdir(output, { recursive: true });
     const replacementApk = join(output, "replacement.apk");
     await writeFile(replacementApk, "replacement build");
+    const gitDirectory = join(worktreePath, ".git");
+    await mkdir(gitDirectory);
     await writeFile(
       join(path, ".aide-android-gradle.json"),
       JSON.stringify({
         worktreeId,
         worktreePath,
+        ...(scope === "legacy"
+          ? {}
+          : { checkoutIdentity: await gradleCheckoutIdentity(gitDirectory) }),
         projectPath: ".",
         module: ":app",
       }),
     );
     const marker = await lstat(join(path, ".aide-android-gradle.json"));
     const cacheBytes = ((await lstat(path)).blocks + marker.blocks) * 512;
-    const target = { path, rootPath, cacheOnly: true };
+    const target = {
+      path,
+      rootPath,
+      ...(scope === "unlinked" ? { cacheOnly: true } : {}),
+      ...(scope === "unlinked" ? {} : { gitDirectory, worktreeId }),
+    };
+    const replacementGitDirectory =
+      scope === "moved" ? join(worktreePath, "replacement.git") : gitDirectory;
+    if (scope === "recreated")
+      await rename(gitDirectory, join(worktreePath, "original.git"));
+    if (scope === "recreated" || scope === "moved")
+      await mkdir(replacementGitDirectory);
+    capture.mockResolvedValue({
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      cancelled: false,
+      stderr: "",
+      outputTruncated: false,
+      stdout: `${worktreePath}\n${replacementGitDirectory}\n`,
+    });
     expect(
-      await sizeBuildData({ targets: [target] }, 10_000, signal(), log),
-    ).toMatchObject({ sizes: [{ path, sizeBytes: cacheBytes, error: null }] });
+      await sizeBuildData(
+        {
+          targets: [
+            {
+              path,
+              rootPath,
+              cacheOnly: target.cacheOnly,
+              gitDirectory: target.gitDirectory,
+            },
+          ],
+        },
+        10_000,
+        signal(),
+        log,
+      ),
+    ).toMatchObject({
+      sizes: [{ path, sizeBytes: cacheBytes, error: null }],
+    });
     expect(
       await deleteBuildData({ targets: [target] }, 10_000, signal(), log),
     ).toMatchObject({
@@ -253,7 +339,14 @@ describe("Build Data agent handlers", () => {
     });
     await expect(lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readFile(replacementApk, "utf8")).toBe("replacement build");
-    expect(capture).not.toHaveBeenCalled();
+    if (scope === "moved" || scope === "recreated") {
+      expect(capture).toHaveBeenCalledTimes(2);
+      expect(capture).toHaveBeenCalledWith(
+        expect.objectContaining({
+          args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"],
+        }),
+      );
+    } else expect(capture).not.toHaveBeenCalled();
   });
   test("discovers and deletes only the removed worktree's managed cache without an Xcode plist", async () => {
     const root = await realpath(await temporaryDirectory());

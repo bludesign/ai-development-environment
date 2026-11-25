@@ -165,8 +165,12 @@ async function gitStatePathExists(
   if (!candidate || result.outputTruncated) {
     throw new Error(`Could not resolve Git state path ${name}`);
   }
+  return pathExists(candidate);
+}
+
+async function pathExists(path: string): Promise<boolean> {
   try {
-    await stat(candidate);
+    await stat(path);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
@@ -176,7 +180,7 @@ async function gitStatePathExists(
   }
 }
 
-export async function inspectWorktreeRefreshState(
+async function inspectWorktreeRefreshState(
   folder: string,
   timeoutMs: number,
   signal: AbortSignal,
@@ -213,8 +217,55 @@ export async function inspectWorktreeRefreshState(
   };
 }
 
-export function cleanForAutoBuild(state: WorktreeRefreshState): boolean {
+function cleanForAutoBuild(state: WorktreeRefreshState): boolean {
   return !state.dirty && !state.mergeInProgress && !state.rebaseInProgress;
+}
+
+export async function inspectAutoBuildState(
+  folder: string,
+  timeoutMs: number,
+  signal: AbortSignal,
+) {
+  const deadline = Date.now() + timeoutMs;
+  try {
+    const state = await inspectWorktreeRefreshState(folder, timeoutMs, signal);
+    let clean = cleanForAutoBuild(state);
+    if (clean && (await pathExists(join(folder, ".gitmodules")))) {
+      // Git's --ignore-submodules=none override only applies to direct children.
+      const modules = requireSuccess(
+        await git(
+          folder,
+          [
+            "submodule",
+            "foreach",
+            "--quiet",
+            "--recursive",
+            'printf "%s\\0" "$PWD"',
+          ],
+          deadline - Date.now(),
+          signal,
+        ),
+        "Could not inspect initialized submodules",
+      );
+      if (modules.outputTruncated) return null;
+      for (const path of modules.stdout.split("\0").filter(Boolean)) {
+        const nested = await inspectWorktreeRefreshState(
+          path,
+          deadline - Date.now(),
+          signal,
+        );
+        if (!cleanForAutoBuild(nested)) {
+          clean = false;
+          break;
+        }
+      }
+    }
+    signal.throwIfAborted();
+    return { ...state, cleanForAutoBuild: clean };
+  } catch {
+    signal.throwIfAborted();
+    return null;
+  }
 }
 
 async function reportedWorktreeState(
@@ -222,14 +273,7 @@ async function reportedWorktreeState(
   timeoutMs: number,
   signal: AbortSignal,
 ) {
-  const strict = await inspectWorktreeRefreshState(
-    folder,
-    timeoutMs,
-    signal,
-  ).catch(() => {
-    signal.throwIfAborted();
-    return null;
-  });
+  const strict = await inspectAutoBuildState(folder, timeoutMs, signal);
   // A clean strict status is also clean under the repository's submodule
   // settings. For dirty or incomplete results, preserve the usual Git status.
   let statusText = "";
@@ -253,7 +297,7 @@ async function reportedWorktreeState(
     rebaseInProgress:
       strict?.rebaseInProgress ??
       (await rebaseInProgress(folder, timeoutMs, signal)),
-    cleanForAutoBuild: strict !== null && cleanForAutoBuild(strict),
+    cleanForAutoBuild: strict?.cleanForAutoBuild ?? false,
   };
 }
 

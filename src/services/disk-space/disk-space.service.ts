@@ -4,6 +4,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   BUILD_DATA_DELETE_JOB_KIND,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
   buildDataDeletePayload,
   parseBuildDataDeleteResult,
 } from "@ai-development-environment/agent-contract/build-data";
@@ -627,9 +628,13 @@ export class DiskSpaceService {
       .filter((id): id is string => Boolean(id));
     const active = await executingResourcesByWorktree(worktreeIds);
     const lockedPaths = new Set(locks.map((lock) => lock.path));
+    const gradleCleanup = parseArray<string>(agent.capabilitiesJson).includes(
+      GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+    );
     entries = entries.filter(
       (entry) =>
-        (entry.kind === "PROJECT" || entry.kind === "GRADLE_PROJECT") &&
+        (entry.kind === "PROJECT" ||
+          (gradleCleanup && entry.kind === "GRADLE_PROJECT")) &&
         Boolean(entry.worktreeId) &&
         !lockedPaths.has(entry.path) &&
         (active.get(entry.worktreeId!)?.length ?? 0) === 0,
@@ -720,7 +725,7 @@ export class DiskSpaceService {
               missingAt: null,
               codebase: { agentId },
             },
-            select: { id: true, folder: true },
+            select: { id: true, folder: true, gitDirectory: true },
           })
         : null;
     if (
@@ -747,6 +752,9 @@ export class DiskSpaceService {
               rootPath: candidate.rootPath,
               name: candidate.name,
               kind: candidate.kind,
+              ...(gradleOwner
+                ? { gitDirectory: gradleOwner.gitDirectory }
+                : {}),
               worktreeId: candidate.worktreeId,
               worktreePath: candidate.worktreePath,
             },

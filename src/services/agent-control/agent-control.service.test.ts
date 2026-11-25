@@ -687,6 +687,11 @@ describe("AgentControlService.claimJob", () => {
     "blocks an older agent from claiming a guarded %s job",
     async (kind) => {
       getPrismaClient.mockResolvedValue({
+        agent: {
+          findUnique: vi.fn().mockResolvedValue({
+            capabilitiesJson: JSON.stringify([kind, "build.clean-worktree.v1"]),
+          }),
+        },
         derivedDataCleanupLease: {
           deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
         },
@@ -711,8 +716,12 @@ describe("AgentControlService.claimJob", () => {
     ["buildData.size", { cacheOnly: true }],
     ["buildData.delete", { cacheOnly: true }],
     ["buildData.delete", { kind: "GRADLE_PROJECT", worktreeId: null }],
+    ["buildData.delete", { kind: "GRADLE_PROJECT", worktreeId: "old" }],
+    ["buildData.delete", { gitDirectory: "/repo/.git/worktrees/tree" }],
+    ["buildData.size", { gitDirectory: "/repo/.git/worktrees/tree" }],
+    ["buildData.delete", {}],
   ])(
-    "blocks a downgraded agent from claiming a cache-only %s job",
+    "blocks a downgraded agent from claiming a scoped %s job",
     async (kind, scope) => {
       getPrismaClient.mockResolvedValue({
         derivedDataCleanupLease: { deleteMany: vi.fn() },

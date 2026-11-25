@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { BUILD_DATA_DELETE_JOB_KIND } from "@ai-development-environment/agent-contract/build-data";
+import {
+  BUILD_DATA_DELETE_JOB_KIND,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+} from "@ai-development-environment/agent-contract/build-data";
 
 const getPrismaClient = vi.hoisted(() => vi.fn());
 
@@ -481,7 +484,10 @@ describe("DiskSpaceService cleanup selection", () => {
         lastSeenAt: new Date(),
         disconnectedAt: null,
         baseRepoDirectory: "/Repos",
-        capabilitiesJson: '["buildData.delete"]',
+        capabilitiesJson: JSON.stringify([
+          BUILD_DATA_DELETE_JOB_KIND,
+          GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+        ]),
       };
       const create = vi.fn().mockResolvedValue({});
       const createJob = vi.fn().mockResolvedValue({ id: "delete-1" });
@@ -519,9 +525,11 @@ describe("DiskSpaceService cleanup selection", () => {
         agent: { findUnique: vi.fn().mockResolvedValue(agent) },
         worktree: {
           findMany: vi.fn().mockResolvedValue(worktrees),
-          findFirst: vi
-            .fn()
-            .mockResolvedValue({ id: ready.name, folder: ready.workspacePath }),
+          findFirst: vi.fn().mockResolvedValue({
+            id: ready.name,
+            folder: ready.workspacePath,
+            gitDirectory: "/Repos/.git/worktrees/ready",
+          }),
         },
       });
       vi.mocked(executingResourcesByWorktree).mockResolvedValueOnce(
@@ -557,6 +565,7 @@ describe("DiskSpaceService cleanup selection", () => {
                   path: ready.path,
                   kind: "GRADLE_PROJECT",
                   worktreeId: ready.name,
+                  gitDirectory: "/Repos/.git/worktrees/ready",
                 }),
               ],
             },

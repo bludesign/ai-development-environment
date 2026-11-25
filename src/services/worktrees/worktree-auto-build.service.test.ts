@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { PrismaBetterSqlite3 } from "@prisma/adapter-better-sqlite3";
+import { OPERATION_RESOURCES_CAPABILITY } from "@ai-development-environment/agent-contract/operation-resources";
 import {
   ANDROID_BUILD_DELETE_JOB_KIND,
   ANDROID_BUILD_JOB_KIND,
@@ -23,7 +24,7 @@ import {
   vi,
 } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
-import type { AgentControlService } from "@/services/agent-control";
+import { AgentControlService } from "@/services/agent-control";
 import { BuildsService } from "@/services/builds/builds.service";
 import { WorktreeAutoBuildService } from "./worktree-auto-build.service";
 import { WorktreesService } from "./worktrees.service";
@@ -478,7 +479,7 @@ test("reattaches an existing job when a restart interrupted automatic submission
   );
 
   await new WorktreeAutoBuildService(builds, vi.fn()).reconcile();
-  expect(createJob).toHaveBeenCalledTimes(2);
+  expect(createJob).toHaveBeenCalledTimes(1);
   expect(await prisma.agentJob.count()).toBe(1);
   expect(
     await prisma.build.findUniqueOrThrow({ where: { id: build.id } }),
@@ -486,6 +487,150 @@ test("reattaches an existing job when a restart interrupted automatic submission
     jobId: job.id,
     queuePayloadJson: null,
   });
+});
+
+test.each([
+  { settings: appleSettings, branch: "main" },
+  { settings: androidSettings, branch: "main" },
+  { settings: androidSettings, branch: null },
+])(
+  "retries a $settings.platform checkout rejected at claim time after switching from $branch on the same commit",
+  async ({ settings, branch }) => {
+    const control = new AgentControlService();
+    const service = new WorktreeAutoBuildService(
+      new BuildsService(control),
+      vi.fn(),
+    );
+    const { report } = fixture();
+    await prisma.agent.update({
+      where: { id: "agent" },
+      data: {
+        capabilitiesJson: JSON.stringify([
+          CLEAN_WORKTREE_BUILD_CAPABILITY,
+          AUTO_BUILD_READINESS_CAPABILITY,
+          IOS_BUILD_JOB_KIND,
+          ANDROID_BUILD_JOB_KIND,
+          OPERATION_RESOURCES_CAPABILITY,
+        ]),
+      },
+    });
+    await prisma.worktree.update({
+      where: { id: "worktree" },
+      data: { branch },
+    });
+    await service.configure(settings);
+    await report("next", 2);
+    await service.reconcile();
+    const first = await prisma.build.findFirstOrThrow();
+    await prisma.worktree.update({
+      where: { id: "worktree" },
+      data: { branch: "other", lastCheckedAt: new Date(3) },
+    });
+    await expect(
+      control.claimJob("agent", first.jobId!, "token"),
+    ).rejects.toThrow("branch or HEAD changed");
+    expect(
+      await prisma.build.findUniqueOrThrow({ where: { id: first.id } }),
+    ).toMatchObject({
+      status: "CANCELLED",
+      errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+    });
+    await service.reconcile();
+    const next = await prisma.build.findFirstOrThrow({
+      where: { id: { not: first.id } },
+    });
+    expect(
+      JSON.parse(
+        (
+          await prisma.agentJob.findUniqueOrThrow({
+            where: { id: next.jobId! },
+          })
+        ).payloadJson,
+      ),
+    ).toMatchObject({ branch: "other", headSha: "next" });
+  },
+);
+
+test.each(["dirty", "missing", "purged", "disabled"] as const)(
+  "settles an interrupted submission when the worktree is %s without dispatching a stale job",
+  async (change) => {
+    const { service, report } = fixture();
+    await service.configure(androidSettings);
+    await report("next", 2);
+    await service.reconcile();
+    const build = await prisma.build.findFirstOrThrow();
+    const job = await prisma.agentJob.findUniqueOrThrow({
+      where: { id: build.jobId! },
+    });
+    await prisma.build.update({
+      where: { id: build.id },
+      data: { jobId: null, queuePayloadJson: job.payloadJson },
+    });
+    await prisma.agentJob.delete({ where: { id: job.id } });
+    if (change === "purged") {
+      await prisma.worktree.delete({ where: { id: "worktree" } });
+    } else if (change === "missing") {
+      await prisma.worktree.update({
+        where: { id: "worktree" },
+        data: { missingAt: new Date() },
+      });
+    } else {
+      if (change === "disabled") await service.cancel("worktree");
+      await report("next", 3, true);
+    }
+    await service.reconcile();
+    expect(
+      await prisma.build.findUniqueOrThrow({ where: { id: build.id } }),
+    ).toMatchObject({
+      status: "CANCELLED",
+      errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+      queuePayloadJson: null,
+    });
+    expect(await prisma.agentJob.count()).toBe(0);
+    if (change === "dirty") {
+      // An initial dispatcher arriving after recovery cannot recreate the cancelled job.
+      await expect(
+        new AgentControlService().createJob({
+          agentId: job.agentId,
+          codebaseId: job.codebaseId,
+          worktreeId: job.worktreeId,
+          kind: job.kind,
+          payload: JSON.parse(job.payloadJson),
+          idempotencyKey: job.idempotencyKey,
+        }),
+      ).rejects.toThrow();
+      expect(await prisma.agentJob.count()).toBe(0);
+      await report("next", 4);
+      await service.reconcile();
+      expect(await prisma.agentJob.count()).toBe(1);
+    }
+  },
+);
+
+test("recovers a completed durable job after its worktree has been purged", async () => {
+  const { service, report } = fixture();
+  await service.configure(androidSettings);
+  await report("next", 2);
+  await service.reconcile();
+  const build = await prisma.build.findFirstOrThrow();
+  const job = await prisma.agentJob.update({
+    where: { id: build.jobId! },
+    data: { status: "SUCCEEDED" },
+  });
+  await prisma.build.update({
+    where: { id: build.id },
+    data: { jobId: null, queuePayloadJson: job.payloadJson },
+  });
+  await prisma.worktree.delete({ where: { id: "worktree" } });
+  await service.reconcile();
+  expect(
+    await prisma.build.findUniqueOrThrow({ where: { id: build.id } }),
+  ).toMatchObject({
+    status: "SUCCEEDED",
+    jobId: job.id,
+    queuePayloadJson: null,
+  });
+  expect(await prisma.agentJob.count()).toBe(1);
 });
 
 test("requires a saved configuration, compatible destination, and capable agent", async () => {

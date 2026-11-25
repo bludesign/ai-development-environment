@@ -14,6 +14,7 @@ import { CCUSAGE_REPORT_JOB_KIND } from "@ai-development-environment/agent-contr
 import {
   BUILD_DATA_JOB_KINDS,
   GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
 } from "@ai-development-environment/agent-contract/build-data";
 import { SIMULATOR_JOB_KINDS } from "@ai-development-environment/agent-contract/simulators";
 import {
@@ -66,6 +67,7 @@ export const AGENT_VERSION =
 
 const PORTABLE_AGENT_CAPABILITIES = [
   CLI_HEALTH_JOB_KIND,
+  "build.clean-worktree.v1", // Older servers recognize the original guard.
   CLEAN_WORKTREE_BUILD_CAPABILITY,
   AUTO_BUILD_READINESS_CAPABILITY,
   COMMAND_RUN_JOB_KIND,
@@ -93,6 +95,7 @@ const PORTABLE_AGENT_CAPABILITIES = [
 const MACOS_AGENT_CAPABILITIES = [
   WORKTREE_DELETE_BUILD_DATA_CAPABILITY,
   GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
   ...BUILD_DATA_JOB_KINDS,
   ...SIMULATOR_JOB_KINDS,
   ...IOS_BUILD_JOB_KINDS,

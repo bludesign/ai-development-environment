@@ -17,7 +17,8 @@ export const IOS_COVERAGE_REPORT_JOB_KIND = "ios.coverage.generate";
 export const IOS_SIGNING_INSPECT_JOB_KIND = "ios.signing.inspect";
 export const XCODE_MULTIPLATFORM_BUILD_CAPABILITY =
   "xcode.build.multiplatform.v1";
-export const CLEAN_WORKTREE_BUILD_CAPABILITY = "build.clean-worktree.v1";
+// v2 verifies initialized nested submodules and treats incomplete status as a retryable skip.
+export const CLEAN_WORKTREE_BUILD_CAPABILITY = "build.clean-worktree.v2";
 export const AUTO_BUILD_READINESS_CAPABILITY =
   "worktree.auto-build-readiness.v1";
 export const AUTO_BUILD_CHECKOUT_CHANGED = "AUTO_BUILD_CHECKOUT_CHANGED";

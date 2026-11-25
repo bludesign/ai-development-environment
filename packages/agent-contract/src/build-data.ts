@@ -2,6 +2,8 @@ export const BUILD_DATA_SCAN_JOB_KIND = "buildData.scan";
 export const BUILD_DATA_SIZE_JOB_KIND = "buildData.size";
 export const BUILD_DATA_DELETE_JOB_KIND = "buildData.delete";
 export const GRADLE_CACHE_ONLY_CAPABILITY = "buildData.gradle-cache-only.v1";
+export const GRADLE_WORKTREE_CLEANUP_CAPABILITY =
+  "buildData.gradle-worktree-cleanup.v1";
 
 export const BUILD_DATA_JOB_KINDS = [
   BUILD_DATA_SCAN_JOB_KIND,
@@ -59,6 +61,7 @@ export type BuildDataDeleteSource = "USER" | "AUTOMATIC";
 
 export type BuildDataSizeTarget = BuildDataTarget & {
   cacheOnly?: true;
+  gitDirectory?: string;
 };
 
 export type BuildDataDeleteTarget = BuildDataSizeTarget & {
@@ -154,20 +157,33 @@ function worktreeRoot(value: unknown, index: number): BuildDataWorktreeRoot {
   };
 }
 
-function cacheOnlyField(
+function gradleScope(
   item: JsonObject,
-): Pick<BuildDataSizeTarget, "cacheOnly"> {
-  if (item.cacheOnly === undefined) return {};
-  if (item.cacheOnly !== true)
+): Pick<BuildDataSizeTarget, "cacheOnly" | "gitDirectory"> {
+  if (item.cacheOnly !== undefined && item.cacheOnly !== true)
     throw new Error("build data target.cacheOnly must be true");
-  return { cacheOnly: true };
+  return {
+    ...(item.cacheOnly === true ? { cacheOnly: true } : {}),
+    ...(item.gitDirectory === undefined
+      ? {}
+      : {
+          gitDirectory: stringValue(
+            item.gitDirectory,
+            "build data target.gitDirectory",
+          ),
+        }),
+  };
 }
 
 function target(value: unknown, index: number): BuildDataSizeTarget {
   const item = objectValue(value, `build data targets[${index}]`);
-  exactKeys(item, ["path", "rootPath", "cacheOnly"], "build data target");
+  exactKeys(
+    item,
+    ["path", "rootPath", "cacheOnly", "gitDirectory"],
+    "build data target",
+  );
   return {
-    ...cacheOnlyField(item),
+    ...gradleScope(item),
     path: stringValue(item.path, `build data targets[${index}].path`),
     rootPath: stringValue(
       item.rootPath,
@@ -188,6 +204,7 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
       "worktreeId",
       "worktreePath",
       "cacheOnly",
+      "gitDirectory",
     ],
     "build data delete target",
   );
@@ -196,7 +213,7 @@ function deleteTarget(value: unknown, index: number): BuildDataDeleteTarget {
     throw new Error(`build data delete targets[${index}].kind is invalid`);
   }
   return {
-    ...cacheOnlyField(item),
+    ...gradleScope(item),
     path: stringValue(item.path, `build data delete targets[${index}].path`),
     rootPath: stringValue(
       item.rootPath,

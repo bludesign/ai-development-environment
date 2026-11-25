@@ -6,6 +6,7 @@ import {
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
   GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
   buildDataDeletePayload,
   buildDataTargetsPayload,
   isCacheOnlyGradleTarget,
@@ -78,6 +79,7 @@ export type BuildDataEntryView = {
   deviceSupportPlatform: string | null;
   status: "READY" | "UNLINKED" | "PENDING" | "SHARED_CACHE";
   workspacePath: string | null;
+  gitDirectory: string | null;
   worktreeId: string | null;
   worktreePath: string | null;
   sizeBytes: number | null;
@@ -533,6 +535,17 @@ export class BuildDataService {
           `Update ${selectedAgent.name} to size or delete unlinked Gradle caches`,
         );
       }
+      if (
+        group.some(
+          (entry) =>
+            entry.kind === "GRADLE_PROJECT" && entry.worktreeId !== null,
+        ) &&
+        !supported.includes(GRADLE_WORKTREE_CLEANUP_CAPABILITY)
+      ) {
+        throw new Error(
+          `Update ${selectedAgent.name} to size or delete linked Gradle build data`,
+        );
+      }
       readyGroups.push({ agentId, entries: group });
     }
     for (const { agentId, entries: group } of readyGroups) {
@@ -573,6 +586,9 @@ export class BuildDataService {
               path: entry.path,
               rootPath: entry.rootPath,
               ...(isCacheOnlyGradleTarget(entry) ? { cacheOnly: true } : {}),
+              ...(entry.kind === "GRADLE_PROJECT" && entry.gitDirectory
+                ? { gitDirectory: entry.gitDirectory }
+                : {}),
               ...(kind === BUILD_DATA_DELETE_JOB_KIND &&
               entry.kind === "GRADLE_PROJECT"
                 ? { kind: entry.kind, worktreeId: entry.worktreeId }
@@ -758,6 +774,7 @@ export class BuildDataService {
                     ? "READY"
                     : "UNLINKED",
           workspacePath: entry.workspacePath,
+          gitDirectory: worktree?.gitDirectory ?? null,
           worktreeId: worktree?.id ?? null,
           worktreePath: worktree
             ? worktreeDisplayPath(worktree.folder, agent.baseRepoDirectory)

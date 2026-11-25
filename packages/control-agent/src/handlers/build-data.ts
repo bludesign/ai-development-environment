@@ -341,9 +341,14 @@ async function gradleProjectRecord(cache: string) {
   const metadata = await lstat(marker);
   if (!metadata.isFile() || metadata.size > 16_384)
     throw new Error("Gradle project cache ownership marker is invalid");
-  const { worktreeId, worktreePath, projectPath, module, modules } = JSON.parse(
-    await readFile(marker, "utf8"),
-  );
+  const {
+    worktreeId,
+    worktreePath,
+    checkoutIdentity,
+    projectPath,
+    module,
+    modules,
+  } = JSON.parse(await readFile(marker, "utf8"));
   if (
     worktreeId !== basename(dirname(cache)) ||
     typeof worktreePath !== "string" ||
@@ -370,19 +375,44 @@ async function gradleProjectRecord(cache: string) {
     )
       modulePaths.add(name.slice(1).replaceAll(":", "/"));
   }
-  return { worktreeId, worktreePath, projectPath, modulePaths };
+  return {
+    worktreeId,
+    worktreePath,
+    checkoutIdentity,
+    projectPath,
+    modulePaths,
+  };
+}
+
+export async function gradleCheckoutIdentity(
+  gitDirectory: string,
+): Promise<string> {
+  const { dev, ino } = await lstat(gitDirectory, { bigint: true });
+  return `${dev}:${ino}`;
 }
 
 async function generatedGradleDirectories(
   target: BuildDataDeleteTarget,
   signal: AbortSignal,
+  limitToCacheCapacity = false,
 ): Promise<string[]> {
   const cache = target.path;
   if (basename(dirname(dirname(cache))) !== MANAGED_GRADLE_CACHE_DIRECTORY)
     return [];
-  const { worktreeId, worktreePath, projectPath, modulePaths } =
-    await gradleProjectRecord(cache);
-  if (target.cacheOnly || target.worktreeId === null) return [];
+  const {
+    worktreeId,
+    worktreePath,
+    checkoutIdentity,
+    projectPath,
+    modulePaths,
+  } = await gradleProjectRecord(cache);
+  if (
+    target.cacheOnly ||
+    target.worktreeId === null ||
+    !target.gitDirectory ||
+    typeof checkoutIdentity !== "string"
+  )
+    return [];
   if (target.worktreeId !== undefined && worktreeId !== target.worktreeId)
     throw new Error(
       "Gradle project cache no longer matches the selected worktree",
@@ -394,8 +424,30 @@ async function generatedGradleDirectories(
     },
   );
   if (workspace !== worktreePath) return [];
+  const checkout = await captureCommand({
+    command: "git",
+    args: ["rev-parse", "--show-toplevel", "--absolute-git-dir"],
+    cwd: workspace,
+    timeoutMs: 5_000,
+    signal,
+  });
+  signal.throwIfAborted();
+  const prefix = `${workspace}\n`;
+  if (
+    checkout.exitCode !== 0 ||
+    checkout.outputTruncated ||
+    !checkout.stdout.startsWith(prefix) ||
+    (await realpath(checkout.stdout.slice(prefix.length).trimEnd()).catch(
+      () => null,
+    )) !== target.gitDirectory ||
+    (await gradleCheckoutIdentity(target.gitDirectory).catch(() => null)) !==
+      checkoutIdentity
+  )
+    return [];
 
   const directories: string[] = [];
+  const cacheDevice = limitToCacheCapacity ? (await stat(cache)).dev : null;
+  let cacheCapacity: string | undefined;
   for (const modulePath of modulePaths) {
     signal.throwIfAborted();
     const output = join(workspace, projectPath, modulePath, "build");
@@ -404,6 +456,18 @@ async function generatedGradleDirectories(
       throw error;
     });
     if (!info?.isDirectory() || (await realpath(output)) !== output) continue;
+    if (cacheDevice !== null && info.dev !== cacheDevice) {
+      cacheCapacity ??= await sharedCapacityId(
+        cache,
+        String(cacheDevice),
+        signal,
+      );
+      if (
+        (await sharedCapacityId(output, String(info.dev), signal)) !==
+        cacheCapacity
+      )
+        continue;
+    }
     const apkOutputs = join(output, "outputs", "apk");
     if ((await realpath(apkOutputs).catch(() => null)) !== apkOutputs) continue;
     const relativeOutput = relative(workspace, output);
@@ -665,6 +729,7 @@ export const deleteBuildData: AgentJobHandler = async (
         for (const directory of await generatedGradleDirectories(
           target,
           signal,
+          payload.source === "AUTOMATIC",
         )) {
           await rm(directory, { recursive: true, force: false, maxRetries: 3 });
         }

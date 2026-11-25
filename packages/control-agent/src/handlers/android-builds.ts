@@ -30,6 +30,7 @@ import { bootAndroidAvd, runningAndroidAvds } from "../android-simulators.js";
 import { captureCommand } from "../capture-command.js";
 import { worktreeCodeStateHash } from "../git-code-state.js";
 import { withRepositoryMetadata } from "../repository-metadata.js";
+import { gradleCheckoutIdentity } from "./build-data.js";
 import {
   BuildLogger,
   containedPath,
@@ -534,6 +535,7 @@ export const runAndroidBuild: AgentJobHandler = async (
   );
   const recordPath = join(cache, ".aide-android-gradle.json");
   const recordTemp = `${recordPath}.${randomUUID()}`;
+  const checkoutIdentity = await gradleCheckoutIdentity(input.gitDirectory);
   const modules = new Set([settings.module]);
   try {
     const info = await lstat(recordPath);
@@ -542,6 +544,7 @@ export const runAndroidBuild: AgentJobHandler = async (
       if (
         prior.worktreeId === input.worktreeId &&
         prior.worktreePath === root &&
+        prior.checkoutIdentity === checkoutIdentity &&
         prior.projectPath === settings.projectPath
       ) {
         for (const gradleModule of [
@@ -568,6 +571,7 @@ export const runAndroidBuild: AgentJobHandler = async (
       JSON.stringify({
         worktreeId: input.worktreeId,
         worktreePath: root,
+        checkoutIdentity,
         projectPath: settings.projectPath,
         module: settings.module,
         modules: [...modules].slice(0, 50),

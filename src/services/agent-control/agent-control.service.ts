@@ -6,7 +6,10 @@ import {
   OPERATION_RESOURCES_CAPABILITY,
   parseOperationDescriptor,
 } from "@ai-development-environment/agent-contract/operation-resources";
-import { jobOperationDescriptor } from "@/services/operation-locks/job-resources";
+import {
+  BuildCheckoutChangedError,
+  jobOperationDescriptor,
+} from "@/services/operation-locks/job-resources";
 import {
   findPipelineRepairRoot,
   PIPELINE_REPAIR_DISPATCH_STATUSES,
@@ -60,6 +63,7 @@ import {
   ANDROID_DEPLOY_JOB_KIND,
   ANDROID_REMOTE_DEPLOY_JOB_KIND,
   ANDROID_RUN_DESTINATIONS_JOB_KIND,
+  AUTO_BUILD_CHECKOUT_CHANGED,
   CLEAN_WORKTREE_BUILD_CAPABILITY,
   isBuildRunJob,
   parseAndroidBuildPayload,
@@ -102,6 +106,8 @@ import {
   BUILD_DATA_SCAN_JOB_KIND,
   BUILD_DATA_SIZE_JOB_KIND,
   GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+  MANAGED_GRADLE_CACHE_DIRECTORY,
   buildDataDeletePayload,
   buildDataScanPayload,
   buildDataTargetsPayload,
@@ -1325,6 +1331,27 @@ export class AgentControlService {
     const descriptor = await jobOperationDescriptor(input, capable);
     try {
       job = await prisma.$transaction(async (transaction) => {
+        // Recovery can retire an interrupted automatic submission while this
+        // caller is preparing its resources. Commit the job only while pending.
+        if (isBuildRunJob(input.kind)) {
+          const build = input.payload as {
+            buildId: string;
+            requireCleanWorktree?: boolean;
+          };
+          if (build.requireCleanWorktree) {
+            await transaction.build.findFirstOrThrow({
+              where: {
+                id: build.buildId,
+                agentId: input.agentId,
+                worktreeId: input.worktreeId,
+                status: "QUEUED",
+                jobId: null,
+                queuePayloadJson: { not: null },
+              },
+              select: { id: true },
+            });
+          }
+        }
         const repairAttempt = input.pipelineRepairAttemptId
           ? await transaction.workflowStepAttempt.findFirst({
               where: {
@@ -1475,18 +1502,31 @@ export class AgentControlService {
         queued.kind === BUILD_DATA_DELETE_JOB_KIND
           ? buildDataDeletePayload(payload)
           : buildDataTargetsPayload(payload);
-      if (targets.some(isCacheOnlyGradleTarget)) {
+      const cacheOnly = targets.some(isCacheOnlyGradleTarget);
+      const linkedGradle = targets.some(
+        (target) =>
+          !isCacheOnlyGradleTarget(target) &&
+          (target.gitDirectory !== undefined ||
+            ("kind" in target && target.kind === "GRADLE_PROJECT") ||
+            posix.basename(posix.dirname(target.rootPath)) ===
+              MANAGED_GRADLE_CACHE_DIRECTORY),
+      );
+      if (cacheOnly || linkedGradle) {
         const agent = await prisma.agent.findUnique({
           where: { id: agentId },
           select: { capabilitiesJson: true },
         });
-        if (
-          !agentCapabilities(agent?.capabilitiesJson ?? "[]").includes(
-            GRADLE_CACHE_ONLY_CAPABILITY,
-          )
-        )
+        const capabilities = agentCapabilities(agent?.capabilitiesJson ?? "[]");
+        if (cacheOnly && !capabilities.includes(GRADLE_CACHE_ONLY_CAPABILITY))
           throw new Error(
             "Update the agent to size or delete unlinked Gradle caches",
+          );
+        if (
+          linkedGradle &&
+          !capabilities.includes(GRADLE_WORKTREE_CLEANUP_CAPABILITY)
+        )
+          throw new Error(
+            "Update the agent to size or delete linked Gradle build data",
           );
       }
     }
@@ -1590,7 +1630,10 @@ export class AgentControlService {
               { ...fresh, payload: JSON.parse(fresh.payloadJson) },
               false,
             );
-      const payload = JSON.parse(fresh.payloadJson) as { moveId?: string };
+      const payload = JSON.parse(fresh.payloadJson) as {
+        moveId?: string;
+        requireCleanWorktree?: boolean;
+      };
       let parentId: string | undefined;
       if (fresh.status === "QUEUED" && fresh.operationResourcesJson) {
         try {
@@ -1616,10 +1659,13 @@ export class AgentControlService {
                 ])
                 .sort((a, b) => String(a[1]).localeCompare(String(b[1]))),
             );
-          if (identity(current) !== identity(descriptor))
-            throw new Error(
-              "Job worktree identity or branch changed while queued; submit it again",
-            );
+          if (identity(current) !== identity(descriptor)) {
+            const message =
+              "Job worktree identity or branch changed while queued; submit it again";
+            if (isBuildRunJob(fresh.kind) && payload.requireCleanWorktree)
+              throw new BuildCheckoutChangedError(message);
+            throw new Error(message);
+          }
           if (payload.moveId) {
             const move = await transaction.worktreeMove.findUnique({
               where: { id: payload.moveId },
@@ -1673,9 +1719,22 @@ export class AgentControlService {
           }
         } catch (error) {
           const reason = error instanceof Error ? error.message : String(error);
+          const skipped =
+            payload.requireCleanWorktree &&
+            error instanceof BuildCheckoutChangedError;
           await transaction.agentJob.update({
             where: { id: jobId },
-            data: { status: "FAILED", error: reason, finishedAt: new Date() },
+            data: {
+              status: skipped ? "CANCELLED" : "FAILED",
+              ...(skipped && {
+                resultJson: JSON.stringify({
+                  errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+                  error: reason,
+                }),
+              }),
+              error: reason,
+              finishedAt: new Date(),
+            },
           });
           await releaseOperation("AGENT_JOB", jobId, undefined, transaction);
           return reason;

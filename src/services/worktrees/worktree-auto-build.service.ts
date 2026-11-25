@@ -41,13 +41,8 @@ const autoBuildInclude = {
   lastQueuedBuild: {
     select: {
       id: true,
-      requestId: true,
-      worktreeId: true,
-      codebaseId: true,
-      agentId: true,
       queuePayloadJson: true,
       jobId: true,
-      destinationType: true,
       status: true,
       errorCode: true,
       finishedAt: true,
@@ -177,11 +172,8 @@ export class WorktreeAutoBuildService {
       const prisma = await getPrismaClient();
       const rules = await prisma.worktreeAutoBuild.findMany({
         where: {
-          worktree: availableCheckout,
           OR: [
-            { worktree: { cleanForAutoBuild: true } },
-            // Captured jobs already carry the agent-side checkout guard,
-            // including jobs saved before strict readiness reports existed.
+            { worktree: { ...availableCheckout, cleanForAutoBuild: true } },
             { lastQueuedBuild: unsubmittedBuild },
           ],
         },
@@ -194,9 +186,9 @@ export class WorktreeAutoBuildService {
       const orphanedSubmissions = await prisma.build.findMany({
         where: {
           ...unsubmittedBuild,
-          worktree: availableCheckout,
           autoBuildRules: { none: {} },
         },
+        select: { id: true },
       });
       for (const build of orphanedSubmissions) {
         await this.builds
@@ -215,8 +207,6 @@ export class WorktreeAutoBuildService {
 
   private async reconcileRule(rule: Rule): Promise<void> {
     const { worktree, lastQueuedBuild } = rule;
-    if (!worktree.headSha) return;
-
     const pending = pendingSubmission(lastQueuedBuild);
     const retryFromNewObservation =
       lastQueuedBuild?.finishedAt &&
@@ -227,8 +217,9 @@ export class WorktreeAutoBuildService {
         lastQueuedBuild.errorCode === QUEUE_BUILD_FAILED);
     if (!pending) {
       if (
-        rule.lastHandledHeadSha === worktree.headSha &&
-        !retryFromNewObservation
+        !worktree.headSha ||
+        (rule.lastHandledHeadSha === worktree.headSha &&
+          !retryFromNewObservation)
       )
         return;
       const prisma = await getPrismaClient();
@@ -242,7 +233,8 @@ export class WorktreeAutoBuildService {
     try {
       const build = pending
         ? await this.builds.resumeAutomaticBuild(pending)
-        : await this.builds.startAutomaticBuild(
+        : worktree.headSha &&
+          (await this.builds.startAutomaticBuild(
             {
               worktreeId: rule.worktreeId,
               configurationId: rule.configurationId,
@@ -256,7 +248,7 @@ export class WorktreeAutoBuildService {
               branch: worktree.branch,
               queuedBuildCount: rule.queuedBuildCount,
             },
-          );
+          ));
       if (build) {
         if (pending && rule.lastError) {
           const prisma = await getPrismaClient();

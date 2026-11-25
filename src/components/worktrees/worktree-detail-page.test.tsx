@@ -1,5 +1,11 @@
 import { serverUrlFixture } from "../../../test/fixtures/server-urls";
 import {
+  ANDROID_BUILD_JOB_KIND,
+  AUTO_BUILD_READINESS_CAPABILITY,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
+  IOS_BUILD_JOB_KIND,
+} from "@ai-development-environment/agent-contract/builds";
+import {
   act,
   cleanup,
   fireEvent,
@@ -830,10 +836,13 @@ describe("WorktreeDetailPage", () => {
       lastError: null,
     } satisfies WorktreeAutoBuild & { worktreeId: string };
     let rule: WorktreeAutoBuild | null = null;
+    let online = true;
     request.mockImplementation(async (query) => {
       if (query.includes("WorktreeAutoBuildOptions")) {
         return {
-          buildConfigurations: [],
+          buildConfigurations: [
+            { id: "ios", name: "iOS Debug", platformConfigurations: [] },
+          ],
           androidBuildConfigurations: [
             { id: "android-debug", name: "Android Debug" },
           ],
@@ -847,9 +856,13 @@ describe("WorktreeDetailPage", () => {
         rule = null;
         return { cancelWorktreeAutoBuild: true } as never;
       }
-      return {
-        worktreeOverview: overview({ online: false, autoBuild: rule }),
-      } as never;
+      const data = overview({ online, autoBuild: rule });
+      data.agents[0]!.agent.capabilities = [
+        CLEAN_WORKTREE_BUILD_CAPABILITY,
+        AUTO_BUILD_READINESS_CAPABILITY,
+        ANDROID_BUILD_JOB_KIND,
+      ];
+      return { worktreeOverview: data } as never;
     });
 
     render(<WorktreeDetailPage worktreeId="worktree-1" />);
@@ -878,7 +891,7 @@ describe("WorktreeDetailPage", () => {
       },
     );
 
-    // A dispatch error changes only the rule, even on an offline checkout.
+    online = false;
     rule = { ...saved, lastError: "Agent is offline" };
     expect(overviewSink).toBeDefined();
     overviewSink!.next({
@@ -892,6 +905,12 @@ describe("WorktreeDetailPage", () => {
     expect(
       await screen.findByText("Agent is offline", { exact: true }),
     ).toBeDefined();
+    expect(
+      screen.queryByRole("button", { name: "Configure Auto Build" }),
+    ).toBeNull();
+    expect(
+      screen.getByText("Android Debug · Android · Agent host"),
+    ).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Disable Auto Build" }));
     await waitFor(() =>
@@ -904,6 +923,46 @@ describe("WorktreeDetailPage", () => {
       { worktreeId: "worktree-1" },
     );
   });
+
+  test.each([
+    {
+      capabilities: [CLEAN_WORKTREE_BUILD_CAPABILITY, ANDROID_BUILD_JOB_KIND],
+      reason: "Update the agent to configure Auto Build.",
+    },
+    {
+      capabilities: [
+        CLEAN_WORKTREE_BUILD_CAPABILITY,
+        AUTO_BUILD_READINESS_CAPABILITY,
+        IOS_BUILD_JOB_KIND,
+      ],
+      reason: "This agent cannot build any of the configured platforms.",
+    },
+  ])(
+    "explains why the agent cannot configure Auto Build: $reason",
+    async ({ capabilities, reason }) => {
+      const data = overview();
+      data.agents[0]!.agent.capabilities = capabilities;
+      request.mockImplementation(async (query) => {
+        if (query.includes("WorktreeAutoBuildOptions"))
+          return {
+            buildConfigurations: [
+              {
+                id: "mac",
+                name: "Mac",
+                platformConfigurations: [{ platform: "MACOS" }],
+              },
+            ],
+            androidBuildConfigurations: [{ id: "android", name: "Android" }],
+          } as never;
+        return { worktreeOverview: data } as never;
+      });
+      render(<WorktreeDetailPage worktreeId="worktree-1" />);
+      await screen.findByText(reason);
+      expect(
+        screen.queryByRole("button", { name: "Configure Auto Build" }),
+      ).toBeNull();
+    },
+  );
 
   test("shows a paused conflict and cancels its rebase inline", async () => {
     let cancelled = false;
@@ -1113,7 +1172,12 @@ describe("WorktreeDetailPage", () => {
     const response = overview({ iosBuildConfigured: true });
     const { agent, codebases } = response.agents[0]!;
     const group = codebases[0]!;
-    agent.capabilities.push("ios.build.run", "android.build.run");
+    agent.capabilities.push(
+      IOS_BUILD_JOB_KIND,
+      ANDROID_BUILD_JOB_KIND,
+      CLEAN_WORKTREE_BUILD_CAPABILITY,
+      AUTO_BUILD_READINESS_CAPABILITY,
+    );
     group.androidProjectEnabled = true;
     group.androidBuildConfigured = false;
     group.worktrees[0]!.latestBuild = null;

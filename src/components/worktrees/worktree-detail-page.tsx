@@ -1070,6 +1070,10 @@ function LoadedWorktreeDetail({
 
       <WorktreeAutoBuildCard
         key={worktree.id}
+        agent={entry.agentGroup.agent}
+        worktreeAvailable={
+          worktree.availability === "AVAILABLE" && !worktree.missingAt
+        }
         worktreeId={worktree.id}
         repositoryId={entry.group.repository.id}
         repositorySettingsVersion={repositorySettingsVersion}

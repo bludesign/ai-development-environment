@@ -6702,6 +6702,10 @@
     "directoryDelete": "Verzeichnis löschen"
   },
   "worktreeAutoBuild": {
+    "agentOffline": "Verbinde den Agenten erneut, um den automatischen Build zu konfigurieren.",
+    "worktreeUnavailable": "Stelle den Zugriff auf diesen Worktree wieder her, um den automatischen Build zu konfigurieren.",
+    "updateAgent": "Aktualisiere den Agenten, um den automatischen Build zu konfigurieren.",
+    "noCompatibleConfigurations": "Dieser Agent kann für keine der konfigurierten Plattformen bauen.",
     "title": "Automatischer Build",
     "enabled": "Aktiviert",
     "description": "Der nächste ausgecheckte Commit wird gebaut, sobald dieser Worktree sauber ist.",

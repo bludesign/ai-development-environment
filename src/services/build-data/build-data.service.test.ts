@@ -10,7 +10,10 @@ vi.mock("@/services/disk-space/executing-work", () => ({
 }));
 
 import type { AgentControlService } from "@/services/agent-control";
-import { GRADLE_CACHE_ONLY_CAPABILITY } from "@ai-development-environment/agent-contract/build-data";
+import {
+  GRADLE_CACHE_ONLY_CAPABILITY,
+  GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+} from "@ai-development-environment/agent-contract/build-data";
 
 import { BuildDataService } from "./build-data.service";
 
@@ -475,6 +478,12 @@ describe("BuildDataService", () => {
         targets: [{ path, rootPath }],
       });
       const currentAgent = agent();
+      const owner = {
+        id: "replacement",
+        folder: "/Repos/App",
+        gitDirectory: "/Repos/.git/worktrees/App",
+        codebase: { agentId: currentAgent.id },
+      };
       getPrismaClient.mockResolvedValue({
         ...unlockedEntries(),
         buildDataDeletionHistory: { deleteMany: vi.fn() },
@@ -482,15 +491,10 @@ describe("BuildDataService", () => {
           findUnique: vi.fn().mockResolvedValue(collection),
         },
         worktree: {
-          findMany: vi.fn().mockResolvedValue([
-            {
-              id: "replacement",
-              folder: "/Repos/App",
-              codebase: { agentId: currentAgent.id },
-            },
-          ]),
+          findMany: vi.fn().mockResolvedValue([owner]),
         },
         agent: { findUnique: vi.fn().mockResolvedValue(currentAgent) },
+        derivedDataCleanupLease: { create: vi.fn(), updateMany: vi.fn() },
       });
       const createJob = vi.fn().mockResolvedValue({ id: "operation-1" });
       const service = new BuildDataService({
@@ -525,6 +529,26 @@ describe("BuildDataService", () => {
       expect(
         (await service.getCollection(collection.id))!.entries[0]?.sizeBytes,
       ).toBe(6000);
+      owner.id = "old";
+      await expect(submit()).rejects.toThrow("Update Builder");
+      currentAgent.capabilitiesJson = JSON.stringify([
+        ...JSON.parse(currentAgent.capabilitiesJson),
+        GRADLE_WORKTREE_CLEANUP_CAPABILITY,
+      ]);
+      await submit();
+      expect(createJob).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          payload: {
+            targets: [
+              expect.objectContaining({
+                path,
+                rootPath,
+                gitDirectory: owner.gitDirectory,
+              }),
+            ],
+          },
+        }),
+      );
     },
   );
 

@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  lstat,
   mkdir,
   mkdtemp,
   readFile,
@@ -194,6 +195,24 @@ esac
       .slice(0, 16);
     const buildRoot = join(root, "artifacts");
     const artifactDirectory = join(buildRoot, buildId);
+    const gradleCachePath = join(
+      buildRoot,
+      ".android-gradle",
+      worktreeId,
+      cacheKey,
+    );
+    const marker = join(gradleCachePath, ".aide-android-gradle.json");
+    await mkdir(gradleCachePath, { recursive: true });
+    await writeFile(
+      marker,
+      JSON.stringify({
+        worktreeId,
+        worktreePath: root,
+        projectPath,
+        module: ":previous",
+        checkoutIdentity: "0:0",
+      }),
+    );
     const result = await runAndroidBuild(
       {
         buildId,
@@ -205,12 +224,7 @@ esac
         expectedOrigin: normalizeGitOrigin(origin).canonicalOrigin,
         headSha: git("rev-parse", "HEAD"),
         artifactDirectory,
-        gradleCachePath: join(
-          buildRoot,
-          ".android-gradle",
-          worktreeId,
-          cacheKey,
-        ),
+        gradleCachePath,
         settings: { projectPath, module: ":app", variant: "release" },
         server: {
           localBaseUrl: "http://localhost:3000",
@@ -249,6 +263,11 @@ export default function (build) {
     );
     expect(result).toMatchObject({
       scriptExecutions: [{ phase: "PRE_BUILD", status: "SUCCEEDED" }],
+    });
+    const gitDirectory = await lstat(join(root, ".git"), { bigint: true });
+    expect(JSON.parse(await readFile(marker, "utf8"))).toMatchObject({
+      checkoutIdentity: `${gitDirectory.dev}:${gitDirectory.ino}`,
+      modules: [":app"],
     });
     if (signed === null) {
       expect(result).toMatchObject({

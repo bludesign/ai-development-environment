@@ -6702,6 +6702,10 @@
     "directoryDelete": "Supprimer le répertoire"
   },
   "worktreeAutoBuild": {
+    "agentOffline": "Reconnectez l’agent pour configurer la compilation automatique.",
+    "worktreeUnavailable": "Rétablissez l’accès à cet arbre de travail pour configurer la compilation automatique.",
+    "updateAgent": "Mettez à jour l’agent pour configurer la compilation automatique.",
+    "noCompatibleConfigurations": "Cet agent ne peut compiler pour aucune des plateformes configurées.",
     "title": "Compilation automatique",
     "enabled": "Activée",
     "description": "Compilez le prochain commit extrait dès que cet arbre de travail est propre.",

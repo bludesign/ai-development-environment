@@ -6702,6 +6702,10 @@
     "directoryDelete": "Delete directory"
   },
   "worktreeAutoBuild": {
+    "agentOffline": "Reconnect the agent to configure Auto Build.",
+    "worktreeUnavailable": "Restore access to this worktree to configure Auto Build.",
+    "updateAgent": "Update the agent to configure Auto Build.",
+    "noCompatibleConfigurations": "This agent cannot build any of the configured platforms.",
     "title": "Auto Build",
     "enabled": "Enabled",
     "description": "Build the next checked-out commit when this worktree is clean.",

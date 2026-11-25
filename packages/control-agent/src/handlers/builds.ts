@@ -76,7 +76,7 @@ import { worktreeCodeStateHash } from "../git-code-state.js";
 import { withRepositoryMetadata } from "../repository-metadata.js";
 import type { ProcessResult } from "../process-runner.js";
 import type { AgentJobHandler, AgentJobHandlerContext } from "./index.js";
-import { cleanForAutoBuild, inspectWorktreeRefreshState } from "./worktrees.js";
+import { inspectAutoBuildState } from "./worktrees.js";
 import type { OperationResource } from "@ai-development-environment/agent-contract/operation-resources";
 
 const successfulProcess = {
@@ -265,12 +265,11 @@ export async function verifyQueuedBuildCheckout(
             "The worktree does not have a commit to build",
           );
         }
-        const state = await inspectWorktreeRefreshState(
-          folder,
-          timeoutMs,
-          signal,
-        );
-        if (!cleanForAutoBuild(state)) {
+        const state = await inspectAutoBuildState(folder, timeoutMs, signal);
+        if (!state) {
+          return skipAutomaticBuild("Could not verify the worktree Git status");
+        }
+        if (!state.cleanForAutoBuild) {
           return skipAutomaticBuild(
             "The worktree became dirty or a Git operation is in progress",
           );

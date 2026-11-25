@@ -1,11 +1,12 @@
 import { realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import {
   AUTO_BUILD_CHECKOUT_CHANGED,
   genericBuildDestinations,
 } from "@ai-development-environment/agent-contract/builds";
 import { normalizeGitOrigin } from "@ai-development-environment/agent-contract/codebases";
+import * as capture from "../capture-command.js";
 import { runAndroidBuild } from "./android-builds.js";
 import { runIosBuild, verifyQueuedBuildCheckout } from "./builds.js";
 import { inspectWorktreeItem } from "./worktrees.js";
@@ -66,6 +67,110 @@ test("inventory and automatic execution agree on ignored submodule changes and c
   await check(false);
   await rm(mergeHead);
   await check(true);
+});
+
+test("an ignored dirty nested submodule blocks inventory readiness and automatic execution", async () => {
+  const folder = await repository();
+  const dependency = await repository();
+  const nested = await repository();
+  await git(
+    dependency,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    nested,
+    "child",
+  );
+  await git(
+    dependency,
+    "config",
+    "-f",
+    ".gitmodules",
+    "submodule.child.ignore",
+    "all",
+  );
+  await git(dependency, "commit", "-am", "Add ignored nested submodule");
+  await git(
+    folder,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "add",
+    dependency,
+    "module",
+  );
+  await git(folder, "commit", "-m", "Add submodule");
+  await git(
+    folder,
+    "-c",
+    "protocol.file.allow=always",
+    "submodule",
+    "update",
+    "--init",
+    "--recursive",
+  );
+  const nestedFolder = join(folder, "module", "child");
+  await writeFile(join(nestedFolder, "README.md"), "nested edit");
+  const headSha = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+  const signal = new AbortController().signal;
+  const verify = () =>
+    verifyQueuedBuildCheckout(
+      folder,
+      { branch: "main", headSha, requireCleanWorktree: true },
+      10_000,
+      signal,
+    );
+  await expect(
+    inspectWorktreeItem(folder, folder, null, true, 10_000, signal),
+  ).resolves.toMatchObject({
+    hasStagedChanges: false,
+    hasUnstagedChanges: false,
+    cleanForAutoBuild: false,
+  });
+  await expect(verify()).resolves.toMatchObject({
+    errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+  });
+  await git(nestedFolder, "restore", "README.md");
+  await expect(verify()).resolves.toBeUndefined();
+});
+
+test("an incomplete checkout inspection skips only until the same revision is clean again", async () => {
+  const folder = await repository();
+  const headSha = (await git(folder, "rev-parse", "HEAD")).stdout.trim();
+  const expected = { branch: "main", headSha, requireCleanWorktree: true };
+  const controller = new AbortController();
+  const verify = () =>
+    verifyQueuedBuildCheckout(folder, expected, 10_000, controller.signal);
+  const captureCommand = capture.captureCommand;
+  const spy = vi
+    .spyOn(capture, "captureCommand")
+    .mockImplementation((options) =>
+      captureCommand(
+        options.args.includes("status")
+          ? { ...options, maxOutputBytes: 1 }
+          : options,
+      ),
+    );
+  try {
+    const untracked = join(folder, "untracked");
+    await writeFile(untracked, "new");
+    await expect(verify()).resolves.toMatchObject({
+      cancelled: true,
+      errorCode: AUTO_BUILD_CHECKOUT_CHANGED,
+    });
+    await rm(untracked);
+    await expect(verify()).resolves.toBeUndefined();
+
+    spy.mockImplementation((options) => {
+      if (options.args.includes("status"))
+        controller.abort(new Error("Stopped during inspection"));
+      return captureCommand(options);
+    });
+    await expect(verify()).rejects.toThrow("Stopped during inspection");
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test("checks branch, HEAD, staged files, untracked files and in-progress merges before a clean build", async () => {

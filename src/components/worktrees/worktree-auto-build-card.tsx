@@ -1,11 +1,17 @@
 "use client";
 
 import {
+  ANDROID_BUILD_JOB_KIND,
+  AUTO_BUILD_READINESS_CAPABILITY,
+  CLEAN_WORKTREE_BUILD_CAPABILITY,
   genericBuildDestinations,
+  IOS_BUILD_JOB_KIND,
+  XCODE_MULTIPLATFORM_BUILD_CAPABILITY,
   type BuildPlatform,
 } from "@ai-development-environment/agent-contract/builds";
 import { useTranslations } from "next-intl";
 import { useEffect, useState } from "react";
+import type { Agent } from "@/components/agents/types";
 import { BUILD_PLATFORMS, platformLabel } from "@/components/builds/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +38,7 @@ import { controlPlaneRequest } from "@/lib/control-plane-client";
 import type { WorktreeAutoBuild } from "./types";
 
 type AutoBuildDestination = WorktreeAutoBuild["destinationType"];
+type BuildAgent = Pick<Agent, "connectionStatus" | "capabilities">;
 
 type Selection = Pick<
   WorktreeAutoBuild,
@@ -91,7 +98,36 @@ function destinations(platform: BuildPlatform): AutoBuildDestination[] {
     : genericBuildDestinations("BUILD", [platform]).map(({ type }) => type);
 }
 
+function supportsPlatform(capabilities: string[], platform: BuildPlatform) {
+  if (platform === "ANDROID")
+    return capabilities.includes(ANDROID_BUILD_JOB_KIND);
+  return (
+    capabilities.includes(IOS_BUILD_JOB_KIND) &&
+    (platform === "IOS" ||
+      capabilities.includes(XCODE_MULTIPLATFORM_BUILD_CAPABILITY))
+  );
+}
+
+function configurationUnavailableReason(
+  agent: BuildAgent,
+  worktreeAvailable: boolean,
+  configured: Configuration[],
+  available: Configuration[],
+) {
+  if (agent.connectionStatus !== "ONLINE") return "agentOffline";
+  if (!worktreeAvailable) return "worktreeUnavailable";
+  if (!configured.length) return "noConfigurations";
+  if (
+    !agent.capabilities.includes(CLEAN_WORKTREE_BUILD_CAPABILITY) ||
+    !agent.capabilities.includes(AUTO_BUILD_READINESS_CAPABILITY)
+  )
+    return "updateAgent";
+  return available.length ? null : "noCompatibleConfigurations";
+}
+
 export function WorktreeAutoBuildCard({
+  agent,
+  worktreeAvailable,
   worktreeId,
   repositoryId,
   repositorySettingsVersion,
@@ -99,6 +135,8 @@ export function WorktreeAutoBuildCard({
   rule,
   onRuleChanged,
 }: {
+  agent: BuildAgent;
+  worktreeAvailable: boolean;
   worktreeId: string;
   repositoryId: string;
   repositorySettingsVersion: number;
@@ -139,10 +177,26 @@ export function WorktreeAutoBuildCard({
     reload,
   ]);
 
-  if (!options && !readingError) return null;
-  const available = options ? configurations(options) : [];
+  if (!options && !readingError && !rule) return null;
+  const configured = options ? configurations(options) : [];
+  const available = configured
+    .map((configuration) => ({
+      ...configuration,
+      platforms: configuration.platforms.filter((platform) =>
+        supportsPlatform(agent.capabilities, platform),
+      ),
+    }))
+    .filter(({ platforms }) => platforms.length > 0);
+  const unavailableReason = configurationUnavailableReason(
+    agent,
+    worktreeAvailable,
+    configured,
+    available,
+  );
   const selected = available.find(({ id }) => id === draft?.configurationId);
-  const currentConfiguration = available.find(
+  const canSave =
+    !unavailableReason && draft && selected?.platforms.includes(draft.platform);
+  const currentConfiguration = configured.find(
     ({ id }) => id === rule?.configurationId,
   );
   const destinationLabel = (type: AutoBuildDestination) => t(type);
@@ -159,7 +213,7 @@ export function WorktreeAutoBuildCard({
   }
 
   async function save() {
-    if (!draft || !selected?.platforms.includes(draft.platform)) return;
+    if (!draft || !canSave) return;
     setBusy(true);
     setSavingError(null);
     try {
@@ -190,7 +244,13 @@ export function WorktreeAutoBuildCard({
 
   function configure() {
     setSavingError(null);
-    if (rule && currentConfiguration?.platforms.includes(rule.platform)) {
+    if (
+      rule &&
+      available.some(
+        ({ id, platforms }) =>
+          id === rule.configurationId && platforms.includes(rule.platform),
+      )
+    ) {
       const { configurationId, platform, destinationType } = rule;
       setDraft({ configurationId, platform, destinationType });
     } else if (available[0]) {
@@ -210,7 +270,12 @@ export function WorktreeAutoBuildCard({
         {rule && (
           <>
             <p className="text-sm">
-              {currentConfiguration?.name ?? t("missingConfiguration")} ·{" "}
+              {options && (
+                <>
+                  {currentConfiguration?.name ?? t("missingConfiguration")}{" "}
+                  ·{" "}
+                </>
+              )}
               {platformLabel(rule.platform)} ·{" "}
               {destinationLabel(rule.destinationType)}
             </p>
@@ -231,9 +296,9 @@ export function WorktreeAutoBuildCard({
             )}
           </>
         )}
-        {options && !rule && (
+        {options && (!rule || unavailableReason) && (
           <p className="text-sm text-muted-foreground">
-            {available.length ? t("description") : t("noConfigurations")}
+            {t(unavailableReason ?? "description")}
           </p>
         )}
         {(readingError || rule?.lastError || (!draft && savingError)) && (
@@ -244,7 +309,7 @@ export function WorktreeAutoBuildCard({
           </Alert>
         )}
         <div className="flex flex-wrap gap-2">
-          {available.length > 0 && (
+          {!unavailableReason && (
             <Button variant="outline" disabled={busy} onClick={configure}>
               {t("configure")}
             </Button>
@@ -277,7 +342,9 @@ export function WorktreeAutoBuildCard({
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>{t("configure")}</DialogTitle>
-                <DialogDescription>{t("description")}</DialogDescription>
+                <DialogDescription>
+                  {t(unavailableReason ?? "description")}
+                </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div className="space-y-2">
@@ -370,10 +437,7 @@ export function WorktreeAutoBuildCard({
                 )}
               </div>
               <DialogFooter>
-                <Button
-                  disabled={busy || !selected}
-                  onClick={() => void save()}
-                >
+                <Button disabled={busy || !canSave} onClick={() => void save()}>
                   {t(rule ? "save" : "enable")}
                 </Button>
               </DialogFooter>
